@@ -1,0 +1,1252 @@
+"use strict";
+
+function pageBridge(action, payload) {
+  "use strict";
+
+  const clean = (value) => (value ? String(value).replace(/[{}]/g, "") : null);
+  const localizedLabel = (value) =>
+    value?.UserLocalizedLabel?.Label ||
+    value?.LocalizedLabels?.[0]?.Label ||
+    "";
+  const escapeOData = (value) => String(value ?? "").replace(/'/g, "''");
+
+  async function context(requirements = {}) {
+    const { requireEntity = true, requireForm = true } = requirements;
+    if (typeof Xrm === "undefined" || !Xrm.Utility?.getGlobalContext) throw Error("Xrm is unavailable in this frame.");
+    const globalContext = Xrm.Utility.getGlobalContext();
+    const entityName = Xrm.Page?.data?.entity?.getEntityName?.() || null;
+    if (requireEntity && !entityName) throw Error("Open a model-driven record form first.");
+    let formItem = Xrm.Page?.ui?.formSelector?.getCurrentItem?.() || null;
+    let formId = clean(formItem?.getId?.());
+    if (!formId && entityName) { formItem = (Xrm.Page?.ui?.formSelector?.items?.get?.() || [])[0] || null; formId = clean(formItem?.getId?.()); }
+    if (requireForm && !formId) throw Error("Current form ID could not be resolved.");
+    let entityMetadata = null, metadataId = null;
+    if (entityName) { entityMetadata = await Xrm.Utility.getEntityMetadata(entityName); metadataId = clean(entityMetadata?.MetadataId); }
+    return { entityName, entitySetName: entityMetadata?.EntitySetName || null, metadataId, formId, formItem, recordId: clean(Xrm.Page?.data?.entity?.getId?.()), clientUrl: globalContext.getClientUrl(), environmentId: clean(globalContext.organizationSettings?.bapEnvironmentId), userId: clean(globalContext.userSettings?.userId), userName: globalContext.userSettings?.userName || "", languageId: globalContext.userSettings?.languageId };
+  }
+  const toolkitState = (window.__DEVLENS_TOOLKIT_STATE ??= {
+    controls: new Map(),
+    tabs: new Map(),
+    sections: new Map(),
+    attributes: new Map(),
+    formKey: null,
+  });
+
+  const metadataCache = (window.__DEVLENS_METADATA_CACHE ??= {
+    tables: null,
+    tablesPromise: null,
+    globalChoices: null,
+    globalChoicesPromise: null,
+    globalChoiceUsage: { usageByName: {}, warnings: [], partial: false },
+    attributeCatalog: null,
+    metadataIndexPromise: null,
+    metadataIndexToken: null,
+    metadataIndexStatus: { state: "idle", phase: "idle", completed: 0, total: 0, warnings: 0, message: "", mode: "automatic" },
+    entities: new Map(),
+    entityPromises: new Map(),
+    stringMaps: new Map(),
+    stringMapPromises: new Map(),
+  });
+
+  const clone = (value) =>
+    value == null
+      ? value
+      : typeof structuredClone === "function"
+        ? structuredClone(value)
+        : JSON.parse(JSON.stringify(value));
+
+  async function fetchJson(url, options = {}) {
+    const headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json; charset=utf-8",
+      "OData-MaxVersion": "4.0",
+      "OData-Version": "4.0",
+      ...(options.headers || {}),
+    };
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      ...options,
+      headers,
+    });
+    if (!response.ok) {
+      let detail = "";
+      try {
+        detail = (await response.json())?.error?.message || "";
+      } catch {}
+      throw Error(
+        detail ||
+          `Dataverse request failed: ${response.status} ${response.statusText}`,
+      );
+    }
+    if (response.status === 204) return {};
+    return response.json();
+  }
+
+  function tag(element) {
+    return (
+      element?.localName?.toLowerCase() || element?.tagName?.toLowerCase() || ""
+    );
+  }
+  function all(root, expected) {
+    return Array.from(root?.getElementsByTagName?.("*") || []).filter(
+      (element) => tag(element) === expected,
+    );
+  }
+  function xmlAttribute(element, names) {
+    for (const name of names) {
+      const value = element?.getAttribute?.(name);
+      if (value != null && String(value).trim()) return String(value).trim();
+    }
+    return null;
+  }
+  function ancestor(element, names) {
+    for (
+      let parent = element?.parentElement;
+      parent;
+      parent = parent.parentElement
+    )
+      if (names.includes(tag(parent))) return parent;
+    return null;
+  }
+  function eventType(raw) {
+    return (
+      {
+        onload: "ONLOAD",
+        onsave: "ONSAVE",
+        onchange: "ONCHANGE",
+        ontabstatechange: "ONTABSTATECHANGE",
+        tabstatechange: "ONTABSTATECHANGE",
+        onexpand: "ONEXPAND",
+        onexpanded: "ONEXPAND",
+        oncollapse: "ONCOLLAPSE",
+        oncollapsed: "ONCOLLAPSE",
+        onstagechange: "ONSTAGECHANGE",
+        onstageselected: "ONSTAGESELECTED",
+        stageselected: "ONSTAGESELECTED",
+      }[
+        String(raw || "")
+          .toLowerCase()
+          .replace(/[^a-z]/g, "")
+      ] || null
+    );
+  }
+  function eventTarget(event, type) {
+    if (type === "ONCHANGE") {
+      const names = [
+        "attribute",
+        "attributename",
+        "attributeName",
+        "datafieldname",
+        "dataFieldName",
+        "field",
+        "fieldname",
+        "fieldName",
+      ];
+      const control = ancestor(event, ["control"]);
+      return {
+        targetType: "field",
+        targetName:
+          xmlAttribute(event, names) ||
+          xmlAttribute(event.parentElement, names) ||
+          xmlAttribute(control, ["datafieldname", "attribute", "name"]) ||
+          "(unresolved field)",
+        targetLabel: null,
+        targetId: xmlAttribute(control, ["id"]),
+      };
+    }
+    if (["ONTABSTATECHANGE", "ONEXPAND", "ONCOLLAPSE"].includes(type)) {
+      const tabElement = ancestor(event, ["tab"]);
+      const labelElement = tabElement ? all(tabElement, "label")[0] : null;
+      const tabName =
+        xmlAttribute(tabElement, ["name", "id"]) ||
+        xmlAttribute(event, ["tabname", "tabName"]) ||
+        xmlAttribute(event.parentElement, ["tabname", "tabName"]);
+      return {
+        targetType: "tab",
+        targetName: tabName || "(unresolved tab)",
+        targetLabel: xmlAttribute(labelElement, ["description", "label"]),
+        targetId: xmlAttribute(tabElement, ["id"]),
+      };
+    }
+    if (["ONSTAGECHANGE", "ONSTAGESELECTED"].includes(type))
+      return {
+        targetType: "bpf",
+        targetName: "(business process)",
+        targetLabel: null,
+        targetId: null,
+      };
+    return {
+      targetType: "form",
+      targetName: "(form)",
+      targetLabel: null,
+      targetId: null,
+    };
+  }
+  function eventHandlers(event) {
+    const output = [];
+    Array.from(event.children || [])
+      .filter((element) =>
+        ["handlers", "internalhandlers"].includes(tag(element)),
+      )
+      .forEach((container) => {
+        all(container, "handler").forEach((handler) =>
+          output.push({
+            functionName: handler.getAttribute("functionName") || "",
+            libraryName: handler.getAttribute("libraryName") || "",
+            enabled: handler.getAttribute("enabled") !== "false",
+            passExecutionContext:
+              handler.getAttribute("passExecutionContext") !== "false",
+            parameters: handler.getAttribute("parameters") || "",
+            internal: tag(container) === "internalhandlers",
+          }),
+        );
+      });
+    return output;
+  }
+  async function report() {
+    const ctx = await context();
+    const form = await Xrm.WebApi.retrieveRecord(
+      "systemform",
+      ctx.formId,
+      "?$select=name,formxml",
+    );
+    const xml = new DOMParser().parseFromString(
+      form.formxml,
+      "application/xml",
+    );
+    if (xml.querySelector("parsererror"))
+      throw Error("Form XML could not be parsed.");
+    const rows = [];
+    all(xml, "event").forEach((event, index) => {
+      const type = eventType(event.getAttribute("name"));
+      if (!type) return;
+      const category = ["ONLOAD", "ONSAVE"].includes(type)
+        ? "FORM"
+        : type === "ONCHANGE"
+          ? "FIELD"
+          : ["ONTABSTATECHANGE", "ONEXPAND", "ONCOLLAPSE"].includes(type)
+            ? "TAB"
+            : "BPF";
+      const target = eventTarget(event, type);
+      eventHandlers(event).forEach((handler) =>
+        rows.push({
+          category,
+          eventType: type,
+          ...target,
+          ...handler,
+          source: "Form XML",
+          eventIndex: index,
+        }),
+      );
+    });
+    const seen = new Set();
+    const unique = rows.filter((row) => {
+      const key = [
+        row.eventType,
+        row.targetType,
+        row.targetName,
+        row.functionName,
+        row.libraryName,
+        row.parameters,
+        row.internal,
+      ].join("|");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return {
+      ok: true,
+      entityName: ctx.entityName,
+      entitySetName: ctx.entitySetName,
+      entityMetadataId: ctx.metadataId,
+      environmentId: ctx.environmentId,
+      formName: form.name || ctx.formItem?.getLabel?.() || "",
+      formId: ctx.formId,
+      recordId: ctx.recordId,
+      clientUrl: ctx.clientUrl,
+      rows: unique,
+      generatedOn: new Date().toISOString(),
+    };
+  }
+
+  const decode = (value) => {
+    try {
+      return new TextDecoder().decode(
+        Uint8Array.from(atob(value || ""), (character) =>
+          character.charCodeAt(0),
+        ),
+      );
+    } catch {
+      return atob(value || "");
+    }
+  };
+  function analyze(name, source, registered) {
+    const definitions = [];
+    for (const regex of [
+      /function\s+([A-Za-z_$][\w$]*)\s*\(/g,
+      /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/g,
+      /\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*=\s*(?:async\s*)?function\s*\(/g,
+      /\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/g,
+    ]) {
+      let match;
+      while ((match = regex.exec(source)))
+        definitions.push({
+          name: match[1],
+          line: source.slice(0, match.index).split("\n").length,
+          index: match.index,
+        });
+    }
+    const unique = [
+      ...new Map(
+        definitions.map((item) => [item.name + "|" + item.line, item]),
+      ).values(),
+    ];
+    return {
+      libraryName: name,
+      source,
+      lineCount: source.split("\n").length,
+      definitions: unique,
+      registeredFunctions: registered.map((functionName) => {
+        const exact = unique.filter(
+          (item) =>
+            item.name === functionName ||
+            item.name.endsWith("." + functionName),
+        );
+        const occurrenceLines = [];
+        let position = 0;
+        while ((position = source.indexOf(functionName, position)) >= 0) {
+          occurrenceLines.push(source.slice(0, position).split("\n").length);
+          position += Math.max(1, functionName.length);
+        }
+        return {
+          functionName,
+          defined: !!exact.length,
+          definitionLines: exact.map((item) => item.line),
+          occurrenceLines: occurrenceLines.slice(0, 200),
+        };
+      }),
+    };
+  }
+  async function scan(libraries) {
+    const results = [];
+    for (const item of libraries) {
+      try {
+        const name = item.libraryName.replace(/'/g, "''");
+        const response = await Xrm.WebApi.retrieveMultipleRecords(
+          "webresource",
+          `?$select=name,displayname,content&$filter=name eq '${name}'&$top=1`,
+        );
+        const resource = response.entities[0];
+        results.push(
+          resource
+            ? {
+                ok: true,
+                displayName: resource.displayname || "",
+                ...analyze(
+                  resource.name,
+                  decode(resource.content),
+                  item.functions,
+                ),
+              }
+            : {
+                ok: false,
+                libraryName: item.libraryName,
+                error: "Web resource not found",
+              },
+        );
+      } catch (error) {
+        results.push({
+          ok: false,
+          libraryName: item.libraryName,
+          error: error.message || String(error),
+        });
+      }
+    }
+    return { ok: true, results };
+  }
+
+  const optionsFrom = (optionSet) => {
+    if (!optionSet) return [];
+    if (Array.isArray(optionSet.Options))
+      return optionSet.Options.map((option) => ({
+        value: option.Value,
+        label: localizedLabel(option.Label),
+        description: localizedLabel(option.Description),
+        color: option.Color || "",
+      }));
+    return [optionSet.TrueOption, optionSet.FalseOption]
+      .filter(Boolean)
+      .map((option) => ({
+        value: option.Value,
+        label: localizedLabel(option.Label),
+        description: localizedLabel(option.Description),
+        color: option.Color || "",
+      }));
+  };
+  async function runBatches(items, size, worker) {
+    for (let index = 0; index < items.length; index += size)
+      await Promise.all(items.slice(index, index + size).map(worker));
+  }
+  async function stringMapChoices(ctx, entityName, attributeName) {
+    const key = `${ctx.clientUrl}|${entityName}|${attributeName}`.toLowerCase();
+    if (metadataCache.stringMaps.has(key))
+      return clone(metadataCache.stringMaps.get(key));
+    if (metadataCache.stringMapPromises.has(key))
+      return clone(await metadataCache.stringMapPromises.get(key));
+    const request = (async () => {
+      const data = await fetchJson(
+        `${ctx.clientUrl}/api/data/v9.2/stringmaps?$select=attributevalue,value,langid&$filter=objecttypecode eq '${escapeOData(entityName)}' and attributename eq '${escapeOData(attributeName)}'`,
+      );
+      const grouped = new Map();
+      for (const row of data.value || []) {
+        if (row.attributevalue == null || !String(row.value || "").trim())
+          continue;
+        if (!grouped.has(row.attributevalue))
+          grouped.set(row.attributevalue, []);
+        grouped.get(row.attributevalue).push({
+          value: row.attributevalue,
+          label: String(row.value).trim(),
+          languageCode: Number(row.langid),
+        });
+      }
+      const options = [...grouped]
+        .map(([value, rows]) => {
+          const selected =
+            rows.find((row) => row.languageCode === 1033) ||
+            rows.find((row) => /^[\x00-\x7F]*$/.test(row.label)) ||
+            rows[0];
+          return { value, label: selected.label, description: "", color: "" };
+        })
+        .sort((left, right) => Number(left.value) - Number(right.value));
+      metadataCache.stringMaps.set(key, clone(options));
+      return options;
+    })();
+    metadataCache.stringMapPromises.set(key, request);
+    try {
+      return clone(await request);
+    } finally {
+      metadataCache.stringMapPromises.delete(key);
+    }
+  }
+  async function metadataTables() {
+    if (metadataCache.tables)
+      return { ok: true, data: clone(metadataCache.tables), cached: true };
+    if (metadataCache.tablesPromise)
+      return {
+        ok: true,
+        data: clone(await metadataCache.tablesPromise),
+        cached: true,
+      };
+    metadataCache.tablesPromise = (async () => {
+      const ctx = await context({ requireEntity: false, requireForm: false });
+      const data = await fetchJson(
+        `${ctx.clientUrl}/api/data/v9.2/EntityDefinitions?$select=LogicalName,SchemaName,EntitySetName,MetadataId,IsCustomEntity,DisplayName,ObjectTypeCode,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled,ChangeTrackingEnabled,IsBPFEntity,IsBusinessProcessEnabled,IsActivity,IsManaged`,
+      );
+      const tables = (data.value || []).map((item) => ({
+        logicalName: item.LogicalName,
+        schemaName: item.SchemaName,
+        displayName: localizedLabel(item.DisplayName),
+        entitySetName: item.EntitySetName,
+        metadataId: item.MetadataId,
+        isCustom: item.IsCustomEntity,
+        objectTypeCode: item.ObjectTypeCode,
+        ownershipType: item.OwnershipType,
+        primaryIdAttribute: item.PrimaryIdAttribute,
+        primaryNameAttribute: item.PrimaryNameAttribute,
+        auditEnabled: item.IsAuditEnabled?.Value,
+        changeTracking: item.ChangeTrackingEnabled,
+        isBpf: item.IsBPFEntity,
+        businessProcessEnabled: item.IsBusinessProcessEnabled,
+        isActivity: item.IsActivity,
+        isManaged: item.IsManaged,
+        search: [
+          localizedLabel(item.DisplayName),
+          item.LogicalName,
+          item.SchemaName,
+          item.ObjectTypeCode,
+          item.OwnershipType,
+          item.IsCustomEntity ? "custom customtype" : "standard",
+          item.IsManaged ? "managed" : "unmanaged",
+        ]
+          .join(" ")
+          .toLowerCase(),
+      }));
+      metadataCache.tables = clone(tables);
+      return tables;
+    })();
+    try {
+      return {
+        ok: true,
+        data: clone(await metadataCache.tablesPromise),
+        cached: false,
+      };
+    } finally {
+      metadataCache.tablesPromise = null;
+    }
+  }
+  const choiceMetadataTypes = [
+    ["PicklistAttributeMetadata", "OptionSet"], ["MultiSelectPicklistAttributeMetadata", "OptionSet"],
+    ["StateAttributeMetadata", "OptionSet"], ["StatusAttributeMetadata", "OptionSet"], ["BooleanAttributeMetadata", "Boolean"],
+  ];
+  const globalChoiceKey=v=>String(v||"").trim().toLowerCase();
+  const reusableChoiceMetadataType=metadataType=>/^(PicklistAttributeMetadata|MultiSelectPicklistAttributeMetadata)$/i.test(String(metadataType||""));
+  const globalOptionSetFrom=(a,metadataType)=>reusableChoiceMetadataType(metadataType)&&(a?.GlobalOptionSet?.Name?a.GlobalOptionSet:(a?.OptionSet?.IsGlobal===true&&a?.OptionSet?.Name?a.OptionSet:null));
+  const optionSetFrom=(a,metadataType)=>globalOptionSetFrom(a,metadataType)||a?.OptionSet||null;
+  function applyDependencyEvidence(entity){
+    if(!entity)return entity;const table=String(entity.logicalName||"").toLowerCase(),choices=metadataCache.globalChoices||[];
+    for(const [name,rows] of Object.entries(metadataCache.globalChoiceUsage?.usageByName||{})){const choice=choices.find(x=>globalChoiceKey(x.name)===name);for(const row of rows||[]){if(String(row.tableLogicalName).toLowerCase()!==table)continue;const col=(entity.columns||[]).find(x=>String(x.logicalName).toLowerCase()===String(row.columnLogicalName).toLowerCase());if(col){col.isGlobalChoice=true;col.globalChoiceName=choice?.name||name;col.globalChoiceMetadataId=choice?.metadataId||"";if(choice?.options?.length&&!col.options?.length)col.options=clone(choice.options);}}}entity.choices=(entity.columns||[]).filter(x=>x.choiceKind==="OptionSet"||x.choiceKind==="Boolean"||/Picklist|MultiSelect|State|Status|Boolean/i.test(String(x.attributeType||x.metadataType||"")));return entity;
+  }
+  function publishUsage(choice,rows){
+    const key=globalChoiceKey(choice.name);metadataCache.globalChoiceUsage.usageByName[key]=rows;
+    if(metadataCache.globalChoices){const target=metadataCache.globalChoices.find(x=>globalChoiceKey(x.name)===key);if(target){target.usedBy=clone(rows);target.usedByCount=rows.length;}}
+    for(const [key,entity] of metadataCache.entities){applyDependencyEvidence(entity);metadataCache.entities.set(key,entity)}
+  }
+  async function globalChoices(){
+    if(metadataCache.globalChoices)return{ok:true,data:clone(metadataCache.globalChoices),cached:true};if(metadataCache.globalChoicesPromise)return{ok:true,data:clone(await metadataCache.globalChoicesPromise),cached:true};
+    metadataCache.globalChoicesPromise=(async()=>{const ctx=await context({requireEntity:false,requireForm:false}),data=await fetchJson(`${ctx.clientUrl}/api/data/v9.2/GlobalOptionSetDefinitions`),usage=metadataCache.globalChoiceUsage.usageByName;const rows=(data.value||[]).map(x=>{const usedBy=usage[globalChoiceKey(x.Name)]||[];return{name:x.Name,metadataId:clean(x.MetadataId)||"",displayName:localizedLabel(x.DisplayName),description:localizedLabel(x.Description),type:x.OptionSetType,isCustom:x.IsCustomOptionSet,isManaged:x.IsManaged,options:optionsFrom(x),usedBy,usedByCount:usedBy.length}}).sort((a,b)=>(a.displayName||a.name).localeCompare(b.displayName||b.name));metadataCache.globalChoices=clone(rows);return rows})();
+    try{return{ok:true,data:clone(await metadataCache.globalChoicesPromise),cached:false}}finally{metadataCache.globalChoicesPromise=null}
+  }
+  async function buildAttributeCatalog(ctx,token){
+    metadataCache.metadataIndexStatus={...metadataCache.metadataIndexStatus,state:"running",phase:"attributes",completed:0,total:1,message:"Loading attribute catalog"};
+    const data=await fetchJson(`${ctx.clientUrl}/api/data/v9.2/EntityDefinitions?$select=LogicalName,DisplayName&$expand=Attributes($select=MetadataId,LogicalName,DisplayName,AttributeType)`),map=new Map();if(token.cancelled)return map;
+    for(const t of data.value||[])for(const a of t.Attributes||[]){const id=clean(a.MetadataId)?.toLowerCase();if(id)map.set(id,{tableLogicalName:t.LogicalName,tableDisplayName:localizedLabel(t.DisplayName)||t.LogicalName,columnLogicalName:a.LogicalName,columnDisplayName:localizedLabel(a.DisplayName)||a.LogicalName,attributeType:a.AttributeType})}metadataCache.attributeCatalog=map;return map;
+  }
+  async function dependencyRows(ctx,choice,catalog){
+    const id=clean(choice.metadataId);if(!id)return[];const data=await fetchJson(`${ctx.clientUrl}/api/data/v9.2/RetrieveDependentComponents(ObjectId=${id},ComponentType=9)`),rows=[];
+    for(const d of data.value||[]){if(Number(d.dependentcomponenttype??d.DependentComponentType)!==2)continue;const key=clean(d.dependentcomponentobjectid??d.DependentComponentObjectId)?.toLowerCase(),row=catalog.get(key);if(row)rows.push(row)}return[...new Map(rows.map(r=>[`${r.tableLogicalName}|${r.columnLogicalName}`.toLowerCase(),r])).values()].sort((a,b)=>(a.tableDisplayName||a.tableLogicalName).localeCompare(b.tableDisplayName||b.tableLogicalName)||a.columnLogicalName.localeCompare(b.columnLogicalName));
+  }
+  function intelligenceStorageKey(ctx){return `devlens.metadataIntelligence.v2.${String(ctx.environmentId||ctx.clientUrl||"default").toLowerCase()}`}
+  function loadIntelligenceHistory(ctx){try{return JSON.parse(localStorage.getItem(intelligenceStorageKey(ctx))||"{}")||{}}catch{return{}}}
+  function scoreTables(tables,ctx,limit=80){const counts=new Map();for(const rows of Object.values(metadataCache.globalChoiceUsage.usageByName||{}))for(const row of rows||[]){const k=String(row.tableLogicalName||"").toLowerCase();counts.set(k,(counts.get(k)||0)+1)}const history=loadIntelligenceHistory(ctx),current=String(ctx.entityName||"").toLowerCase();return [...tables].sort((a,b)=>{const score=t=>{const k=String(t.logicalName||"").toLowerCase(),h=history[k]||{};return(k===current?100000:0)+(t.isCustom?150:0)+(/user|team/i.test(String(t.ownershipType||""))?40:0)+(counts.get(k)||0)*10+Math.min(300,Number(h.opens||0)*15)};return score(b)-score(a)||(a.displayName||a.logicalName).localeCompare(b.displayName||b.logicalName)}).slice(0,limit)}
+  async function recordTableVisit(logicalName){try{const ctx=await context({requireEntity:false,requireForm:false}),key=intelligenceStorageKey(ctx),history=loadIntelligenceHistory(ctx),name=String(logicalName||"").toLowerCase(),row=history[name]||{opens:0,lastOpened:""};row.opens++;row.lastOpened=new Date().toISOString();history[name]=row;localStorage.setItem(key,JSON.stringify(history))}catch{}}
+  async function preloadIntelligence(tables,ctx,token,mode,warnings){const queue=[],seen=new Set(),add=n=>{const k=String(n||"").toLowerCase();if(k&&!seen.has(k)){seen.add(k);queue.push(k)}};add(ctx.entityName);scoreTables(tables,ctx).forEach(t=>add(t.logicalName));metadataCache.metadataIndexStatus={state:"running",phase:"intelligence",completed:0,total:queue.length,warnings:warnings.length,message:"Preloading intelligent table cache",mode};const worker=async()=>{while(queue.length&&!token.cancelled){const name=queue.shift();try{await metadataEntity(name,false)}catch(e){warnings.push(`${name}: ${e.message||e}`)}metadataCache.metadataIndexStatus.completed++}};await Promise.all(Array.from({length:Math.min(4,queue.length||1)},worker))}
+  async function runMetadataIndex(ctx,token,mode){
+    const [tableResult,cr]=await Promise.all([metadataTables(),globalChoices()]);if(token.cancelled)return{cancelled:true};const tables=tableResult.data||[],choices=cr.data||[],catalog=metadataCache.attributeCatalog||await buildAttributeCatalog(ctx,token);if(token.cancelled)return{cancelled:true};
+    metadataCache.metadataIndexStatus={state:"running",phase:"dependencies",completed:0,total:choices.length,warnings:0,message:"Indexing Global Choice dependencies",mode};const queue=[...choices],warnings=[],workers=8;
+    const worker=async()=>{while(queue.length&&!token.cancelled){const choice=queue.shift();try{publishUsage(choice,await dependencyRows(ctx,choice,catalog))}catch(e){warnings.push(`${choice.name}: ${e.message||e}`)}metadataCache.metadataIndexStatus.completed++;metadataCache.metadataIndexStatus.warnings=warnings.length}};await Promise.all(Array.from({length:Math.min(workers,choices.length||1)},worker));
+    if(token.cancelled){metadataCache.metadataIndexStatus={...metadataCache.metadataIndexStatus,state:"cancelled",message:"Indexing cancelled"};return{cancelled:true}}metadataCache.globalChoiceUsage.warnings=warnings;metadataCache.globalChoiceUsage.partial=!!warnings.length;await preloadIntelligence(tables,ctx,token,mode,warnings);if(token.cancelled)return{cancelled:true};metadataCache.metadataIndexStatus={state:"complete",phase:"complete",completed:metadataCache.metadataIndexStatus.total,total:metadataCache.metadataIndexStatus.total,warnings:warnings.length,message:"Metadata Intelligence Phase 2 cache ready; remaining tables load on demand",mode};return metadataCache.globalChoiceUsage;
+  }
+  function startMetadataIndex(mode="automatic"){
+    if(metadataCache.metadataIndexStatus.state==="complete")return Promise.resolve({ok:true,data:clone(metadataCache.metadataIndexStatus),cached:true});if(metadataCache.metadataIndexPromise)return Promise.resolve({ok:true,data:clone(metadataCache.metadataIndexStatus),running:true});const token={cancelled:false};metadataCache.metadataIndexToken=token;metadataCache.metadataIndexStatus.mode=mode;
+    metadataCache.metadataIndexPromise=(async()=>runMetadataIndex(await context({requireEntity:false,requireForm:false}),token,mode))().catch(e=>{metadataCache.metadataIndexStatus={...metadataCache.metadataIndexStatus,state:"error",message:e.message||String(e)};return{error:e.message||String(e)}}).finally(()=>{metadataCache.metadataIndexPromise=null;metadataCache.metadataIndexToken=null});return Promise.resolve({ok:true,started:true});
+  }
+  function metadataIndexStatus(){return{ok:true,data:clone(metadataCache.metadataIndexStatus),usage:clone(metadataCache.globalChoiceUsage)}}
+  function cancelMetadataIndex(){if(metadataCache.metadataIndexToken&&metadataCache.metadataIndexStatus.mode==="manual")metadataCache.metadataIndexToken.cancelled=true;return{ok:true,message:"Index cancellation requested."}}
+  async function metadataEntity(logicalName,trackVisit=true) {
+    const requested = String(logicalName || "").trim();
+    if (!requested) throw Error("Table logical name is required.");
+    const key = requested.toLowerCase();
+    if (metadataCache.entities.has(key)){if(trackVisit)void recordTableVisit(key);return{ok:true,data:clone(applyDependencyEvidence(metadataCache.entities.get(key))),cached:true};}
+    if (metadataCache.entityPromises.has(key))
+      return {
+        ok: true,
+        data: clone(await metadataCache.entityPromises.get(key)),
+        cached: true,
+      };
+    const request = (async () => {
+      const ctx = await context({ requireEntity: false, requireForm: false });
+      const base = `${ctx.clientUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${escapeOData(requested)}')`;
+      const definition = await fetchJson(
+        `${base}?$select=LogicalName,SchemaName,EntitySetName,MetadataId,IsCustomEntity,DisplayName,DisplayCollectionName,Description,ObjectTypeCode,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled,ChangeTrackingEnabled,IsBPFEntity,IsBusinessProcessEnabled,IsActivity,IsManaged&$expand=Attributes,Keys,ManyToOneRelationships,OneToManyRelationships,ManyToManyRelationships`,
+      );
+      const types = choiceMetadataTypes;
+      const choiceMap = new Map();
+      const results = await Promise.all(
+        types.map(async ([metadataType, choiceKind]) => {
+          try {
+            return {
+              metadataType,
+              choiceKind,
+              data:
+                (
+                  await fetchJson(
+                    `${base}/Attributes/Microsoft.Dynamics.CRM.${metadataType}?$select=LogicalName,SchemaName,MetadataId,AttributeType,DefaultValue&$expand=OptionSet,GlobalOptionSet`,
+                  )
+                ).value || [],
+            };
+          } catch {
+            return { metadataType, choiceKind, data: [] };
+          }
+        }),
+      );
+      for (const result of results)
+        for (const attribute of result.data)
+          { const optionSet=optionSetFrom(attribute,result.metadataType),globalSet=globalOptionSetFrom(attribute,result.metadataType),isGlobalChoice=!!globalSet; choiceMap.set(attribute.LogicalName,{metadataType:result.metadataType,choiceKind:result.choiceKind,defaultValue:attribute.DefaultValue,options:optionsFrom(optionSet),isGlobalChoice,globalChoiceName:isGlobalChoice?String(globalSet.Name||""):"",globalChoiceMetadataId:isGlobalChoice?(clean(globalSet.MetadataId)||""):""}); }
+      const columns = (definition.Attributes || []).map((attribute) => {
+        const choice = choiceMap.get(attribute.LogicalName);
+        const attributeType = String(attribute.AttributeType || "");
+        const metadataType =
+          choice?.metadataType ||
+          attribute["@odata.type"]?.split(".").at(-1) ||
+          attribute.AttributeType;
+        return {
+          logicalName: attribute.LogicalName,
+          schemaName: attribute.SchemaName,
+          displayName: localizedLabel(attribute.DisplayName),
+          description: localizedLabel(attribute.Description),
+          attributeType: attribute.AttributeType,
+          metadataType,
+          choiceKind:
+            choice?.choiceKind ||
+            (attributeType === "Boolean"
+              ? "Boolean"
+              : /Picklist|State|Status|MultiSelect/.test(attributeType)
+                ? "OptionSet"
+                : ""),
+          isCustom: attribute.IsCustomAttribute,
+          isManaged: attribute.IsManaged,
+          requiredLevel: attribute.RequiredLevel?.Value,
+          advancedFind: attribute.IsValidForAdvancedFind?.Value,
+          audit: attribute.IsAuditEnabled?.Value,
+          secured: attribute.IsSecured,
+          validForCreate: attribute.IsValidForCreate,
+          validForRead: attribute.IsValidForRead,
+          validForUpdate: attribute.IsValidForUpdate,
+          lookupValueColumn: /Lookup|Customer|Owner/.test(metadataType)
+            ? `_${attribute.LogicalName}_value`
+            : "",
+          targets: attribute.Targets || [],
+          format: attribute.Format,
+          maxLength: attribute.MaxLength,
+          minValue: attribute.MinValue,
+          maxValue: attribute.MaxValue,
+          precision: attribute.Precision,
+          defaultValue: choice?.defaultValue ?? attribute.DefaultValue,
+          options: choice?.options || optionsFrom(attribute.OptionSet),
+          isGlobalChoice: choice?.isGlobalChoice === true, globalChoiceName: choice?.globalChoiceName || "", globalChoiceMetadataId: choice?.globalChoiceMetadataId || "",
+        };
+      });
+      await runBatches(
+        columns.filter(
+          (column) =>
+            column.choiceKind === "OptionSet" && !column.options?.length,
+        ),
+        8,
+        async (column) => {
+          try {
+            const options = await stringMapChoices(
+              ctx,
+              definition.LogicalName || requested,
+              column.logicalName,
+            );
+            if (options.length) column.options = options;
+          } catch {}
+        },
+      );
+      const relationships = [];
+      for (const item of definition.OneToManyRelationships || [])
+        relationships.push({ kind: "1:N", ...item });
+      for (const item of definition.ManyToOneRelationships || [])
+        relationships.push({ kind: "N:1", ...item });
+      for (const item of definition.ManyToManyRelationships || [])
+        relationships.push({ kind: "N:N", ...item });
+      const result = {
+        logicalName: definition.LogicalName,
+        schemaName: definition.SchemaName,
+        displayName: localizedLabel(definition.DisplayName),
+        collectionName: localizedLabel(definition.DisplayCollectionName),
+        description: localizedLabel(definition.Description),
+        entitySetName: definition.EntitySetName,
+        metadataId: definition.MetadataId,
+        isCustom: definition.IsCustomEntity,
+        objectTypeCode: definition.ObjectTypeCode,
+        ownershipType: definition.OwnershipType,
+        primaryIdAttribute: definition.PrimaryIdAttribute,
+        primaryNameAttribute: definition.PrimaryNameAttribute,
+        auditEnabled: definition.IsAuditEnabled?.Value,
+        changeTracking: definition.ChangeTrackingEnabled,
+        isBpf: definition.IsBPFEntity,
+        businessProcessEnabled: definition.IsBusinessProcessEnabled,
+        isActivity: definition.IsActivity,
+        isManaged: definition.IsManaged,
+        columns,
+        keys: definition.Keys || [],
+        relationships,
+        choices: columns.filter((column) => column.choiceKind === "OptionSet" || column.choiceKind === "Boolean" || /Picklist|MultiSelect|State|Status|Boolean/i.test(String(column.attributeType || column.metadataType || ""))),
+      };
+      applyDependencyEvidence(result);
+      metadataCache.entities.set(key, clone(result));
+      return result;
+    })();
+    metadataCache.entityPromises.set(key, request);
+    try {
+      const data=clone(await request);if(trackVisit)void recordTableVisit(key);return { ok: true, data, cached: false };
+    } finally {
+      metadataCache.entityPromises.delete(key);
+    }
+  }
+
+  function clearMetadataCache() { if(metadataCache.metadataIndexToken)metadataCache.metadataIndexToken.cancelled=true;metadataCache.tables=null;metadataCache.tablesPromise=null;metadataCache.globalChoices=null;metadataCache.globalChoicesPromise=null;metadataCache.globalChoiceUsage={usageByName:{},warnings:[],partial:false};metadataCache.attributeCatalog=null;metadataCache.metadataIndexPromise=null;metadataCache.metadataIndexToken=null;metadataCache.metadataIndexStatus={state:"idle",phase:"idle",completed:0,total:0,warnings:0,message:"",mode:"automatic"};metadataCache.entities.clear();metadataCache.entityPromises.clear();metadataCache.stringMaps.clear();metadataCache.stringMapPromises.clear();return{ok:true}; }
+
+  async function dirtyFieldState(){
+    const ctx=await context({requireEntity:true,requireForm:false}),rows=[];
+    ctx.formContext.data.entity.attributes.forEach(attribute=>rows.push({logicalName:attribute.getName(),dirty:!!attribute.getIsDirty?.(),value:attribute.getValue?.(),text:attribute.getText?.(),formattedValue:attribute.getText?.()}));
+    return{ok:true,entityName:ctx.entityName,rows};
+  }
+  async function shellContext() { const ctx=await context({requireEntity:false,requireForm:false}); return {ok:true,clientUrl:ctx.clientUrl,environmentId:ctx.environmentId,currentUser:{id:ctx.userId,name:ctx.userName}}; }
+  function formLocation(attribute) {
+    const output = [];
+    attribute.controls?.forEach?.((control) => {
+      const section = control.getParent?.();
+      const tab = section?.getParent?.();
+      output.push({
+        control: control.getName?.(),
+        label: control.getLabel?.(),
+        tab: tab?.getName?.(),
+        tabLabel: tab?.getLabel?.(),
+        section: section?.getName?.(),
+        sectionLabel: section?.getLabel?.(),
+        visible: control.getVisible?.(),
+        disabled: control.getDisabled?.(),
+      });
+    });
+    return output;
+  }
+  function openUrl(url, message = "Opened.") {
+    Xrm.Navigation.openUrl(url);
+    return { ok: true, message };
+  }
+  function runtimeFieldValue(attribute) {
+    const value=attribute.getValue?.(), type=attribute.getAttributeType?.()||"unknown", text=attribute.getText?.();
+    const empty=value==null||value===""||(Array.isArray(value)&&!value.length); let displayValue="",rawValue="";
+    if(!empty){ if(type==="lookup"&&Array.isArray(value)){displayValue=value.map(x=>x?.name||x?.id||"").filter(Boolean).join(", ");rawValue=value.map(x=>`${x?.entityType||"lookup"}:${clean(x?.id)||""}`).join(", ");} else if(value instanceof Date){displayValue=value.toLocaleString();rawValue=value.toISOString();} else if(Array.isArray(value)){displayValue=Array.isArray(text)?text.join(", "):text||value.join(", ");rawValue=value.join(", ");} else {displayValue=text==null||text===""?String(value):String(text);rawValue=typeof value==="object"?JSON.stringify(value):String(value);} }
+    return {displayValue,rawValue,empty};
+  }
+  async function allFieldsReport() {
+    const ctx=await context(), fields=[];
+    Xrm.Page.data.entity.attributes.forEach(attribute=>{ const logicalName=attribute.getName?.()||"",controls=[];attribute.controls?.forEach?.(c=>controls.push(c));const primaryControl=controls[0]||Xrm.Page.getControl?.(logicalName)||null;
+      const locations=controls.map(control=>{const section=control.getParent?.(),tab=section?.getParent?.();return {controlName:control.getName?.()||"",controlLabel:control.getLabel?.()||"",visible:control.getVisible?.()!==false,disabled:control.getDisabled?.()===true,sectionName:section?.getName?.()||"",sectionLabel:section?.getLabel?.()||section?.getName?.()||"",tabName:tab?.getName?.()||"",tabLabel:tab?.getLabel?.()||tab?.getName?.()||""};});
+      const onForm=locations.length>0,visible=onForm&&locations.some(x=>x.visible),disabled=onForm&&locations.every(x=>x.disabled),v=runtimeFieldValue(attribute),loc=locations[0]||{};
+      fields.push({displayName:primaryControl?.getLabel?.()||logicalName,logicalName,attributeType:attribute.getAttributeType?.()||"unknown",displayValue:v.displayValue,rawValue:v.rawValue,empty:v.empty,visible,hidden:!visible,disabled,readOnly:disabled,dirty:attribute.getIsDirty?.()===true,requiredLevel:attribute.getRequiredLevel?.()||"none",submitMode:attribute.getSubmitMode?.()||"dirty",onForm,controlCount:locations.length,multiControl:locations.length>1,controlName:loc.controlName||"",tabName:loc.tabName||"",tabLabel:loc.tabLabel||"",sectionName:loc.sectionName||"",sectionLabel:loc.sectionLabel||"",locations}); });
+    try {
+      const meta = await metadataEntity(ctx.entityName);
+      const columns = meta.data?.columns || [];
+      const runtimeMap = new Map(fields.map((field) => [field.logicalName, field]));
+      for (const column of columns) {
+        const runtime = runtimeMap.get(column.logicalName);
+        if (runtime) {
+          runtime.schemaName = column.schemaName || "";
+          runtime.runtimeAvailable = true;
+          runtime.metadataAvailable = true;
+          runtime.metadataOnly = false;
+          runtime.metadata = column;
+        } else {
+          fields.push({ displayName: column.displayName || column.logicalName, logicalName: column.logicalName, schemaName: column.schemaName || "", attributeType: column.attributeType || column.metadataType || "unknown", displayValue: "", rawValue: "", empty: true, visible: false, hidden: false, disabled: false, readOnly: !column.validForUpdate, dirty: false, requiredLevel: column.requiredLevel || "none", submitMode: "n/a", onForm: false, runtimeAvailable: false, metadataAvailable: true, metadataOnly: true, controlCount: 0, multiControl: false, controlName: "", tabName: "", tabLabel: "", sectionName: "", sectionLabel: "", locations: [], metadata: column });
+        }
+      }
+      for (const field of fields) {
+        if (field.runtimeAvailable !== false) field.runtimeAvailable = true;
+        if (field.metadataAvailable !== true) { field.metadataAvailable = false; field.metadataOnly = false; field.schemaName ||= ""; }
+      }
+    } catch {
+      for (const field of fields) { field.schemaName = ""; field.runtimeAvailable = true; field.metadataAvailable = false; field.metadataOnly = false; }
+    }
+    fields.sort((a,b)=>(a.displayName||a.logicalName).localeCompare(b.displayName||b.logicalName));return {ok:true,entityName:ctx.entityName,formName:ctx.formItem?.getLabel?.()||"",formId:ctx.formId,recordId:ctx.recordId,fields,generatedOn:new Date().toISOString(),fieldModel:"metadata-runtime-merged"};
+  }
+
+  async function allFields(ctx) {
+    if (!ctx.recordId)
+      return { ok: false, error: "Save the record before loading all fields." };
+    const data = await fetchJson(
+      `${ctx.clientUrl}/api/data/v9.2/${ctx.entitySetName}(${ctx.recordId})`,
+      { headers: { Prefer: 'odata.include-annotations="*"' } },
+    );
+    const rows = Object.keys(data)
+      .filter((key) => !key.startsWith("@odata."))
+      .map((key) => {
+        const formatted =
+          data[`${key}@OData.Community.Display.V1.FormattedValue`];
+        const raw = data[key];
+        return {
+          field: key,
+          value:
+            raw == null
+              ? "[NULL]"
+              : typeof raw === "object"
+                ? JSON.stringify(raw)
+                : String(raw),
+          formatted: formatted || "",
+          type: Array.isArray(raw)
+            ? "array"
+            : raw === null
+              ? "null"
+              : typeof raw,
+        };
+      })
+      .sort((left, right) => left.field.localeCompare(right.field));
+    return {
+      ok: true,
+      data: rows,
+      entityName: ctx.entityName,
+      recordId: ctx.recordId,
+    };
+  }
+
+  async function tableProcesses(ctx) {
+    const logicalName = escapeOData(ctx.entityName);
+    const workflows = await fetchJson(
+      `${ctx.clientUrl}/api/data/v9.2/workflows?$select=workflowid,name,description,category,type,mode,scope,statecode,statuscode,createdon,modifiedon&$filter=primaryentity eq '${logicalName}' and statecode eq 1&$orderby=name asc`,
+    );
+    let customApis = { value: [] };
+    try {
+      customApis = await fetchJson(
+        `${ctx.clientUrl}/api/data/v9.2/customapis?$select=customapiid,uniquename,displayname,description,bindingtype,boundentitylogicalname,isfunction,isprivate,createdon,modifiedon&$filter=bindingtype eq 1 and boundentitylogicalname eq '${logicalName}'&$orderby=uniquename asc`,
+      );
+    } catch (error) {
+      customApis = { value: [], warning: error.message };
+    }
+    const processGroups = [
+      [
+        "Realtime Workflows",
+        (item) => item.category === 0 && item.type === 1 && item.mode === 1,
+      ],
+      [
+        "Background Workflows",
+        (item) => item.category === 0 && item.type === 1 && item.mode === 0,
+      ],
+      ["Flows", (item) => item.category === 5 && item.type === 1],
+      ["Business Rules", (item) => item.category === 2],
+      ["Business Process Flows", (item) => item.category === 4],
+      ["Custom Actions", (item) => item.category === 3],
+    ].map(([title, predicate]) => ({
+      title,
+      items: (workflows.value || []).filter(predicate).map((item) => ({
+        id: item.workflowid,
+        name: item.name || "(unnamed)",
+        description: item.description || "",
+        category: item.category,
+        mode: item.mode,
+        statecode: item.statecode,
+        statuscode: item.statuscode,
+        modifiedon: item.modifiedon,
+        openUrl:
+          item.category === 2
+            ? `${ctx.clientUrl}/tools/systemcustomization/businessrules/businessRulesDesigner.aspx?BRlaunchpoint=BRGrid&id=%7B${item.workflowid}%7D`
+            : `${ctx.clientUrl}/sfa/workflow/edit.aspx?id=%7b${item.workflowid}%7d`,
+      })),
+    }));
+    processGroups.push({
+      title: "Custom APIs",
+      items: (customApis.value || []).map((item) => ({
+        id: item.customapiid,
+        name: item.displayname || item.uniquename || "(unnamed)",
+        uniqueName: item.uniquename || "",
+        description: item.description || "",
+        bindingType: item.bindingtype,
+        isFunction: item.isfunction,
+        isPrivate: item.isprivate,
+        modifiedon: item.modifiedon,
+        openUrl: `${ctx.clientUrl}/api/data/v9.2/customapis(${item.customapiid})`,
+      })),
+    });
+    return {
+      ok: true,
+      entityName: ctx.entityName,
+      groups: processGroups,
+      warning: customApis.warning || "",
+    };
+  }
+
+  async function processExplorer(ctx, force = false) {
+    const cache = (window.__DEVLENS_PROCESS_CACHE ??= new Map());
+    const key = `${ctx.clientUrl}|${ctx.entityName}`.toLowerCase();
+    if (!force && cache.has(key)) return clone(cache.get(key));
+    const logicalName = escapeOData(ctx.entityName);
+    const result = { ok: true, entityName: ctx.entityName, generatedOn: new Date().toISOString(), categories: [] };
+    const category = async (id, title, loader) => {
+      try {
+        const items = await loader();
+        return { id, title, ok: true, count: items.length, items, error: "" };
+      } catch (error) {
+        return { id, title, ok: false, count: 0, items: [], error: error.message || String(error) };
+      }
+    };
+    let workflowPromise;
+    const workflows = () => (workflowPromise ??= fetchJson(`${ctx.clientUrl}/api/data/v9.2/workflows?$select=workflowid,name,description,category,type,mode,scope,statecode,statuscode,createdon,modifiedon,primaryentity&$filter=primaryentity eq '${logicalName}'&$orderby=name asc`));
+    const workflowItems = async (predicate, kind) => (await workflows()).value.filter(predicate).map((item) => ({
+      id: item.workflowid, kind, name: item.name || "(unnamed)", description: item.description || "", category: item.category,
+      mode: item.mode, scope: item.scope, statecode: item.statecode, statuscode: item.statuscode, createdon: item.createdon,
+      modifiedon: item.modifiedon, primaryTable: item.primaryentity || ctx.entityName,
+      openUrl: item.category === 2 ? `${ctx.clientUrl}/tools/systemcustomization/businessrules/businessRulesDesigner.aspx?BRlaunchpoint=BRGrid&id=%7B${item.workflowid}%7D` : `${ctx.clientUrl}/sfa/workflow/edit.aspx?id=%7b${item.workflowid}%7d`,
+    }));
+    const pluginSteps = async () => {
+      const filters = await fetchJson(`${ctx.clientUrl}/api/data/v9.2/sdkmessagefilters?$select=sdkmessagefilterid,primaryobjecttypecode,secondaryobjecttypecode&$filter=primaryobjecttypecode eq '${logicalName}'`);
+      const filterRows = filters.value || [];
+      if (!filterRows.length) return [];
+      const filterMap = new Map(filterRows.map((x) => [String(x.sdkmessagefilterid).toLowerCase(), x]));
+      const filterClause = filterRows.map((x) => `_sdkmessagefilterid_value eq ${x.sdkmessagefilterid}`).join(" or ");
+      const steps = await fetchJson(`${ctx.clientUrl}/api/data/v9.2/sdkmessageprocessingsteps?$select=sdkmessageprocessingstepid,name,description,stage,mode,rank,supporteddeployment,filteringattributes,statecode,statuscode,configuration,_sdkmessageid_value,_sdkmessagefilterid_value,_eventhandler_value,_plugintypeid_value,_sdkmessageprocessingstepsecureconfigid_value&$filter=${encodeURIComponent(filterClause)}&$orderby=rank asc`);
+      const rows = steps.value || [], typeIds = [...new Set(rows.map((x) => x._plugintypeid_value || x._eventhandler_value).filter(Boolean))];
+      const typeMap = new Map(), assemblyMap = new Map(), messageMap = new Map(), imageMap = new Map();
+      if (typeIds.length) {
+        const typeClause = typeIds.map((id) => `plugintypeid eq ${id}`).join(" or ");
+        const types = await fetchJson(`${ctx.clientUrl}/api/data/v9.2/plugintypes?$select=plugintypeid,name,typename,_pluginassemblyid_value&$filter=${encodeURIComponent(typeClause)}`);
+        for (const type of types.value || []) typeMap.set(String(type.plugintypeid).toLowerCase(), type);
+        const assemblyIds = [...new Set((types.value || []).map((x) => x._pluginassemblyid_value).filter(Boolean))];
+        if (assemblyIds.length) {
+          const clause = assemblyIds.map((id) => `pluginassemblyid eq ${id}`).join(" or ");
+          const assemblies = await fetchJson(`${ctx.clientUrl}/api/data/v9.2/pluginassemblies?$select=pluginassemblyid,name,version,isolationmode&$filter=${encodeURIComponent(clause)}`);
+          for (const assembly of assemblies.value || []) assemblyMap.set(String(assembly.pluginassemblyid).toLowerCase(), assembly);
+        }
+      }
+      const messageIds = [...new Set(rows.map((x) => x._sdkmessageid_value).filter(Boolean))];
+      if (messageIds.length) {
+        const clause = messageIds.map((id) => `sdkmessageid eq ${id}`).join(" or ");
+        const messages = await fetchJson(`${ctx.clientUrl}/api/data/v9.2/sdkmessages?$select=sdkmessageid,name&$filter=${encodeURIComponent(clause)}`);
+        for (const message of messages.value || []) messageMap.set(String(message.sdkmessageid).toLowerCase(), message);
+      }
+      const stepIds = rows.map((x) => x.sdkmessageprocessingstepid);
+      if (stepIds.length) {
+        const clause = stepIds.map((id) => `_sdkmessageprocessingstepid_value eq ${id}`).join(" or ");
+        try {
+          const images = await fetchJson(`${ctx.clientUrl}/api/data/v9.2/sdkmessageprocessingstepimages?$select=sdkmessageprocessingstepimageid,name,imagetype,attributes,_sdkmessageprocessingstepid_value&$filter=${encodeURIComponent(clause)}`);
+          for (const image of images.value || []) { const id = String(image._sdkmessageprocessingstepid_value).toLowerCase(); if (!imageMap.has(id)) imageMap.set(id, []); imageMap.get(id).push({ name: image.name || "(unnamed image)", imageType: image.imagetype, attributes: image.attributes || "" }); }
+        } catch {}
+      }
+      const stages = { 10: "Pre-validation", 20: "Pre-operation", 30: "Main operation", 40: "Post-operation", 50: "Post-operation (deprecated)" }, modes = { 0: "Synchronous", 1: "Asynchronous" }, deployments = { 0: "Server only", 1: "Offline only", 2: "Server and offline" };
+      return rows.map((step) => {
+        const type = typeMap.get(String(step._plugintypeid_value || step._eventhandler_value || "").toLowerCase()) || {};
+        const assembly = assemblyMap.get(String(type._pluginassemblyid_value || "").toLowerCase()) || {};
+        const filter = filterMap.get(String(step._sdkmessagefilterid_value || "").toLowerCase()) || {};
+        const images = imageMap.get(String(step.sdkmessageprocessingstepid).toLowerCase()) || [];
+        return { id: step.sdkmessageprocessingstepid, kind: "pluginStep", name: step.name || "(unnamed step)", description: step.description || "", pluginAssembly: assembly.name || "", pluginAssemblyVersion: assembly.version || "", pluginType: type.typename || type.name || "", sdkMessage: messageMap.get(String(step._sdkmessageid_value || "").toLowerCase())?.name || "", primaryTable: filter.primaryobjecttypecode || ctx.entityName, secondaryTable: filter.secondaryobjecttypecode || "", pipelineStage: stages[step.stage] || step.stage, executionMode: modes[step.mode] || step.mode, rank: step.rank, deploymentType: deployments[step.supporteddeployment] || step.supporteddeployment, filteringAttributes: step.filteringattributes || "", statecode: step.statecode, statuscode: step.statuscode, preImages: images.filter((x) => x.imageType === 0 || x.imageType === 2), postImages: images.filter((x) => x.imageType === 1 || x.imageType === 2), hasSecureConfiguration: !!step._sdkmessageprocessingstepsecureconfigid_value, hasUnsecureConfiguration: !!String(step.configuration || "").trim(), openUrl: `${ctx.clientUrl}/main.aspx?pagetype=entityrecord&etn=sdkmessageprocessingstep&id=${step.sdkmessageprocessingstepid}` };
+      });
+    };
+    result.categories = await Promise.all([
+      category("realtime", "Real-time workflows", () => workflowItems((x) => x.category === 0 && x.type === 1 && x.mode === 1, "realtimeWorkflow")),
+      category("background", "Background workflows", () => workflowItems((x) => x.category === 0 && x.type === 1 && x.mode === 0, "backgroundWorkflow")),
+      category("rules", "Business rules", () => workflowItems((x) => x.category === 2, "businessRule")),
+      category("flows", "Cloud flows", () => workflowItems((x) => x.category === 5, "cloudFlow")),
+      category("bpf", "Business process flows", () => workflowItems((x) => x.category === 4, "businessProcessFlow")),
+      category("actions", "Custom actions", () => workflowItems((x) => x.category === 3, "customAction")),
+      category("apis", "Custom APIs", async () => {
+        const data = await fetchJson(`${ctx.clientUrl}/api/data/v9.2/customapis?$select=customapiid,uniquename,displayname,description,bindingtype,boundentitylogicalname,isfunction,isprivate,allowedcustomprocessingsteptype,statecode,statuscode,createdon,modifiedon&$filter=bindingtype eq 1 and boundentitylogicalname eq '${logicalName}'&$orderby=uniquename asc`);
+        return (data.value || []).map((item) => ({ id: item.customapiid, kind: "customApi", name: item.displayname || item.uniquename || "(unnamed)", uniqueName: item.uniquename || "", description: item.description || "", bindingType: item.bindingtype, primaryTable: item.boundentitylogicalname || ctx.entityName, isFunction: item.isfunction, isPrivate: item.isprivate, allowedCustomProcessingStepType: item.allowedcustomprocessingsteptype, statecode: item.statecode, statuscode: item.statuscode, createdon: item.createdon, modifiedon: item.modifiedon, openUrl: `${ctx.clientUrl}/main.aspx?pagetype=entityrecord&etn=customapi&id=${item.customapiid}` }));
+      }),
+      category("plugins", "Plug-in steps", pluginSteps),
+    ]);
+    result.partial = result.categories.some((x) => !x.ok);
+    cache.set(key, clone(result));
+    return result;
+  }
+
+  async function searchUsers(ctx, query) {
+    const term = String(query || "").trim();
+    if (term.length < 2)
+      return { ok: false, error: "Enter at least two characters." };
+    const escaped = escapeOData(term);
+    const filter = `(contains(fullname,'${escaped}') or contains(internalemailaddress,'${escaped}') or contains(domainname,'${escaped}')) and isdisabled eq false`;
+    const data = await fetchJson(
+      `${ctx.clientUrl}/api/data/v9.2/systemusers?$select=systemuserid,azureactivedirectoryobjectid,fullname,internalemailaddress,domainname&$filter=${encodeURIComponent(filter)}&$orderby=fullname asc&$top=20`,
+    );
+    return { ok: true, data: data.value || [] };
+  }
+
+  async function tool(request) {
+    const actionName = request.action;
+    const globalOnly = ["advancedFind", "maker", "searchUsers"].includes(actionName);
+    const ctx = await context(globalOnly ? { requireEntity: false, requireForm: false } : { requireEntity: true, requireForm: true });
+    if (actionName === "recordApi")
+      return ctx.recordId
+        ? openUrl(
+            `${ctx.clientUrl}/api/data/v9.2/${ctx.entitySetName}(${ctx.recordId})`,
+            "Record API opened.",
+          )
+        : { ok: false, error: "Save the record first." };
+    if (actionName === "maker") {
+      let metadataId = ctx.metadataId;
+      if (request.logicalName)
+        metadataId = clean(
+          (
+            await fetchJson(
+              `${ctx.clientUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${escapeOData(request.logicalName)}')?$select=MetadataId`,
+            )
+          ).MetadataId,
+        );
+      if (!ctx.environmentId || !metadataId)
+        return {
+          ok: false,
+          error: "Environment or table metadata ID could not be resolved.",
+        };
+      return openUrl(
+        `https://make.powerapps.com/environments/${ctx.environmentId}/entities/${metadataId}`,
+        "Table opened in Power Apps.",
+      );
+    }
+    if (actionName === "advancedFind")
+      return openUrl(
+        `${ctx.clientUrl}/main.aspx?pagetype=advancedfind`,
+        "Advanced Find opened.",
+      );
+    if (actionName === "formEditor") {
+      if (!ctx.environmentId || !ctx.formId)
+        return {
+          ok: false,
+          error: "Environment or current form ID could not be resolved.",
+        };
+      const defaultSolutionId = "fd140aaf-4df4-11dd-bd17-0019b9312238";
+      return openUrl(
+        `https://make.powerapps.com/e/${ctx.environmentId}/s/${defaultSolutionId}/entity/${ctx.entityName}/form/edit/${ctx.formId}`,
+        `Form editor opened for ${ctx.entityName}.`,
+      );
+    }
+    if (actionName === "allFields") return allFields(ctx);
+    if (actionName === "processes") return tableProcesses(ctx);
+    if (actionName === "searchUsers") return searchUsers(ctx, request.query);
+    if (actionName === "showFields" || actionName === "god") {
+      Xrm.Page.data.entity.attributes.forEach((attribute) => {
+        if (!toolkitState.attributes.has(attribute.getName()))
+          toolkitState.attributes.set(
+            attribute.getName(),
+            attribute.getRequiredLevel?.(),
+          );
+        if (actionName === "god") attribute.setRequiredLevel?.("none");
+      });
+      Xrm.Page.ui.controls.forEach((control) => {
+        const name = control.getName?.();
+        if (name && !toolkitState.controls.has(name))
+          toolkitState.controls.set(name, {
+            visible: control.getVisible?.(),
+            disabled: control.getDisabled?.(),
+          });
+        control.setVisible?.(true);
+        if (actionName === "god") control.setDisabled?.(false);
+      });
+      if (actionName === "god")
+        Xrm.Page.ui.tabs.forEach((tab) => {
+          const name = tab.getName?.();
+          if (!toolkitState.tabs.has(name))
+            toolkitState.tabs.set(name, tab.getVisible?.());
+          tab.setVisible?.(true);
+          tab.sections?.forEach((section) => {
+            const key = name + "|" + section.getName?.();
+            if (!toolkitState.sections.has(key))
+              toolkitState.sections.set(key, section.getVisible?.());
+            section.setVisible?.(true);
+          });
+        });
+      return {
+        ok: true,
+        message:
+          actionName === "god"
+            ? "God Mode enabled temporarily."
+            : "Hidden fields shown.",
+      };
+    }
+    if (actionName === "showTabs") {
+      Xrm.Page.ui.tabs.forEach((tab) => {
+        const name = tab.getName?.();
+        if (!toolkitState.tabs.has(name))
+          toolkitState.tabs.set(name, tab.getVisible?.());
+        tab.setVisible?.(true);
+        tab.sections?.forEach((section) => {
+          const key = name + "|" + section.getName?.();
+          if (!toolkitState.sections.has(key))
+            toolkitState.sections.set(key, section.getVisible?.());
+          section.setVisible?.(true);
+        });
+      });
+      return { ok: true, message: "Hidden tabs and sections shown." };
+    }
+    if (actionName === "restore") {
+      Xrm.Page.data.entity.attributes.forEach(
+        (attribute) =>
+          toolkitState.attributes.has(attribute.getName()) &&
+          attribute.setRequiredLevel?.(
+            toolkitState.attributes.get(attribute.getName()),
+          ),
+      );
+      Xrm.Page.ui.controls.forEach((control) => {
+        const saved = toolkitState.controls.get(control.getName?.());
+        if (saved) {
+          control.setVisible?.(saved.visible);
+          control.setDisabled?.(saved.disabled);
+        }
+      });
+      Xrm.Page.ui.tabs.forEach((tab) => {
+        const name = tab.getName?.();
+        if (toolkitState.tabs.has(name))
+          tab.setVisible?.(toolkitState.tabs.get(name));
+        tab.sections?.forEach((section) => {
+          const key = name + "|" + section.getName?.();
+          if (toolkitState.sections.has(key))
+            section.setVisible?.(toolkitState.sections.get(key));
+        });
+      });
+      toolkitState.controls.clear();
+      toolkitState.tabs.clear();
+      toolkitState.sections.clear();
+      toolkitState.attributes.clear();
+      return {
+        ok: true,
+        message: "Original UI and required-level state restored.",
+      };
+    }
+    if (actionName === "listFields") {
+      const data = [];
+      Xrm.Page.data.entity.attributes.forEach((attribute) =>
+        data.push({
+          name: attribute.getName(),
+          type: attribute.getAttributeType?.(),
+          value: attribute.getValue?.(),
+          text: attribute.getText?.(),
+          dirty: attribute.getIsDirty?.(),
+          required: attribute.getRequiredLevel?.(),
+          locations: formLocation(attribute),
+        }),
+      );
+      return { ok: true, data };
+    }
+    if (actionName === "focusField") {
+      const attribute = Xrm.Page.getAttribute(request.field),
+        location = attribute && formLocation(attribute)[0];
+      if (!attribute || !location)
+        return { ok: false, error: "Field is not present on the loaded form." };
+      const tab = Xrm.Page.ui.tabs.get(location.tab),
+        section = tab?.sections?.get(location.section),
+        control = Xrm.Page.getControl(location.control);
+      tab?.setVisible?.(true);
+      tab?.setDisplayState?.("expanded");
+      section?.setVisible?.(true);
+      control?.setVisible?.(true);
+      control?.setFocus?.();
+      const element = document.querySelector(
+        `[data-id^="${CSS.escape(location.control)}"]`,
+      );
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+        element.style.outline = "4px solid #22d3ee";
+        setTimeout(() => (element.style.outline = ""), 15000);
+      }
+      return {
+        ok: true,
+        message: `Highlighted ${request.field}.`,
+        data: { field: request.field, ...location },
+      };
+    }
+    if (actionName === "choices") {
+      const data = [];
+      Xrm.Page.data.entity.attributes.forEach((attribute) => {
+        const options = attribute.getOptions?.();
+        if (options)
+          data.push({
+            field: attribute.getName(),
+            type: attribute.getAttributeType?.(),
+            text: attribute.getText?.(),
+            value: attribute.getValue?.(),
+            options: options.map((option) => ({
+              text: option.text,
+              value: option.value,
+            })),
+          });
+      });
+      return { ok: true, data };
+    }
+    if (actionName === "logical") {
+      Xrm.Page.ui.controls.forEach((control) => {
+        const attribute = control.getAttribute?.(),
+          name = control.getName?.(),
+          element =
+            name && document.querySelector(`[data-id^="${CSS.escape(name)}"]`);
+        if (
+          attribute &&
+          element &&
+          !element.querySelector(".devlens-logical")
+        ) {
+          const span = document.createElement("span");
+          span.className = "devlens-logical";
+          span.textContent = ` [${attribute.getName()}]`;
+          span.style.color = "#22d3ee";
+          (element.querySelector("label") || element).appendChild(span);
+        }
+      });
+      return { ok: true, message: "Logical names shown." };
+    }
+    if (actionName === "clearLogical") {
+      document
+        .querySelectorAll(".devlens-logical")
+        .forEach((element) => element.remove());
+      return { ok: true, message: "Logical names cleared." };
+    }
+    if (actionName === "ribbon") {
+      const url = new URL(location.href);
+      url.searchParams.set("ribbondebug", "true");
+      return openUrl(url.toString(), "Ribbon debug enabled.");
+    }
+    return { ok: false, error: "Unsupported action." };
+  }
+
+  const task =
+    action === "report"
+      ? report()
+      : action === "allFieldsReport"
+        ? allFieldsReport()
+        : action === "dirtyFieldState"
+          ? dirtyFieldState()
+        : action === "shellContext"
+          ? shellContext()
+          : action === "clearMetadataCache"
+            ? Promise.resolve(clearMetadataCache())
+            : action === "scan"
+        ? scan(payload?.libraries || [])
+        : action === "metadataTables"
+          ? metadataTables()
+          : action === "globalChoices"
+            ? globalChoices()
+            : action === "startMetadataIndex"
+              ? startMetadataIndex(payload?.mode || "automatic")
+              : action === "metadataIndexStatus"
+                ? Promise.resolve(metadataIndexStatus())
+                : action === "cancelMetadataIndex"
+                  ? Promise.resolve(cancelMetadataIndex())
+            : action === "metadataEntity"
+              ? metadataEntity(payload?.logicalName)
+              : action === "processExplorer"
+                ? context({ requireEntity: true, requireForm: false }).then((ctx) => processExplorer(ctx, !!payload?.force))
+              : action === "tool"
+                ? tool(payload || {})
+                : Promise.resolve({ ok: false, error: "Unknown action" });
+  return task.catch((error) => ({
+    ok: false,
+    error: error.message || String(error),
+  }));
+}
+
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type !== "DEVLENS_ACTION") return;
+  chrome.scripting
+    .executeScript({
+      target: { tabId: sender.tab.id, allFrames: message.action !== "tool" },
+      world: "MAIN",
+      func: pageBridge,
+      args: [message.action, message.payload || {}],
+    })
+    .then((results) =>
+      reply(
+        results.find((item) => item.result?.ok)?.result ||
+          results.find((item) => item.result?.error)?.result || {
+            ok: false,
+            error: "No Dynamics form frame found.",
+          },
+      ),
+    )
+    .catch((error) => reply({ ok: false, error: error.message }));
+  return true;
+});
+
+chrome.commands.onCommand.addListener(async (command) => {
+  const messageType =
+    command === "command-palette"
+      ? "DEVLENS_PALETTE"
+      : command === "toggle-analyzer"
+        ? "DEVLENS_MINIMIZE"
+        : null;
+  if (!messageType) return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  chrome.tabs.sendMessage(
+    tab.id,
+    { type: messageType },
+    () => void chrome.runtime.lastError,
+  );
+});
