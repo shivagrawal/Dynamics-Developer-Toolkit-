@@ -1,1 +1,0 @@
-# Dynamics Developer Toolkit
