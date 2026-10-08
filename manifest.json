@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Dynamics 365 & Dataverse DevLens",
   "short_name": "D365 DevLens",
-  "version": "5.20.1",
-  "version_name": "5.20.1 Metadata Intelligence Engine Phase 2",
+  "version": "5.20.13.1",
+  "version_name": "5.20.13.1 Metadata Performance Hotfix",
   "description": "Developer diagnostics for Dynamics 365 and Dataverse with events, JavaScript, fields, metadata, process, custom control, security, audit, command palette, and developer toolkit capabilities.",
   "permissions": [
     "scripting",
@@ -43,6 +43,16 @@
     }
   },
   "content_scripts": [
+    {
+      "matches": [
+        "*://*.dynamics.com/main.aspx*"
+      ],
+      "js": [
+        "surface-bootstrap-main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": [
         "*://*.dynamics.com/main.aspx*"

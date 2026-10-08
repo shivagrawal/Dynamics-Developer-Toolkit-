@@ -17,7 +17,7 @@
   const send = (action, payload = {}) =>
     new Promise((resolve) =>
       chrome.runtime.sendMessage(
-        { type: "DEVLENS_PROCESS_EXPLORER_V2", action, payload },
+        { type: "DEVLENS_PROCESS_EXPLORER_V2", action, payload: { ...payload, __devlensSurface: window.D365AnalyzerApi?.getActiveSurface?.() || null } },
         resolve,
       ),
     );

@@ -70,13 +70,94 @@
     }
   }
   async function showGlobal() {
-    if(!S.globalChoices){root.innerHTML="<div class=status>Loading global choices…</div>";const x=await D365AnalyzerApi.send("globalChoices");if(!x?.ok){root.innerHTML=`<div class=bad>${E(x?.error||"Global Choices returned no response.")}</div>`;return}S.globalChoices=x.data||[]}
-    if(!S.tables){const t=await D365AnalyzerApi.send("metadataTables");S.tables=t?.data||[]}
-    const a=S.globalChoices;root.innerHTML=`<div class=row><button id=back class=b>Tables</button><button class="b active">Global Choices</button><input id=gq class="i search" placeholder="Search choice or option"><input id=tableFilter class="i search" placeholder="Search and select one exact table"><button id=clearTable class=b hidden>Clear Table</button><button id=selectAll class=b>Select All</button><button id=clearSelected class=b>Clear Selection</button><button id=refreshUsage class=b>Refresh Choice Usage</button><button id=cancelIndex class="b danger" hidden>Cancel Indexing</button><button id=downloadGlobals class="b pri">Download Global Choices</button><span id=gc class=muted></span></div><div id=tablePickerResults class=tablePickerResults hidden></div><div id=indexStatus class=muted></div><div id=globalRows></div>`;
-    root.querySelector("#back").onclick=showTables;root.querySelector("#downloadGlobals").onclick=exportGlobalChoices;const q=root.querySelector("#gq"),tf=root.querySelector("#tableFilter"),o=root.querySelector("#globalRows"),c=root.querySelector("#gc"),status=root.querySelector("#indexStatus"),cancel=root.querySelector("#cancelIndex");let selected=new Set();
-    function draw(){const v=q.value.toLowerCase(),tv=tf.value.toLowerCase(),visible=a.filter(x=>(!v||JSON.stringify({name:x.name,displayName:x.displayName,options:x.options}).toLowerCase().includes(v))&&(!tv||(x.usedBy||[]).some(u=>`${u.tableDisplayName} ${u.tableLogicalName}`.toLowerCase().includes(tv))));c.textContent=`${visible.length} choices · ${selected.size} selected`;o.innerHTML=visible.map((x,choiceIndex)=>{const usedBy=x.usedBy||[],usage=usedBy.length?`<table><thead><tr><th>Table</th><th>Column</th></tr></thead><tbody>${usedBy.map((u,i)=>`<tr class="link usageRow" data-choice="${choiceIndex}" data-usage="${i}"><td>${E(u.tableDisplayName||u.tableLogicalName)}<div class=muted>${E(u.tableLogicalName)}</div></td><td>${E(u.columnDisplayName||u.columnLogicalName)}<div class=muted>${E(u.columnLogicalName)}</div></td></tr>`).join("")}</tbody></table>`:'<div class=muted>Dependency indexing has not reached this choice yet, or no dependent columns were returned.</div>';return `<details><summary><input type=checkbox class=choiceSelect data-name="${E(x.name)}" ${selected.has(x.name)?"checked":""}> <b>${E(x.displayName||x.name)}</b> · ${E(x.name)} · ${E(x.type)} · <b>Used By ${usedBy.length} Column${usedBy.length===1?"":"s"}</b></summary><div class=card>Metadata ID: ${E(x.metadataId||"Not returned")}</div><details><summary><b>Options</b> (${(x.options||[]).length})</summary>${grid([["Option Text","label"],["Value","value"],["Color","color"],["Description","description"]],x.options||[])}</details><details><summary><b>Used By (${usedBy.length} Columns)</b></summary>${usage}</details></details>`}).join("")||"<div class=muted>No matching Global Choices.</div>";o.querySelectorAll(".choiceSelect").forEach(box=>box.onchange=()=>{box.checked?selected.add(box.dataset.name):selected.delete(box.dataset.name);c.textContent=`${visible.length} choices · ${selected.size} selected`});o.querySelectorAll(".usageRow").forEach(row=>row.onclick=()=>{const usage=visible[+row.dataset.choice]?.usedBy?.[+row.dataset.usage];if(usage)openChoiceColumn(usage.tableLogicalName,usage.columnLogicalName)})}
-    const sync=async()=>{const r=await D365AnalyzerApi.send("metadataIndexStatus"),p=r?.data;if(r?.usage?.usageByName){for(const choice of a){const rows=r.usage.usageByName[String(choice.name||"").toLowerCase()];if(rows){choice.usedBy=rows;choice.usedByCount=rows.length}}draw()}if(p){const pct=p.total?Math.round(p.completed*100/p.total):0;status.className=p.state==="error"?"bad":p.state==="complete"?"good":p.state==="cancelled"?"warn":"status";status.textContent=p.state==="running"?`Metadata indexing: ${p.phase} · ${p.completed} of ${p.total} (${pct}%) · warnings ${p.warnings}`:`${p.message||p.state} · warnings ${p.warnings}`;cancel.hidden=!(p.state==="running"&&p.mode==="manual");if(p.state==="running")setTimeout(sync,800)}};
-    root.querySelector("#selectAll").onclick=()=>{a.forEach(x=>selected.add(x.name));draw()};root.querySelector("#clearSelected").onclick=()=>{selected.clear();draw()};root.querySelector("#refreshUsage").onclick=async()=>{await D365AnalyzerApi.send("clearMetadataCache");S.tables=null;S.globalChoices=null;await D365AnalyzerApi.send("startMetadataIndex",{mode:"manual"});cancel.hidden=false;status.textContent="Refreshing metadata dependency index…";void sync()};cancel.onclick=async()=>{const r=await D365AnalyzerApi.send("cancelMetadataIndex");status.textContent=r?.message||r?.error};q.oninput=draw;tf.oninput=draw;draw();void sync();q.focus();
+    if (!S.globalChoices) {
+      root.innerHTML = "<div class=status>Loading global choice definitions…</div>";
+      const response = await D365AnalyzerApi.send("globalChoices");
+      if (!response?.ok) {
+        root.innerHTML = `<div class=bad>${E(response?.error || "Global Choices returned no response.")}</div>`;
+        return;
+      }
+      S.globalChoices = response.data || [];
+    }
+    if (!S.tables) {
+      const response = await D365AnalyzerApi.send("metadataTables");
+      S.tables = response?.data || [];
+    }
+    const choices = S.globalChoices;
+    let selectedTable = null;
+    const selected = new Set();
+    root.innerHTML = `<div class=row><button id=back class=b>Tables</button><button class="b active">Global Choices</button><input id=gq class="i search" placeholder="Search choice or option"><input id=tableFilter class="i search" placeholder="Type table display, logical, or schema name"><button id=clearTable class=b hidden>Clear Table</button><button id=selectAll class=b>Select All</button><button id=clearSelected class=b>Clear Selection</button><button id=refreshUsage class=b>Refresh Choice Usage</button><button id=cancelIndex class="b danger" hidden>Cancel Indexing</button><button id=downloadGlobals class="b pri">Download Global Choices</button><span id=gc class=muted></span></div><div id=tablePickerResults class=tablePickerResults hidden></div><div id=indexStatus class=muted>Global choice definitions loaded. Usage indexing continues in the background.</div><div id=globalRows></div>`;
+    root.querySelector("#back").onclick = showTables;
+    root.querySelector("#downloadGlobals").onclick = exportGlobalChoices;
+    const query = root.querySelector("#gq"), tableInput = root.querySelector("#tableFilter"), picker = root.querySelector("#tablePickerResults"), clearTable = root.querySelector("#clearTable"), output = root.querySelector("#globalRows"), count = root.querySelector("#gc"), status = root.querySelector("#indexStatus"), cancel = root.querySelector("#cancelIndex");
+    const tableKey = table => `${table.displayName || ""} ${table.logicalName || ""} ${table.schemaName || ""}`.toLowerCase();
+    function usageMatchesTable(usage, table) {
+      if (!table) return true;
+      const logical = String(usage.tableLogicalName || "").toLowerCase();
+      const schema = String(usage.tableSchemaName || "").toLowerCase();
+      return logical === String(table.logicalName || "").toLowerCase() || schema === String(table.schemaName || "").toLowerCase();
+    }
+    function captureOpen() {
+      return new Set([...output.querySelectorAll("details[open][data-choice]")].map(item => item.dataset.choice));
+    }
+    function draw(openChoices = captureOpen()) {
+      const term = query.value.toLowerCase();
+      const visible = choices.filter(choice => {
+        const choiceMatch = !term || JSON.stringify({ name: choice.name, displayName: choice.displayName, options: choice.options }).toLowerCase().includes(term);
+        return choiceMatch && (!selectedTable || (choice.usedBy || []).some(usage => usageMatchesTable(usage, selectedTable)));
+      });
+      count.textContent = `${visible.length} choices · ${selected.size} selected`;
+      output.innerHTML = visible.map(choice => `<details data-choice="${E(choice.name)}" ${openChoices.has(choice.name) ? "open" : ""}><summary><input class=choiceSelect type=checkbox data-name="${E(choice.name)}" ${selected.has(choice.name) ? "checked" : ""}> <b>${E(choice.displayName || choice.name)}</b> · ${E(choice.name)} · ${(choice.options || []).length} options · ${(choice.usedBy || []).length} usages</summary>${grid([["Option Text","label"],["Value","value"],["Color","color"],["Description","description"]], choice.options || [])}<details><summary><b>Used By</b> (${(choice.usedBy || []).length})</summary>${grid([["Table Display","tableDisplayName"],["Table Logical","tableLogicalName"],["Table Schema","tableSchemaName"],["Column Display","columnDisplayName"],["Column Logical","columnLogicalName"]], choice.usedBy || [])}</details></details>`).join("") || '<div class=muted>No matching global choices. Usage filters populate as indexing progresses.</div>';
+      output.querySelectorAll(".choiceSelect").forEach(box => box.onchange = () => { box.checked ? selected.add(box.dataset.name) : selected.delete(box.dataset.name); count.textContent = `${visible.length} choices · ${selected.size} selected`; });
+    }
+    function drawPicker() {
+      if (selectedTable) { picker.hidden = true; return; }
+      const term = tableInput.value.trim().toLowerCase();
+      if (!term) { picker.hidden = true; return; }
+      const matches = S.tables.filter(table => tableKey(table).includes(term)).slice(0, 50);
+      picker.hidden = false;
+      picker.innerHTML = matches.length ? matches.map((table, index) => `<button class="b tablePickerResult" data-index="${index}"><b>${E(table.displayName || table.logicalName)}</b><br><span class=muted>Logical: ${E(table.logicalName)} · Schema: ${E(table.schemaName)}</span></button>`).join("") : '<div class=muted>No matching tables.</div>';
+      picker.querySelectorAll(".tablePickerResult").forEach(button => button.onclick = () => {
+        selectedTable = matches[+button.dataset.index];
+        tableInput.value = `${selectedTable.displayName || selectedTable.logicalName} · ${selectedTable.logicalName} · ${selectedTable.schemaName}`;
+        tableInput.readOnly = true;
+        clearTable.hidden = false;
+        picker.hidden = true;
+        draw();
+      });
+    }
+    async function sync() {
+      const response = await D365AnalyzerApi.send("metadataIndexStatus"), progress = response?.data;
+      if (response?.usage?.usageByName) {
+        for (const choice of choices) {
+          const rows = response.usage.usageByName[String(choice.name || "").toLowerCase()];
+          if (rows) { choice.usedBy = rows; choice.usedByCount = rows.length; }
+        }
+      }
+      if (!progress) return;
+      const pct = progress.total ? Math.round(progress.completed * 100 / progress.total) : 0;
+      status.className = progress.state === "error" ? "bad" : progress.state === "complete" ? "good" : progress.state === "cancelled" ? "warn" : "status";
+      status.textContent = progress.state === "running" ? `Metadata indexing: ${progress.phase} · ${progress.completed} of ${progress.total} (${pct}%) · warnings ${progress.warnings}` : `${progress.message || progress.state} · warnings ${progress.warnings}`;
+      cancel.hidden = !(progress.state === "running" && progress.mode === "manual");
+      if (progress.state === "running") setTimeout(sync, 800);
+      else draw();
+    }
+    root.querySelector("#selectAll").onclick = () => { choices.forEach(choice => selected.add(choice.name)); draw(); };
+    root.querySelector("#clearSelected").onclick = () => { selected.clear(); draw(); };
+    root.querySelector("#refreshUsage").onclick = async () => {
+      const response = await D365AnalyzerApi.send("startMetadataIndex", { mode: "manual" });
+      status.textContent = response?.message || "Refreshing metadata dependency index…";
+      cancel.hidden = false;
+      void sync();
+    };
+    cancel.onclick = async () => { const response = await D365AnalyzerApi.send("cancelMetadataIndex"); status.textContent = response?.message || response?.error; };
+    clearTable.onclick = () => { selectedTable = null; tableInput.value = ""; tableInput.readOnly = false; clearTable.hidden = true; picker.hidden = true; draw(); tableInput.focus(); };
+    query.oninput = () => draw();
+    tableInput.oninput = drawPicker;
+    tableInput.onfocus = drawPicker;
+    draw();
+    void sync();
+    query.focus();
   }
   async function load(n) {
     root.innerHTML =

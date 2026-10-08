@@ -2,6 +2,8 @@
 
 function devLensProcessExplorerBridge(action, payload) {
   "use strict";
+  const requestedSurface = payload?.__devlensSurface || null;
+  const selectedSidePane = requestedSurface?.kind === "sidePane" && requestedSurface?.entityName ? requestedSurface : null;
   const label = (value) => value?.UserLocalizedLabel?.Label || value?.LocalizedLabels?.[0]?.Label || "";
   const clean = (value) => value ? String(value).replace(/[{}]/g, "") : "";
   async function json(url) {
@@ -16,7 +18,7 @@ function devLensProcessExplorerBridge(action, payload) {
   async function context() {
     if (typeof Xrm === "undefined" || !Xrm.Utility?.getGlobalContext) throw Error("Xrm is unavailable in this frame.");
     const global = Xrm.Utility.getGlobalContext();
-    return { clientUrl: global.getClientUrl(), currentTable: Xrm.Page?.data?.entity?.getEntityName?.() || "" };
+    return { clientUrl: global.getClientUrl(), currentTable: selectedSidePane?.entityName || Xrm.Page?.data?.entity?.getEntityName?.() || "", surfaceKind:selectedSidePane?"sidePane":"mainForm", surfaceProvider:selectedSidePane?.internal?.provider||selectedSidePane?.provider||"main-form-xrm", surfaceRecordId:selectedSidePane?.recordId||selectedSidePane?.internal?.recordId||"" };
   }
   const cache = (window.__DEVLENS_PROCESS_EXPLORER_V2_CACHE ??= new Map());
   async function tableList(ctx) {
@@ -85,9 +87,9 @@ function devLensProcessExplorerBridge(action, payload) {
       category("apis","Custom APIs",async()=>{ const d=await json(`${ctx.clientUrl}/api/data/v9.2/customapis?$select=customapiid,uniquename,displayname,description,bindingtype,boundentitylogicalname,isfunction,isprivate,statecode,statuscode&$filter=bindingtype eq 1 and boundentitylogicalname eq '${escaped}'&$orderby=uniquename asc`); return (d.value||[]).map(x=>({id:x.customapiid,kind:"customApi",name:x.displayname||x.uniquename||"(unnamed)",uniqueName:x.uniquename||"",description:x.description||"",primaryTable:x.boundentitylogicalname||table,isFunction:x.isfunction,isPrivate:x.isprivate,statecode:x.statecode,statuscode:x.statuscode})); }),
       category("plugins","Plug-in steps",pluginSteps),
     ]);
-    const output={ok:true,entityName:table,tables:await tableList(ctx),categories,partial:categories.some(x=>!x.ok),generatedOn:new Date().toISOString()}; cache.set(key,output); return output;
+    const output={ok:true,entityName:table,tables:await tableList(ctx),categories,partial:categories.some(x=>!x.ok),generatedOn:new Date().toISOString(),surfaceKind:ctx.surfaceKind,surfaceProvider:ctx.surfaceProvider,surfaceRecordId:ctx.surfaceRecordId}; cache.set(key,output); return output;
   }
-  return (async()=>{ const ctx=await context(); if(action==="tables") return {ok:true,tables:await tableList(ctx),currentTable:ctx.currentTable}; return load(ctx,payload?.table||ctx.currentTable,!!payload?.force); })().catch(error=>({ok:false,error:error.message||String(error)}));
+  return (async()=>{ const ctx=await context(); if(action==="tables") return {ok:true,tables:await tableList(ctx),currentTable:ctx.currentTable,surfaceKind:ctx.surfaceKind,surfaceProvider:ctx.surfaceProvider,surfaceRecordId:ctx.surfaceRecordId}; const table=payload?.table||selectedSidePane?.entityName||ctx.currentTable||""; return load(ctx,table,!!payload?.force); })().catch(error=>({ok:false,error:error.message||String(error)}));
 }
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {

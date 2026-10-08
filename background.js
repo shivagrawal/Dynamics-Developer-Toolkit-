@@ -10,6 +10,17 @@ function pageBridge(action, payload) {
     "";
   const escapeOData = (value) => String(value ?? "").replace(/'/g, "''");
 
+  const requestedSurface=payload?.__devlensSurface||null;
+  const sidePane=()=>requestedSurface?.kind==="sidePane"&&requestedSurface?.entityName;
+  async function surfaceContext(requirements={}){if(!sidePane())return context(requirements);const gc=Xrm.Utility.getGlobalContext(),meta=await Xrm.Utility.getEntityMetadata(requestedSurface.entityName);return{entityName:requestedSurface.entityName,entitySetName:meta.EntitySetName||null,metadataId:clean(meta.MetadataId),formId:clean(requestedSurface.internal?.metadataForm?.id||requestedSurface.internal?.formId||requestedSurface.formId),formItem:null,recordId:clean(requestedSurface.recordId||requestedSurface.internal?.recordId),clientUrl:gc.getClientUrl(),environmentId:clean(gc.organizationSettings?.bapEnvironmentId),userId:clean(gc.userSettings?.userId),userName:gc.userSettings?.userName||"",languageId:gc.userSettings?.languageId,surface:requestedSurface};}
+  const listify=value=>Array.isArray(value)?value:value&&typeof value==="object"?Object.values(value):[];
+  const agentActionMap={logical:"showLogicalNames",clearLogical:"clearLogicalNames"};
+  function requestFormAgent(actionName,actionPayload={}){return new Promise(resolve=>{const requestId=`devlens-${Date.now()}-${Math.random().toString(36).slice(2)}`,timer=setTimeout(()=>{cleanup();resolve({ok:false,code:"SIDE_PANE_LIVE_RUNTIME_REQUIRED",error:"Live side-pane Form Agent did not respond.",provider:"form-agent"})},1500);const listener=event=>{if(event.source!==window||event.origin!==location.origin)return;const d=event.data;if(d?.source!=="DEVLENS_FORM_AGENT"||d?.type!=="COMMAND_RESPONSE"||d.requestId!==requestId)return;cleanup();resolve(d)};function cleanup(){clearTimeout(timer);window.removeEventListener("message",listener,true)}window.addEventListener("message",listener,true);window.postMessage({source:"DEVLENS_EXTENSION",type:"COMMAND_REQUEST",requestId,action:agentActionMap[actionName]||actionName,identity:{entityName:requestedSurface?.entityName||requestedSurface?.internal?.entityName,recordId:requestedSurface?.recordId||requestedSurface?.internal?.recordId,formId:requestedSurface?.internal?.metadataForm?.id||requestedSurface?.internal?.formId||requestedSurface?.formId},payload:actionPayload},location.origin)})}
+
+  const firstValue=(object,names,fallback="")=>{for(const name of names){const value=object?.[name];if(value!==undefined&&value!==null&&value!=="")return value}return fallback};
+  function normalizeLibraries(metadataForm){return listify(metadataForm?.formLibraries).map(item=>typeof item==="string"?item:firstValue(item,["LibraryName","libraryName","Name","name","WebResourceName","webResourceName"])) .filter(Boolean).filter((value,index,array)=>array.indexOf(value)===index);}
+  function normalizeEvents(metadataForm,entityName){return listify(metadataForm?.eventHandlers).map((handler,index)=>{const eventName=String(firstValue(handler,["EventName","eventName","EventType","eventType","Event","event","Type","type"],"INTERNAL")).toUpperCase().replace(/^ON/,"ON");const libraryName=firstValue(handler,["LibraryName","libraryName","WebResourceName","webResourceName","Library","library"]);const functionName=firstValue(handler,["FunctionName","functionName","Handler","handler","MethodName","methodName"]);const targetName=firstValue(handler,["AttributeName","attributeName","ControlName","controlName","TargetName","targetName"],entityName);const category=eventName.includes("CHANGE")?"FIELD":eventName.includes("TAB")||eventName.includes("EXPAND")||eventName.includes("COLLAPSE")?"TAB":eventName.includes("PROCESS")||eventName.includes("STAGE")?"BPF":"FORM";return{category,eventType:eventName,targetType:category==="FIELD"?"ATTRIBUTE":category,targetName,targetLabel:firstValue(handler,["TargetLabel","targetLabel"]),functionName,libraryName,enabled:firstValue(handler,["Enabled","enabled"],true)!==false,passExecutionContext:firstValue(handler,["PassExecutionContext","passExecutionContext"],false),parameters:firstValue(handler,["Parameters","parameters"],""),internal:false,source:"UCI Redux metadata.forms",eventIndex:index}}).filter(row=>row.functionName||row.libraryName);}
+  function internalFields(){const internal=requestedSurface?.internal,controls=internal?.form?.controls||{},cached=internal?.cachedEntity||{},rows=[];for(const [key,c] of Object.entries(controls)){const logical=c?.dataFieldName||c?.DataFieldName||c?.name||c?.Name||null;if(!logical)continue;const field=cached?.fields?.[logical]||cached?.[logical]||{};const value=field?.value??field?.Value??field;rows.push({displayName:c?.label||c?.Label||logical,logicalName:logical,attributeType:c?.attributeType||c?.AttributeType||"unknown",displayValue:field?.formattedValue??field?.FormattedValue??(value==null?"":String(value)),rawValue:value==null?"":typeof value==="object"?JSON.stringify(value):String(value),empty:value==null||value==="",visible:c?.visible??c?.Visible??true,hidden:(c?.visible??c?.Visible)===false,disabled:c?.disabled??c?.Disabled??false,readOnly:c?.disabled??c?.Disabled??false,dirty:field?.isDirty??field?.dirty??false,requiredLevel:c?.requiredLevel||c?.RequiredLevel||"unknown",submitMode:"internal-state",onForm:true,runtimeAvailable:true,metadataAvailable:false,metadataOnly:false,controlCount:1,multiControl:false,controlName:key,locations:[],inspectionSource:"UCI internal Redux state"})}return rows;}
   async function context(requirements = {}) {
     const { requireEntity = true, requireForm = true } = requirements;
     if (typeof Xrm === "undefined" || !Xrm.Utility?.getGlobalContext) throw Error("Xrm is unavailable in this frame.");
@@ -204,6 +215,7 @@ function pageBridge(action, payload) {
     return output;
   }
   async function report() {
+    if(sidePane()){const ctx=await surfaceContext({requireEntity:true,requireForm:false});const internal=requestedSurface.internal||{},metadataForm=internal.metadataForm||{};const rows=normalizeEvents(metadataForm,ctx.entityName),formLibraries=normalizeLibraries(metadataForm);for(const row of rows)if(row.libraryName&&!formLibraries.includes(row.libraryName))formLibraries.push(row.libraryName);return{ok:true,entityName:ctx.entityName,entitySetName:ctx.entitySetName,entityMetadataId:ctx.metadataId,environmentId:ctx.environmentId,formName:metadataForm.name||"Selected side-pane record",formId:ctx.formId||metadataForm.id,recordId:ctx.recordId,clientUrl:ctx.clientUrl,rows,formLibraries,generatedOn:new Date().toISOString(),surface:{...requestedSurface,internal:undefined},internalDiagnostics:{pageKey:internal.pageKey,controlCount:internal.form?.controlCount||0,eventHandlerCount:rows.length,formLibraryCount:formLibraries.length,metadataFormId:metadataForm.id||null,metadataFormKeys:metadataForm.keys||[],browsingContext:internal.browsingContext,commandContext:internal.commandContext}}}
     const ctx = await context();
     const form = await Xrm.WebApi.retrieveRecord(
       "systemform",
@@ -678,7 +690,7 @@ function pageBridge(action, payload) {
 
   function clearMetadataCache() { if(metadataCache.metadataIndexToken)metadataCache.metadataIndexToken.cancelled=true;metadataCache.tables=null;metadataCache.tablesPromise=null;metadataCache.globalChoices=null;metadataCache.globalChoicesPromise=null;metadataCache.globalChoiceUsage={usageByName:{},warnings:[],partial:false};metadataCache.attributeCatalog=null;metadataCache.metadataIndexPromise=null;metadataCache.metadataIndexToken=null;metadataCache.metadataIndexStatus={state:"idle",phase:"idle",completed:0,total:0,warnings:0,message:"",mode:"automatic"};metadataCache.entities.clear();metadataCache.entityPromises.clear();metadataCache.stringMaps.clear();metadataCache.stringMapPromises.clear();return{ok:true}; }
 
-  async function dirtyFieldState(){
+  async function dirtyFieldState(){if(sidePane())return{ok:true,entityName:requestedSurface.entityName,rows:internalFields(),surface:{...requestedSurface,internal:undefined}};
     const ctx=await context({requireEntity:true,requireForm:false}),rows=[];
     ctx.formContext.data.entity.attributes.forEach(attribute=>rows.push({logicalName:attribute.getName(),dirty:!!attribute.getIsDirty?.(),value:attribute.getValue?.(),text:attribute.getText?.(),formattedValue:attribute.getText?.()}));
     return{ok:true,entityName:ctx.entityName,rows};
@@ -712,7 +724,7 @@ function pageBridge(action, payload) {
     if(!empty){ if(type==="lookup"&&Array.isArray(value)){displayValue=value.map(x=>x?.name||x?.id||"").filter(Boolean).join(", ");rawValue=value.map(x=>`${x?.entityType||"lookup"}:${clean(x?.id)||""}`).join(", ");} else if(value instanceof Date){displayValue=value.toLocaleString();rawValue=value.toISOString();} else if(Array.isArray(value)){displayValue=Array.isArray(text)?text.join(", "):text||value.join(", ");rawValue=value.join(", ");} else {displayValue=text==null||text===""?String(value):String(text);rawValue=typeof value==="object"?JSON.stringify(value):String(value);} }
     return {displayValue,rawValue,empty};
   }
-  async function allFieldsReport() {
+  async function allFieldsReport() {if(sidePane()){const ctx=await surfaceContext({requireEntity:true,requireForm:false});let fields=internalFields();try{const meta=await metadataEntity(ctx.entityName);const map=new Map(fields.map(x=>[x.logicalName,x]));for(const col of meta.data?.columns||[]){const x=map.get(col.logicalName);if(x){x.displayName=col.displayName||x.displayName;x.schemaName=col.schemaName||"";x.attributeType=col.attributeType||x.attributeType;x.metadata=col;x.metadataAvailable=true}else fields.push({displayName:col.displayName||col.logicalName,logicalName:col.logicalName,schemaName:col.schemaName||"",attributeType:col.attributeType||col.metadataType||"unknown",displayValue:"",rawValue:"",empty:true,visible:false,hidden:true,disabled:false,readOnly:!col.validForUpdate,dirty:false,requiredLevel:col.requiredLevel||"none",submitMode:"n/a",onForm:false,runtimeAvailable:false,metadataAvailable:true,metadataOnly:true,controlCount:0,multiControl:false,locations:[],metadata:col})}}catch{}fields.sort((a,b)=>(a.displayName||a.logicalName).localeCompare(b.displayName||b.logicalName));return{ok:true,entityName:ctx.entityName,formName:"Selected side-pane record",formId:ctx.formId,recordId:ctx.recordId,fields,generatedOn:new Date().toISOString(),fieldModel:"uci-redux-metadata-merged",surface:{...requestedSurface,internal:undefined}}}
     const ctx=await context(), fields=[];
     Xrm.Page.data.entity.attributes.forEach(attribute=>{ const logicalName=attribute.getName?.()||"",controls=[];attribute.controls?.forEach?.(c=>controls.push(c));const primaryControl=controls[0]||Xrm.Page.getControl?.(logicalName)||null;
       const locations=controls.map(control=>{const section=control.getParent?.(),tab=section?.getParent?.();return {controlName:control.getName?.()||"",controlLabel:control.getLabel?.()||"",visible:control.getVisible?.()!==false,disabled:control.getDisabled?.()===true,sectionName:section?.getName?.()||"",sectionLabel:section?.getLabel?.()||section?.getName?.()||"",tabName:tab?.getName?.()||"",tabLabel:tab?.getLabel?.()||tab?.getName?.()||""};});
@@ -944,8 +956,19 @@ function pageBridge(action, payload) {
 
   async function tool(request) {
     const actionName = request.action;
-    const globalOnly = ["advancedFind", "maker", "searchUsers"].includes(actionName);
-    const ctx = await context(globalOnly ? { requireEntity: false, requireForm: false } : { requireEntity: true, requireForm: true });
+    const GLOBAL_CONTEXT_ACTIONS = ["advancedFind","maker","searchUsers","ribbon"];
+    const SELECTED_SURFACE_READ_ACTIONS = ["recordApi","formEditor","allFields","processes","listFields","choices"];
+    const LIVE_RUNTIME_MUTATION_ACTIONS = ["showFields","showTabs","focusField","logical","clearLogical","restore","god"];
+    const selectedPane = sidePane();
+    if (selectedPane && LIVE_RUNTIME_MUTATION_ACTIONS.includes(actionName)) return requestFormAgent(actionName,request);
+    if (selectedPane && actionName === "choices") { const live=await requestFormAgent("choices",request); if(live?.ok)return live; }
+    if (selectedPane && actionName === "listFields") { const live=await requestFormAgent("listFields",request); if(live?.ok)return live; }
+
+    const globalOnly = GLOBAL_CONTEXT_ACTIONS.includes(actionName);
+    const selectedRead = SELECTED_SURFACE_READ_ACTIONS.includes(actionName);
+    const ctx = selectedRead ? await surfaceContext({ requireEntity:true, requireForm:actionName === "formEditor" }) : await context(globalOnly ? { requireEntity:false, requireForm:false } : { requireEntity:true, requireForm:true });
+    if (selectedPane && actionName === "listFields") return {ok:true,data:internalFields().map(row=>({...row,provider:"uci-redux"})),provider:"uci-redux",entityName:ctx.entityName,recordId:ctx.recordId};
+    if (selectedPane && actionName === "choices") { const meta=await metadataEntity(ctx.entityName); const cached=requestedSurface?.internal?.cachedEntity||{}; const columns=(meta.data?.columns||[]).filter(column=>/picklist|multiselect|state|status|boolean/i.test(String(column.attributeType||column.metadataType||""))); return {ok:true,provider:"uci-redux",entityName:ctx.entityName,data:columns.map(column=>{const field=cached?.fields?.[column.logicalName]||cached?.[column.logicalName]||{};return{field:column.logicalName,type:column.attributeType||column.metadataType,value:field?.value??field?.Value??null,text:field?.formattedValue??field?.FormattedValue??null,options:column.options||column.optionSet?.options||[],provider:"uci-redux",valueEvidence:"cached internal state"}})}; }
     if (actionName === "recordApi")
       return ctx.recordId
         ? openUrl(
@@ -979,16 +1002,11 @@ function pageBridge(action, payload) {
         "Advanced Find opened.",
       );
     if (actionName === "formEditor") {
-      if (!ctx.environmentId || !ctx.formId)
-        return {
-          ok: false,
-          error: "Environment or current form ID could not be resolved.",
-        };
+      if (selectedPane && !ctx.formId) return {ok:false,error:"The selected side-pane form ID could not be resolved.",provider:ctx.surface?.internal?.provider||ctx.surface?.provider||"uci-redux",surfaceKind:"sidePane",entityName:ctx.entityName,formId:null};
+      if (!ctx.environmentId || !ctx.formId) return {ok:false,error:"Environment or current form ID could not be resolved."};
       const defaultSolutionId = "fd140aaf-4df4-11dd-bd17-0019b9312238";
-      return openUrl(
-        `https://make.powerapps.com/e/${ctx.environmentId}/s/${defaultSolutionId}/entity/${ctx.entityName}/form/edit/${ctx.formId}`,
-        `Form editor opened for ${ctx.entityName}.`,
-      );
+      const result=openUrl(`https://make.powerapps.com/e/${clean(ctx.environmentId)}/s/${defaultSolutionId}/entity/${ctx.entityName}/form/edit/${clean(ctx.formId)}`,`Form editor opened for ${ctx.entityName}.`);
+      return {...result,entityName:ctx.entityName,formId:clean(ctx.formId),provider:selectedPane?(ctx.surface?.internal?.provider||ctx.surface?.provider||"uci-redux"):"main-form-xrm",surfaceKind:selectedPane?"sidePane":"mainForm"};
     }
     if (actionName === "allFields") return allFields(ctx);
     if (actionName === "processes") return tableProcesses(ctx);
@@ -1202,7 +1220,7 @@ function pageBridge(action, payload) {
             : action === "metadataEntity"
               ? metadataEntity(payload?.logicalName)
               : action === "processExplorer"
-                ? context({ requireEntity: true, requireForm: false }).then((ctx) => processExplorer(ctx, !!payload?.force))
+                ? surfaceContext({ requireEntity: true, requireForm: false }).then((ctx) => processExplorer(ctx, !!payload?.force))
               : action === "tool"
                 ? tool(payload || {})
                 : Promise.resolve({ ok: false, error: "Unknown action" });

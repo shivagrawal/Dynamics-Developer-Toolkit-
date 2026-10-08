@@ -1,8 +1,8 @@
-(() => {
+﻿(() => {
   "use strict";
   if (window.__DEVLENS5101) return;
   window.__DEVLENS5101 = true;
-  const APP_VERSION = "5.20.1";
+  const APP_VERSION = "5.20.13.1";
   const APP_AUTHOR = "Shiv Agrawal";
 
   let host,
@@ -32,10 +32,30 @@
               ? "&quot;"
               : "&#39;",
     );
+  let activeSurfaceState={selectedSurface:null,panes:[]};
+  window.addEventListener("message",event=>{if(event.source!==window||event.origin!==location.origin)return;if(event.data?.source==="DEVLENS_SURFACE_BOOTSTRAP"&&event.data.type==="SURFACE_STATE"){const old=activeSurfaceState.selectedSurface?.surfaceId;activeSurfaceState=event.data.payload||{selectedSurface:null,panes:[]};if(visible&&old!==activeSurfaceState.selectedSurface?.surfaceId){report=null;scan=null;allFieldsData=null;window.D365ProcessView?.reset?.();void load(true)}}},true);
+  const activeSurfacePayload=()=>activeSurfaceState.selectedSurface||null;
+  function extractToolFields(response) {
+    if (Array.isArray(response?.fields)) return response.fields;
+    if (Array.isArray(response?.data)) return response.data;
+    if (Array.isArray(response?.data?.fields)) return response.data.fields;
+    return [];
+  }
+  function normalizeToolField(item) {
+    return {
+      ...item,
+      name: item?.name || item?.logicalName || "",
+      type: item?.type || item?.attributeType || "unknown",
+      required: item?.required ?? item?.requiredLevel ?? "unknown",
+      locations: Array.isArray(item?.locations) ? item.locations : []
+    };
+  }  const isFieldTarget = item => { const targetType=String(item?.targetType||"").trim().toLowerCase(); return targetType==="field"||targetType==="attribute"||String(item?.category||"").trim().toUpperCase()==="FIELD"; };
   const extensionUnavailable = () => !globalThis.chrome?.runtime?.id;
   const send = (action, payload = {}) => new Promise((resolve) => {
     if (extensionUnavailable()) { resolve({ ok:false, error:"Extension context was reloaded. Reload this Dynamics tab to reconnect DevLens." }); return; }
-    try { chrome.runtime.sendMessage({ type:"DEVLENS_ACTION", action, payload }, (response) => { const runtimeError=chrome.runtime?.lastError; resolve(response || { ok:false, error:runtimeError?.message || "DevLens received no extension response. Reload the Dynamics tab." }); }); }
+    try { chrome.runtime.sendMessage({ type:"DEVLENS_ACTION", action, payload:{...payload,__devlensSurface:activeSurfacePayload()} }, (response) => { const runtimeError=chrome.runtime?.lastError; if(response?.code === "SIDE_PANE_LIVE_RUNTIME_REQUIRED") response.error = "Selected side pane detected. Live runtime unavailable. The action was not applied to the parent form.";
+              if(response?.code === "SIDE_PANE_AGENT_IDENTITY_MISMATCH") response.error = "The live Form Agent context does not match the selected side-pane record. No form was modified.";
+              if(response?.provider) response.providerLabel={"form-agent":"Live side-pane Form Agent","uci-redux":"Internal UCI form-state inspection","dataverse-webapi":"Persisted Dataverse inspection","main-form-xrm":"Main-form Xrm runtime"}[response.provider]||response.provider; resolve(response || { ok:false, error:runtimeError?.message || "DevLens received no extension response. Reload the Dynamics tab." }); }); }
     catch(error) { resolve({ ok:false, error:error?.message || String(error) }); }
   });
 
@@ -192,7 +212,7 @@
       [...groups]
         .map(
           ([name, values], index) =>
-            `<details open class="eventGroup" data-group="${index}"><summary><b>${escapeHtml(name)}</b> · ${values.length} registration${values.length === 1 ? "" : "s"}</summary>${eventTable(values)}</details>`,
+            `<details open class="eventGroup" data-group="${index}"><summary><b>${escapeHtml(name)}</b> Â· ${values.length} registration${values.length === 1 ? "" : "s"}</summary>${eventTable(values)}</details>`,
         )
         .join("") || '<div class="muted">No matching events.</div>'
     );
@@ -237,6 +257,8 @@
       .forEach((item) =>
         (map[item.libraryName] ??= new Set()).add(item.functionName),
       );
+    for (const libraryName of report?.formLibraries || [])
+      map[libraryName] ??= new Set();
     const response = await send("scan", {
       libraries: Object.entries(map).map(([libraryName, functions]) => ({
         libraryName,
@@ -328,7 +350,7 @@
       byId("body").innerHTML = rows
         .map(
           (item, index) =>
-            `<div class="card link jsLibrary" data-i="${index}">${escapeHtml(item.libraryName)} · ${item.lineCount || 0} lines · ${item.definitions?.length || 0} definitions</div>`,
+            `<div class="card link jsLibrary" data-i="${index}">${escapeHtml(item.libraryName)} Â· ${item.lineCount || 0} lines Â· ${item.definitions?.length || 0} definitions</div>`,
         )
         .join("");
     else
@@ -388,7 +410,7 @@
           .join(" / "),
       )
       .join("<br>");
-    return `<article class="card fieldCard"><b>${escapeHtml(field.displayName || field.logicalName)}</b><div class="muted">${escapeHtml(field.logicalName)}${field.schemaName ? ` · ${escapeHtml(field.schemaName)}` : ""} · ${escapeHtml(field.attributeType)}</div><div class="fieldValue">${field.metadataOnly ? "(not available in runtime context)" : field.empty ? "(empty)" : escapeHtml(field.displayValue)}</div>${field.rawValue && field.rawValue !== field.displayValue ? `<div class="muted">Raw: ${escapeHtml(field.rawValue)}</div>` : ""}<div class="badges">${badges}</div><div class="locationList">${locations || "No bound form control."}</div><div class="muted">Required: ${escapeHtml(field.requiredLevel)} · Submit: ${escapeHtml(field.submitMode)} · Controls: ${field.controlCount}${field.metadata?.isGlobalChoice ? ` · Global Choice: ${escapeHtml(field.metadata.globalChoiceName || "Yes")}` : ""}</div><div class="fieldActions"><button class="b fieldAction" data-a="logical" data-i="${index}">Copy Logical</button>${field.schemaName ? `<button class="b fieldAction" data-a="schema" data-i="${index}">Copy Schema</button>` : ""}<button class="b fieldAction" data-a="value" data-i="${index}">Copy Value</button>${field.onForm ? `<button class="b fieldAction" data-a="focus" data-i="${index}">Highlight</button>` : ""}<button class="b fieldAction" data-a="metadata" data-i="${index}">Metadata</button><button class="b fieldAction" data-a="deps" data-i="${index}">Dependencies</button></div></article>`;
+    return `<article class="card fieldCard"><b>${escapeHtml(field.displayName || field.logicalName)}</b><div class="muted">${escapeHtml(field.logicalName)}${field.schemaName ? ` Â· ${escapeHtml(field.schemaName)}` : ""} Â· ${escapeHtml(field.attributeType)}</div><div class="fieldValue">${field.metadataOnly ? "(not available in runtime context)" : field.empty ? "(empty)" : escapeHtml(field.displayValue)}</div>${field.rawValue && field.rawValue !== field.displayValue ? `<div class="muted">Raw: ${escapeHtml(field.rawValue)}</div>` : ""}<div class="badges">${badges}</div><div class="locationList">${locations || "No bound form control."}</div><div class="muted">Required: ${escapeHtml(field.requiredLevel)} Â· Submit: ${escapeHtml(field.submitMode)} Â· Controls: ${field.controlCount}${field.metadata?.isGlobalChoice ? ` Â· Global Choice: ${escapeHtml(field.metadata.globalChoiceName || "Yes")}` : ""}</div><div class="fieldActions"><button class="b fieldAction" data-a="logical" data-i="${index}">Copy Logical</button>${field.schemaName ? `<button class="b fieldAction" data-a="schema" data-i="${index}">Copy Schema</button>` : ""}<button class="b fieldAction" data-a="value" data-i="${index}">Copy Value</button>${field.onForm ? `<button class="b fieldAction" data-a="focus" data-i="${index}">Highlight</button>` : ""}<button class="b fieldAction" data-a="metadata" data-i="${index}">Metadata</button><button class="b fieldAction" data-a="deps" data-i="${index}">Dependencies</button></div></article>`;
   }
   function renderFieldGroups(rows, key) {
     const groups = new Map();
@@ -414,7 +436,7 @@
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(
         ([n, fs]) =>
-          `<details open class="fieldGroup"><summary><b>${escapeHtml(n)}</b> · ${fs.length} fields</summary><div class="grid">${fs.map((f) => allFieldsCard(f, f.__index)).join("")}</div></details>`,
+          `<details open class="fieldGroup"><summary><b>${escapeHtml(n)}</b> Â· ${fs.length} fields</summary><div class="grid">${fs.map((f) => allFieldsCard(f, f.__index)).join("")}</div></details>`,
       )
       .join("");
   }
@@ -596,7 +618,7 @@
         );
       bindAllFieldsActions(byId("body"), all);
       byId("status").textContent =
-        `${summary.total} merged table fields · ${rows.length} shown · ${data.formName || data.entityName}.`;
+        `${summary.total} merged table fields Â· ${rows.length} shown Â· ${data.formName || data.entityName}.`;
     } catch (e) {
       byId("body").innerHTML =
         `<div class="bad">${escapeHtml(e.message || e)}</div>`;
@@ -669,7 +691,7 @@
   }
   function openField(name) {
     const rows = eventRows().filter(
-      (item) => item.targetType === "field" && item.targetName === name,
+      (item) => isFieldTarget(item) && item.targetName === name,
     );
     openDrawer(`Field: ${name}`, eventTable(rows), (root) =>
       bindEvents(rows, root),
@@ -712,7 +734,7 @@
       normalize = (item) => ({ enabled: item?.enabled ?? true, passExecutionContext: item?.passExecutionContext ?? true, parameters: item?.parameters ?? "", internal: item?.internal ?? false }),
       changed = [...mapB].filter(([key, value]) => mapA.has(key) && JSON.stringify(normalize(mapA.get(key))) !== JSON.stringify(normalize(value))).map(([key, after]) => ({ before: normalize(mapA.get(key)), after: normalize(after), event: after })),
       changedTable = `<table><thead><tr><th>Event</th><th>Target</th><th>Function</th><th>Library</th><th>Before Enabled</th><th>After Enabled</th><th>Before Execution Context</th><th>After Execution Context</th><th>Before Parameters</th><th>After Parameters</th></tr></thead><tbody>${changed.map((change) => `<tr><td>${escapeHtml(change.event.eventType)}</td><td>${escapeHtml(change.event.targetName)}</td><td>${escapeHtml(change.event.functionName)}</td><td>${escapeHtml(change.event.libraryName)}</td><td>${escapeHtml(change.before.enabled)}</td><td>${escapeHtml(change.after.enabled)}</td><td>${escapeHtml(change.before.passExecutionContext)}</td><td>${escapeHtml(change.after.passExecutionContext)}</td><td>${escapeHtml(change.before.parameters)}</td><td>${escapeHtml(change.after.parameters)}</td></tr>`).join("")}</tbody></table>`;
-    return `<div class="card">${escapeHtml(first.name)} to ${escapeHtml(second.name)} · Added ${added.length} · Removed ${removed.length} · Changed ${changed.length}</div><h3>Added</h3>${eventTable(added)}<h3>Removed</h3>${eventTable(removed)}<h3>Changed</h3>${changed.length ? changedTable : '<div class="muted">No changed handler settings.</div>'}`;
+    return `<div class="card">${escapeHtml(first.name)} to ${escapeHtml(second.name)} Â· Added ${added.length} Â· Removed ${removed.length} Â· Changed ${changed.length}</div><h3>Added</h3>${eventTable(added)}<h3>Removed</h3>${eventTable(removed)}<h3>Changed</h3>${changed.length ? changedTable : '<div class="muted">No changed handler settings.</div>'}`;
   }
 
   const toolkitSections = [
@@ -804,6 +826,11 @@
       name: "Administration",
       description: "Developer administration utilities.",
       tools: [
+        [
+          "Security and Audit Toolkit",
+          "securityAudit",
+          "Inspect user roles, table access, role privileges, roles by privilege, and record audit history.",
+        ],
         [
           "Impersonation",
           "impersonation",
@@ -904,7 +931,7 @@
       (sum, group) => sum + group.items.length,
       0,
     );
-    return `${data.impersonation ? `<div class="banner impersonating">Web API request executed as ${escapeHtml(data.impersonation.fullname || data.impersonation.domainname)}</div>` : ""}${data.warning ? `<div class="card warn">${escapeHtml(data.warning)}</div>` : ""}<div class="card">Current table: <b>${escapeHtml(data.entityName)}</b> · ${total} process records</div>${(data.groups || []).map((group, index) => `<details ${group.items.length ? "open" : ""}><summary><b>${escapeHtml(group.title)}</b><span class="processCount">${group.items.length}</span></summary>${group.items.length ? `<table><thead><tr><th>Name</th><th>Description / Unique Name</th><th>Modified</th><th></th></tr></thead><tbody>${group.items.map((item, itemIndex) => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.description || item.uniqueName || "")}</td><td>${escapeHtml(item.modifiedon || "")}</td><td><button class="b openProcess" data-g="${index}" data-i="${itemIndex}">Open</button></td></tr>`).join("")}</tbody></table>` : '<div class="muted">None found.</div>'}</details>`).join("")}`;
+    return `${data.impersonation ? `<div class="banner impersonating">Web API request executed as ${escapeHtml(data.impersonation.fullname || data.impersonation.domainname)}</div>` : ""}${data.warning ? `<div class="card warn">${escapeHtml(data.warning)}</div>` : ""}<div class="card">Current table: <b>${escapeHtml(data.entityName)}</b> Â· ${total} process records</div>${(data.groups || []).map((group, index) => `<details ${group.items.length ? "open" : ""}><summary><b>${escapeHtml(group.title)}</b><span class="processCount">${group.items.length}</span></summary>${group.items.length ? `<table><thead><tr><th>Name</th><th>Description / Unique Name</th><th>Modified</th><th></th></tr></thead><tbody>${group.items.map((item, itemIndex) => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.description || item.uniqueName || "")}</td><td>${escapeHtml(item.modifiedon || "")}</td><td><button class="b openProcess" data-g="${index}" data-i="${itemIndex}">Open</button></td></tr>`).join("")}</tbody></table>` : '<div class="muted">None found.</div>'}</details>`).join("")}`;
   }
   async function openProcesses() {
     byId("status").textContent = "Loading table processes...";
@@ -937,13 +964,22 @@
   }
 
   async function runTool(action) {
+    if (action === "securityAudit") {
+      if (typeof window.D365SecurityAuditView?.open !== "function") {
+        byId("status").textContent = "Security and Audit Toolkit is unavailable. Reload the Dynamics tab.";
+        return;
+      }
+      byId("status").textContent = "";
+      window.D365SecurityAuditView.open();
+      return;
+    }
     if (action === "allFields") return openAllFields();
     if (action === "processes") return openProcesses();
     if (action === "impact") {
       const fields = [
         ...new Set(
           eventRows()
-            .filter((item) => item.targetType === "field")
+            .filter((item) => isFieldTarget(item))
             .map((item) => item.targetName),
         ),
       ];
@@ -1044,7 +1080,7 @@
               .slice(0, 300)
               .map(
                 (item) =>
-                  `<button class="b makerTable" data-name="${escapeHtml(item.logicalName)}"><b>${escapeHtml(item.displayName || item.logicalName)}</b><br><span class="muted">${escapeHtml(item.logicalName)} · ${escapeHtml(item.schemaName)}</span></button>`,
+                  `<button class="b makerTable" data-name="${escapeHtml(item.logicalName)}"><b>${escapeHtml(item.displayName || item.logicalName)}</b><br><span class="muted">${escapeHtml(item.logicalName)} Â· ${escapeHtml(item.schemaName)}</span></button>`,
               )
               .join("");
           }
@@ -1123,7 +1159,7 @@
               "Current / Selected",
               "current",
               (value, row) =>
-                `${row.selected ? "Selected · " : ""}${value || ""}`,
+                `${row.selected ? "Selected Â· " : ""}${value || ""}`,
             ],
           ]),
       );
@@ -1166,7 +1202,7 @@
       ["Keyboard Shortcuts", `Alt+P: minimize or restore DevLens. Alt+Shift+D: open the Command Palette. Browser-managed extension shortcuts can be reviewed or reassigned from the browser extension shortcuts page if another extension or browser feature reserves the same combination.`],
       ["Safety and Privacy", `DevLens runs in the authenticated Dynamics context. It does not store passwords or access tokens. Form visibility, required-level, and disabled-state changes are temporary. Security and audit results depend on the current caller's Dataverse privileges.`],
     ];
-    return `<div class="card"><h2>Dynamics 365 & Dataverse DevLens</h2><p><b>Version ${APP_VERSION}</b></p><p>Developer diagnostics and investigation tools for Dynamics 365 model-driven apps and Microsoft Dataverse.</p><p><b>Author: ${escapeHtml(APP_AUTHOR)}</b></p></div>${sections.map(([title, description], index) => `<details ${index < 2 ? "open" : ""}><summary><b>${escapeHtml(title)}</b></summary><p>${description}</p></details>`).join("")}<div class="card muted">Dynamics 365 & Dataverse DevLens v${APP_VERSION} · Created by ${escapeHtml(APP_AUTHOR)}</div>`;
+    return `<div class="card"><h2>Dynamics 365 & Dataverse DevLens</h2><p><b>Version ${APP_VERSION}</b></p><p>Developer diagnostics and investigation tools for Dynamics 365 model-driven apps and Microsoft Dataverse.</p><p><b>Author: ${escapeHtml(APP_AUTHOR)}</b></p></div>${sections.map(([title, description], index) => `<details ${index < 2 ? "open" : ""}><summary><b>${escapeHtml(title)}</b></summary><p>${description}</p></details>`).join("")}<div class="card muted">Dynamics 365 & Dataverse DevLens v${APP_VERSION} Â· Created by ${escapeHtml(APP_AUTHOR)}</div>`;
   }
   async function render() {
     configure();
@@ -1230,7 +1266,7 @@
         ? bindGroupedEvents(rows, "targetName")
         : bindEvents(rows);
       byId("status").textContent =
-        `${allRows.length} registrations cached · ${rows.length} shown.`;
+        `${allRows.length} registrations cached Â· ${rows.length} shown.`;
     } else if (view === "js") await renderJavaScript();
     else if (view === "fields") await renderAllFields();
     else if (view === "snapshots") {
@@ -1281,9 +1317,8 @@
       report = response;
       scan = null;
       allFieldsData = null;
-      byId("context").textContent =
-        `${response.entityName} · ${response.formName}`;
-      byId("status").textContent = "";
+      byId("context").textContent=`${response.entityName} Â· ${response.formName}`;
+      byId("status").textContent=response.surface?.kind==="sidePane"?`Side pane Â· ${response.surface.mode==="internal"?"Internal UCI form-state inspection":"Persisted inspection"}`:"";
       warmSecondaryExplorers();ensureDirtyPolling();
       return render();
     }
@@ -1292,13 +1327,31 @@
     scan = null;
     allFieldsData = null;
     byId("context").textContent = shell.ok
-      ? "Dynamics context · no record form"
+      ? "Dynamics context Â· no record form"
       : "Dynamics context unavailable";
     byId("status").textContent = response.error;
     render();
   }
   let dirtyPollTimer=null,dirtyPollBusy=false;
-  async function pollDirtyFields(){if(dirtyPollBusy||view!=="fields"||!allFieldsData)return;dirtyPollBusy=true;try{const state=await send("dirtyFieldState");if(!state?.ok)return;const map=new Map((state.rows||[]).map(x=>[String(x.logicalName).toLowerCase(),x]));let changed=false;for(const field of allFieldsData.fields||[]){const live=map.get(String(field.logicalName).toLowerCase());if(!live)continue;if(field.dirty!==live.dirty){field.dirty=live.dirty;changed=true}if(JSON.stringify(field.value)!==JSON.stringify(live.value)){field.value=live.value;field.formattedValue=live.formattedValue;field.empty=live.value==null||live.value==="";changed=true}}if(changed)await renderFields()}finally{dirtyPollBusy=false}}
+  async function pollDirtyFields(){
+    if(dirtyPollBusy||view!=="fields"||!allFieldsData||!Array.isArray(allFieldsData.fields))return;
+    dirtyPollBusy=true;
+    try{
+      const state=await send("dirtyFieldState");
+      if(!state?.ok||!Array.isArray(state.rows))return;
+      const map=new Map(state.rows.filter(x=>x?.logicalName).map(x=>[String(x.logicalName).toLowerCase(),x]));
+      let changed=false;
+      for(const field of allFieldsData.fields){
+        if(!field?.logicalName)continue;
+        const live=map.get(String(field.logicalName).toLowerCase());
+        if(!live)continue;
+        if(field.dirty!==live.dirty){field.dirty=live.dirty;changed=true}
+        if(JSON.stringify(field.value)!==JSON.stringify(live.value)){field.value=live.value;field.formattedValue=live.formattedValue;field.empty=live.value==null||live.value==="";changed=true}
+      }
+      if(changed)await renderAllFields();
+    }catch(error){console.warn("[DevLens] dirty polling failed",error)}
+    finally{dirtyPollBusy=false}
+  }
   function ensureDirtyPolling(){if(dirtyPollTimer)return;dirtyPollTimer=setInterval(()=>void pollDirtyFields(),700)}
   function warmSecondaryExplorers(){void ensureScan().catch(()=>{});void send("processExplorer",{force:false}).catch(()=>{})}
   function saveFile(name, blob) {
@@ -1348,6 +1401,7 @@
     escape: escapeHtml,
     send,
     getReport: () => structuredClone(report),
+    getActiveSurface: () => { const surface=activeSurfacePayload(); return surface ? structuredClone(surface) : null; },
     getJavaScriptScan: async () => structuredClone(await ensureScan()),
     openDrawer,
     openLibrary,
@@ -1361,3 +1415,4 @@
   });
   void send("startMetadataIndex", { mode: "automatic" });
 })();
+
