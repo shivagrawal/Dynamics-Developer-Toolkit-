@@ -19,7 +19,7 @@ function createBridge() {
     if (path.startsWith("systemusers?fetchXml=")) {
       body = { value: [{ systemuserid: USER_ID, fullname: "USD8 Test User" }] };
     } else if (path.startsWith("roles?fetchXml=")) {
-      body = { value: [{ roleid: ROLE_ID, name: "Sales Representative", _parentrootroleid_value: ROLE_ID, "bu.name": "Sales BU" }] };
+      body = { value: [{ roleid: ROLE_ID, name: "Sales Representative", _parentrootroleid_value: ROLE_ID, "bu.name": "Sales BU", "SU.fullname": "USD8 Test User", "SU.systemuserid": USER_ID, "BU.name": "Sales BU" }] };
     } else if (path.startsWith("privileges?fetchXml=")) {
       body = { value: [{ name: "prvReadSalesOrder" }, { name: "prvWriteSalesOrder" }, { name: "prvReadSalesOrder" }] };
     } else if (path.startsWith("systemuserrolescollection?fetchXml=")) {
@@ -93,6 +93,8 @@ test("security query 1 returns role membership and business unit", async () => {
   const result = await createBridge().run(queries.userRoles);
   assert.equal(result.ok, true);
   assert.deepEqual(JSON.parse(JSON.stringify(result.columns)), ["fullname", "systemuserid", "role_name", "role_businessunit"]);
+  assert.equal(result.rows[0].fullname, "USD8 Test User");
+  assert.equal(result.rows[0].systemuserid, USER_ID);
   assert.equal(result.rows[0].role_name, "Sales Representative");
   assert.equal(result.rows[0].role_businessunit, "Sales BU");
 });
