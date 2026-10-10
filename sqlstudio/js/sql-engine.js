@@ -12,7 +12,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  const KEYWORDS = new Set(("SELECT DISTINCT TOP FROM WHERE ORDER BY GROUP HAVING ASC DESC AS INNER LEFT JOIN ON AND OR IS NULL NOT LIKE IN").split(/\s+/));
+  const KEYWORDS = new Set(("SELECT DISTINCT TOP FROM WHERE ORDER BY GROUP HAVING ASC DESC AS INNER LEFT JOIN ON AND OR IS NULL NOT LIKE IN BETWEEN").split(/\s+/));
   const OPS = { "=": "eq", "!=": "ne", "<>": "ne", ">": "gt", ">=": "ge", "<": "lt", "<=": "le" };
 
   function tokenize(sql) {
@@ -107,6 +107,13 @@
         const field=qualified();
         if (peek("IS")) { take(); const not=!!(peek("NOT")&&take()); expect("NULL"); return {type:"null",field,not}; }
         let not=false; if (peek("NOT")) { take(); not=true; }
+        if (peek("BETWEEN")) {
+          take();
+          if (not) fail("NOT BETWEEN is not supported in this engine version.");
+          const lower = literal(); expect("AND"); const upper = literal();
+          if (lower.type === "null" || upper.type === "null") fail("BETWEEN bounds cannot be NULL.");
+          return {type:"between",field,lower,upper};
+        }
         if (peek("IN")) { take(); expect("("); const values=[]; do { values.push(literal()); if(!peek(","))break; take(); } while(true); expect(")"); if(not) fail("NOT IN is not supported in this engine version."); if(values.some(value=>value.type==="null")) fail("NULL values in IN lists are not supported; handle NULL explicitly."); return {type:"in",field,values}; }
         if (peek("LIKE")) { take(); if(not) fail("NOT LIKE is not supported in this engine version."); const value=literal(); if(value.type!=="string") fail("LIKE requires a string literal."); return {type:"like",field,value:value.value}; }
         const op=take(); if (!OPS[op.value]) fail("Unsupported WHERE operator '" + op.value + "'.");
@@ -163,6 +170,7 @@
     const entity=field.entityAlias?' entityname="'+escapeXml(field.entityAlias)+'"':'';
     if(node.type==="null") return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-null":"null")+'"'+entity+'/>';
     if(node.type==="in") return '<condition attribute="'+escapeXml(field.name)+'" operator="in"'+entity+'>'+node.values.map(v=>'<value>'+escapeXml(valueXml(v))+'</value>').join("")+'</condition>';
+    if(node.type==="between") return '<condition attribute="'+escapeXml(field.name)+'" operator="between"'+entity+'><value>'+escapeXml(valueXml(node.lower))+'</value><value>'+escapeXml(valueXml(node.upper))+'</value></condition>';
     if(node.type==="like") {
       const pattern=node.value;
       const value=pattern.replace(/\\%/g,"%").replace(/\\_/g,"_");
