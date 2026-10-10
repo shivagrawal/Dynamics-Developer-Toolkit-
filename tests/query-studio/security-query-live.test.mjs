@@ -176,7 +176,7 @@ for (let index = 0; index < queries.length; index++) {
       for (const name of names) assert.ok(name.startsWith("prv"), "Privilege projection contains a malformed privilege name.");
     }
     if (index === 2 || index === 3) {
-      for (const row of result.rows) assert.match(String(row.depth), /^(User|Business Unit|Parent:Child BU|Organization|\\d+)$/, "Privilege depth CASE mapping is invalid.");
+      for (const row of result.rows) assert.match(String(row.depth), /^(User|Business Unit|Parent:Child BU|Organization|\d+)$/, "Privilege depth CASE mapping is invalid.");
     }
     if (index === 4) {
       const accessLevels = new Set(["User", "Business Unit", "Parent:Child BU", "Organization", "None"]);
