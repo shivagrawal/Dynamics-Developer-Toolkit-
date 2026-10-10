@@ -17,8 +17,8 @@ test("SELECT parser splits projections only at top level", () => {
   assert.deepEqual(p.projection, ["c.fullname", "COALESCE ( c.emailaddress1 , 'x,y' ) AS email"]);
   assert.equal(p.table, "contact");
   assert.equal(p.alias, "c");
-  assert.equal(p.clauses.WHERE, "c . statecode = 0");
-  assert.equal(p.clauses["ORDER BY"], "c . fullname");
+  assert.equal(p.clauses.WHERE, "c.statecode = 0");
+  assert.equal(p.clauses["ORDER BY"], "c.fullname");
 });
 
 test("completion context resolves table aliases to logical tables", () => {
