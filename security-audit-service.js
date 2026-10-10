@@ -494,9 +494,26 @@ function devLensSecurityAuditBridge(action, p) {
     }
   }
 
+  function maskSqlStringLiterals(sql) {
+    let output = "", inString = false;
+    for (let i = 0; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (inString) {
+        if (ch === "'" && next === "'") { output += "  "; i++; }
+        else if (ch === "'") { output += " "; inString = false; }
+        else output += ch === "\n" || ch === "\r" ? ch : " ";
+        continue;
+      }
+      if (ch === "'") { inString = true; output += " "; continue; }
+      output += ch;
+    }
+    return output;
+  }
+
   function assertSqlShape(sql, shape, requirements) {
+    const structure = maskSqlStringLiterals(sql);
     for (const [pattern, description] of requirements) {
-      if (!pattern.test(sql)) throw Error("Unsupported SQL structure for " + shape + ": expected " + description + ".");
+      if (!pattern.test(structure)) throw Error("Unsupported SQL structure for " + shape + ": expected " + description + ".");
     }
   }
   function roleAccessProjectionExpressions() {
