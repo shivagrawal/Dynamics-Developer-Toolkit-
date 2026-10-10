@@ -809,8 +809,8 @@ function pageBridge(action, payload) {
     if (!Number.isInteger(offset) || offset < 0 || offset >= 10000) return { ok: false, error: "OFFSET must be an integer from 0 to 9999." };
     if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 5000 || offset + limit > 10000)) return { ok: false, error: "FETCH NEXT must be an integer from 1 to 5000 and fit within the 10,000-row safety cap." };
     if (hasTop && (offset > 0 || limit !== null)) return { ok: false, error: "TOP cannot be combined with OFFSET/FETCH." };
-    const pageSize = 500;
-    const maxPages = 20;
+    const pageSize = limit !== null ? Math.min(500, Math.max(1, offset + limit)) : 500;
+    const maxPages = Math.ceil(10000 / pageSize);
     const escapeXmlAttribute = value => String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
     const setFetchAttribute = (xml, name, value) => {
       const match = xml.match(/<fetch\b([^>]*)>/i);
