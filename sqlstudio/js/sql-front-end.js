@@ -100,7 +100,7 @@
       if (out && !out.endsWith(" ")) out += " ";
       out += v;
     }
-    return out.replace(/\\s+/g, " ");
+    return out.replace(/\s+/g, " ");
   }
 
   function parseSelect(sql) {
