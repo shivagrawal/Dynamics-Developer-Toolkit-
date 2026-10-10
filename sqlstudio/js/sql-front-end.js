@@ -136,11 +136,15 @@
   }
 
   function completionContext(sql, cursor) {
-    sql = String(sql || ""); cursor = Math.max(0, Math.min(Number.isFinite(cursor) ? cursor : sql.length, sql.length));
+    sql = String(sql || "");
+    cursor = Math.max(0, Math.min(Number.isFinite(cursor) ? cursor : sql.length, sql.length));
     const before = sql.slice(0, cursor);
-    const tokens = significant(tokenize(before));
-    const tail = tokens[tokens.length - 1];
-    if (tail && (tail.type === "string" || tail.type === "comment") && tail.end === cursor) return { kind: "none", reason: tail.type };
+    const rawTokens = tokenize(before);
+    const rawTail = rawTokens[rawTokens.length - 1];
+    if (rawTail && (rawTail.type === "string" || rawTail.type === "comment") && rawTail.end === cursor) {
+      return { kind: "none", reason: rawTail.type };
+    }
+    const tokens = significant(rawTokens);
     let depth = 0, lastClause = null, lastTable = null, aliasMap = {};
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i], u = t.value.toUpperCase();
@@ -159,9 +163,8 @@
     }
     const last = tokens[tokens.length - 1];
     const prefix = last && last.end === cursor && ["word","keyword","quotedIdentifier"].includes(last.type) ? unquoteIdentifier(last.value) : "";
-    if (last && last.end === cursor && ["string","comment"].includes(last.type)) return { kind: "none", reason: last.type, prefix };
     if (!lastClause || lastClause === "FROM" || lastClause === "JOIN" || lastClause === "INTO") return { kind: "table", prefix, aliases: aliasMap };
-    if (lastClause === "SELECT" || lastClause === "WHERE" || lastClause === "ON" || lastClause === "SET" || lastClause === "ORDER" || lastClause === "GROUP" || lastClause === "HAVING") {
+    if (["SELECT","WHERE","ON","SET","ORDER","GROUP","HAVING"].includes(lastClause)) {
       const dot = prefix.lastIndexOf(".");
       if (dot > 0) {
         const qualifier = prefix.slice(0, dot).toLowerCase();
