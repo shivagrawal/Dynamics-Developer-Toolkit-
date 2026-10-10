@@ -117,6 +117,8 @@
     if (peek(";")) take();
     if (p !== tokens.length) fail("Unsupported SQL syntax near '" + tokens[p].value + "'.");
     if (columns.some(c=>c.star) && columns.length>1) fail("SELECT * cannot be combined with individual columns in this engine version.");
+    const aliases = [baseAlias.toLowerCase(), ...joins.map(join => join.alias.toLowerCase())];
+    if (new Set(aliases).size !== aliases.length) fail("Table aliases must be unique within a query.");
     return {type:"select",table,alias:baseAlias,columns,distinct,top,where,orderBy,joins};
   }
 
