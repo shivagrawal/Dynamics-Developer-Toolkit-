@@ -324,4 +324,30 @@ test("alias normalization preserves ordinary fields while dropping annotations",
   assert.equal(result.rows[0]["a.name"], "Contoso");
   assert.equal(Object.keys(result.rows[0]).some((key) => key.includes("@")), false);
 });
+test("SELECT * exposes the columns Dataverse reports in response metadata", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#contacts(contactid,fullname,_parentcustomerid_value)",
+      value: [{
+        contactid: "contact-guid",
+        fullname: "Test Contact",
+        _parentcustomerid_value: null,
+        "fullname@OData.Community.Display.V1.FormattedValue": "Test Contact",
+      }],
+    },
+  });
+  const { result, requestedUrl } = await harness.runQuery("SELECT * FROM contact");
+  assert.equal(result.ok, true);
+  assert.ok(Array.from(result.columns).includes("contactid"));
+  assert.ok(Array.from(result.columns).includes("fullname"));
+  assert.equal(Object.keys(result.rows[0]).some((key) => key.includes("@")), false);
+  assert.match(requestedUrl, /sql=SELECT\+\*\+FROM\+contact/i);
+});
+
+test("SELECT * still fails closed if Dataverse provides no verifiable projection metadata", async () => {
+  const harness = createHarness({ response: { value: [{ fullname: "Unverified" }] } });
+  const { result } = await harness.runQuery("SELECT * FROM contact");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /verifiable SQL result projection/i);
+});
 
