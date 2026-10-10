@@ -869,7 +869,7 @@ function pageBridge(action, payload) {
       }
       return cleanRow;
     });
-    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, rowsFetched: entities.length, pagesFetched, moreRecords };
+    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, rowsFetched: entities.length, pagesFetched, moreRecords: hasTop || limit !== null ? false : moreRecords };
   }
 
   async function querySqlReadOnly(sql) {
