@@ -387,7 +387,7 @@
       const response = await api.send("queryFetchXml", { tableName: plan.table, fetchXml: compiled.fetchXml });
       if (!response?.ok) throw new Error(response?.error || "Compiled FetchXML execution failed.");
       const sourceRows = response.rows || [];
-      const projections = plan.columns.some(column => column.star)
+      const projections = compiled.resultColumns || (plan.columns.some(column => column.star)
         ? metadata.entities[plan.table].columns.filter(column => column.queryable).map(column => ({label: column.logicalName, key: column.logicalName}))
         : plan.columns.map(column => {
             const label = column.alias || (column.tableAlias ? column.tableAlias + "." : "") + column.column;
@@ -395,7 +395,7 @@
               ? column.tableAlias + "_" + column.column
               : column.column);
             return { label, key };
-          });
+          }));
       const columns = [...new Set(projections.map(p => p.label))];
       const rows = sourceRows.map(row => {
         const output = {};
