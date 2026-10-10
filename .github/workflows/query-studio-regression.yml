@@ -35,4 +35,4 @@ jobs:
           node -e "JSON.parse(require('node:fs').readFileSync('manifest.json', 'utf8'))"
 
       - name: Run Query Studio regression suite
-        run: node --test tests/query-studio/*.test.mjs
+        run: node --test tests/query-studio/sql-engine.test.mjs tests/query-studio/sql-front-end.test.mjs tests/query-studio/query-studio-regression.test.mjs
