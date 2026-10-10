@@ -23,7 +23,7 @@ function createBridge(options = {}) {
       const roleRow = { roleid: ROLE_ID, name: "Sales Representative", _parentrootroleid_value: ROLE_ID, "bu.name": "Sales BU", "SU.fullname": "USD8 Test User", "SU.systemuserid": USER_ID, "BU.name": "Sales BU" };
       body = { value: options.bulkRoles ? Array.from({ length: 5000 }, () => ({ ...roleRow })) : options.duplicateRoles ? [roleRow, { ...roleRow }] : [roleRow] };
     } else if (path.startsWith("privileges?fetchXml=")) {
-      body = { value: [{ name: "prvReadSalesOrder" }, { name: "prvWriteSalesOrder" }, { name: options.caseVariantPrivileges ? "PRVREADSALESORDER" : "prvReadSalesOrder" }] };
+      body = { value: [{ name: "prvReadSalesOrder" }, { name: "prvWriteSalesOrder" }, { name: options.accentVariantPrivileges ? "prvReadSálesOrder" : options.caseVariantPrivileges ? "PRVREADSALESORDER" : "prvReadSalesOrder" }] };
     } else if (path.startsWith("systemuserrolescollection?fetchXml=")) {
       body = { value: [{ "su.fullname": "USD8 Test User", "ur.roleid": ROLE_ID, "ur.name": "Sales Representative", "bu.name": "Sales BU", "p.privilegeid": "44444444-4444-4444-8444-444444444444", "p.name": "prvReadQuote", "rp.privilegedepthmask": options.userDepthMask ?? 8, "e.logicalname": "quote" }] };
     } else if (path.startsWith("roleprivilegescollection?fetchXml=")) {
@@ -307,6 +307,13 @@ test("DISTINCT inside a string literal does not alter query result deduplication
 
 test("DISTINCT uses case-insensitive Dataverse string collation", async () => {
   const result = await createBridge({ caseVariantPrivileges: true }).run(queries.privileges);
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.rows.map(row => row.privilege_name))), ["prvReadSalesOrder", "prvWriteSalesOrder"]);
+});
+
+test("DISTINCT normalizes accented strings for Dataverse-style collation", async () => {
+  const result = await createBridge({ accentVariantPrivileges: true }).run(queries.privileges);
   assert.equal(result.ok, true);
   assert.equal(result.rows.length, 2);
   assert.deepEqual(JSON.parse(JSON.stringify(result.rows.map(row => row.privilege_name))), ["prvReadSalesOrder", "prvWriteSalesOrder"]);
