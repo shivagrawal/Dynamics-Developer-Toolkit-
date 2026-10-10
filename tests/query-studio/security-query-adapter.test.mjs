@@ -159,6 +159,26 @@ test("security query 6 expands audit details to one row per changed attribute", 
   assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")));
 });
 
+test("string literals cannot impersonate missing join structure", async () => {
+  const bridge = createBridge();
+  const sql = queries.userRoles
+    .replace("INNER JOIN Role AS R ON SUR.roleid = R.roleid INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid", "")
+    .replace("'%USD8%'", "'%JOIN Role AS R ON SUR.roleid = R.roleid INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid%'");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Unsupported SQL structure/);
+  assert.equal(bridge.calls.length, 0);
+});
+
+test("audit adapter rejects an incorrect OPENJSON field mapping", async () => {
+  const bridge = createBridge();
+  const sql = queries.audit.replace("$.oldValue", "$.previousValue");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /must map logicalName, oldValue, and newValue/);
+  assert.equal(bridge.calls.length, 0);
+});
+
 test("string literals cannot impersonate required SQL projection expressions", async () => {
   const bridge = createBridge();
   const sql = queries.audit.replace("a.createdon,", "'a.createdon' AS createdon,");
