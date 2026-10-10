@@ -32,7 +32,11 @@
   };
   let host = null;
 
-  function isQueryableColumn(column) {\n    return column?.validForRead !== false && String(column?.attributeType || "").toLowerCase() !== "virtual";\n  }\n\n  function schemaExplorerHtml() {
+  function isQueryableColumn(column) {
+    return column?.validForRead !== false && String(column?.attributeType || "").toLowerCase() !== "virtual";
+  }
+
+  function schemaExplorerHtml() {
     if (!state.schemaOpen) return "";
     const tableMatches = state.tables.filter(table =>
       [table.displayName, table.logicalName, table.schemaName].join(" ").toLowerCase().includes(state.tableFilter.toLowerCase())
@@ -79,7 +83,7 @@
       (tableMeta ? '<div class="ss-schema-table-meta"><code>' + esc(tableMeta.logicalName) + '</code> · ' + esc(tableMeta.columns.length) + ' columns · ' + esc(tableMeta.entitySetName || '') + '</div>' : '<div class="ss-empty">Select a table to inspect its columns.</div>') +
       (state.columnsError ? '<div class="ss-status ss-error">' + esc(state.columnsError) + '</div>' : '') +
       (tableMeta ? '<input class="ss-schema-search" data-schema-filter="columns" value="' + esc(state.columnFilter) + '" placeholder="Search columns or data types…">' +
-      '<div class="ss-schema-actions"><button class="ss-btn" data-act="selectVisibleColumns">Select visible</button><button class="ss-btn" data-act="clearSelectedColumns">Clear selection</button><button class="ss-btn" data-act="insertSelected" ' + (!state.selectedColumns.length ? 'disabled' : '') + '>Insert selected</button><button class="ss-btn primary" data-act="generateSelect" ' + (!state.selectedColumns.length ? 'disabled' : '') + '>Generate SELECT</button><button class="ss-btn" data-act="generateAllSelect">Generate all readable</button></div>' +
+      '<div class="ss-schema-actions"><button class="ss-btn" data-act="selectVisibleColumns">Select visible</button><button class="ss-btn" data-act="clearSelectedColumns">Clear selection</button><button class="ss-btn" data-act="insertSelected" ' + (!state.selectedColumns.length ? 'disabled' : '') + '>Insert selected</button><button class="ss-btn primary" data-act="generateSelect" ' + (!state.selectedColumns.length ? 'disabled' : '') + '>Generate SELECT</button><button class="ss-btn" data-act="generateAllSelect">Generate SELECT *</button></div>' +
       '<div class="ss-schema-list ss-schema-columns">' + (state.columnsLoading ? '<div class="ss-empty">Loading columns…</div>' : columnRows || '<div class="ss-empty">No matching columns.</div>') + '</div>' +
       '<div class="ss-meta">Selected ' + state.selectedColumns.length + ' · Click a column checkbox, then insert it or generate a query.</div>' : '') +
       '</div></div></section>';
@@ -263,8 +267,16 @@
 
   function generateSelect(allReadable) {
     const columns = state.tableMeta?.columns || [];
-    const names = (allReadable ? columns.filter(column => column.validForRead !== false) :
-      columns.filter(column => state.selectedColumns.includes(column.logicalName) && column.validForRead !== false))
+    if (allReadable) {
+      if (!state.tableMeta) { state.schemaError = "Select a table first."; render(); return; }
+      state.sql = "SELECT TOP 100 *\\nFROM " + state.tableMeta.logicalName + ";";
+      state.editorSelectionStart = state.editorSelectionEnd = 0;
+      state.error = ""; state.results = null; state.status = "SELECT * generated"; render();
+      const editor = host?.querySelector(".ss-editor");
+      if (editor) { editor.focus(); editor.setSelectionRange(0, 0); }
+      return;
+    }
+    const names = columns.filter(column => state.selectedColumns.includes(column.logicalName) && isQueryableColumn(column))
       .map(column => column.logicalName);
     if (!state.tableMeta || !names.length) {
       state.schemaError = allReadable ? "No readable columns were returned for this table." : "Select at least one readable column first.";
