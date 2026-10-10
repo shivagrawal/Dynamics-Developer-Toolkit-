@@ -879,8 +879,7 @@ function pageBridge(action, payload) {
         const backing = "_" + column + "_value";
         const hasContextBacking = contextColumns?.some(name => name.toLowerCase() === backing);
         const hasRowBacking = rows.some(row => Object.prototype.hasOwnProperty.call(row, backing));
-        const hasNavigationExpansion = new RegExp("(?:^|[,(])\\s*" + column + "_[A-Za-z0-9_]*\\s*\\(", "i")
-          .test(result["@odata.context"] || "");
+        const hasNavigationExpansion = (result["@odata.context"] || "").toLowerCase().includes(column.toLowerCase() + "_");
         if (hasContextBacking && hasRowBacking && hasNavigationExpansion && !expectedProjection.includes(backing)) {
           projectedLookupBackings.add(backing);
           for (const row of rows) {
