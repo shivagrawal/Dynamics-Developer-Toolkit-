@@ -276,7 +276,6 @@ test("live audit adapter expands a disposable record's actual audited attribute 
     const query = queries[5].replace("bb20fca4-e8a2-f111-b8db-7c1e5280e98a", accountId);
     const result = await bridge.run(query);
     assert.equal(result.ok, true, "Audit adapter failed for the temporary record: " + (result.error || "unknown error"));
-    assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")), "Audit details API was not called.");
     const descriptionChange = result.rows.find(row => row.logicalname === "description" &&
       String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     if (!descriptionChange) {
@@ -287,6 +286,7 @@ test("live audit adapter expands a disposable record's actual audited attribute 
       }
       assert.ok(descriptionChange, "Audit details were returned but the known description change was not reconstructed.");
     }
+    assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")), "Audit details API was not called.");
     console.log("Live disposable audit fixture: PASS; audit attribute rows=" + result.rowCount);
   } finally {
     if (accountId) await bridge.request("DELETE", "accounts(" + accountId + ")");
