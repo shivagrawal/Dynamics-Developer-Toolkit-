@@ -696,6 +696,38 @@ function pageBridge(action, payload) {
     return{ok:true,entityName:ctx.entityName,rows};
   }
   async function shellContext() { const ctx=await context({requireEntity:false,requireForm:false}); return {ok:true,clientUrl:ctx.clientUrl,environmentId:ctx.environmentId,currentUser:{id:ctx.userId,name:ctx.userName}}; }
+  async function querySqlReadOnly(sql) {
+    if (typeof sql !== "string" || !sql.trim()) return { ok: false, error: "Enter a SELECT query." };
+    if (sql.length > 100000) return { ok: false, error: "Query exceeds the 100,000 character limit." };
+    const query = sql.trim();
+    if (!/^SELECT\b/i.test(query)) return { ok: false, error: "Read-only mode accepts SELECT statements only." };
+    if (/;\s*\S/.test(query.replace(/;\s*$/, ""))) return { ok: false, error: "Run one SELECT statement at a time." };
+    // The Dataverse SQL endpoint enforces its own supported syntax and read-only semantics.
+    // Resolve the first FROM table to its EntitySetName; logical names are not always plural names.
+    const match = query.match(/\bFROM\s+((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)/i);
+    if (!match) return { ok: false, error: "Could not identify the base table after FROM." };
+    const tableName = match[1].split(".").pop().replace(/^[\[\"]|[\]\"]$/g, "");
+    const ctx = await context({ requireEntity: false, requireForm: false });
+    const metadata = await Xrm.Utility.getEntityMetadata(tableName);
+    if (!metadata?.EntitySetName) return { ok: false, error: "Dataverse did not return an entity set for " + tableName + "." };
+    const endpoint = new URL("/api/data/v9.2/" + metadata.EntitySetName, ctx.clientUrl);
+    endpoint.searchParams.set("sql", query);
+    const result = await fetchJson(endpoint.toString(), {
+      method: "GET",
+      headers: { Prefer: 'odata.include-annotations="*"' },
+      cache: "no-store"
+    });
+    return {
+      ok: true,
+      clientUrl: ctx.clientUrl,
+      environmentId: ctx.environmentId,
+      currentUser: { id: ctx.userId, name: ctx.userName },
+      columns: [...new Set((result.value || []).flatMap(row => Object.keys(row).filter(key => !key.startsWith("@") && !key.endsWith("@OData.Community.Display.V1.AttributeName") && key !== "@odata.etag")))],
+      rows: result.value || [],
+      totalRecordCount: result["@Microsoft.Dynamics.CRM.totalrecordcount"] ?? null,
+      totalRecordCountLimitExceeded: result["@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded"] ?? false
+    };
+  }
   function formLocation(attribute) {
     const output = [];
     attribute.controls?.forEach?.((control) => {
@@ -1221,7 +1253,9 @@ function pageBridge(action, payload) {
               ? metadataEntity(payload?.logicalName)
               : action === "processExplorer"
                 ? surfaceContext({ requireEntity: true, requireForm: false }).then((ctx) => processExplorer(ctx, !!payload?.force))
-              : action === "tool"
+              : action === "querySql"
+          ? querySqlReadOnly(payload?.sql)
+          : action === "tool"
                 ? tool(payload || {})
                 : Promise.resolve({ ok: false, error: "Unknown action" });
   return task.catch((error) => ({
