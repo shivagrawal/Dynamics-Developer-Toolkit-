@@ -262,6 +262,31 @@ function devLensSecurityAuditBridge(action, p) {
       id: G(row.systemuserid), name: row.fullname || "", raw: row
     }));
   }
+
+  async function sqlUserRolesByName(term) {
+    const xml = "<fetch top='5000'><entity name='role'><attribute name='roleid'/><attribute name='name'/><link-entity name='systemuserroles' from='roleid' to='roleid' link-type='inner'><link-entity name='systemuser' from='systemuserid' to='systemuserid' alias='SU' link-type='inner'><attribute name='systemuserid'/><attribute name='fullname'/><filter><condition attribute='fullname' operator='like' value='%" + X(term) + "%'/></filter></link-entity></link-entity><link-entity name='businessunit' from='businessunitid' to='businessunitid' alias='BU' link-type='inner'><attribute name='name'/></link-entity></entity></fetch>";
+    const rows = await all("roles?fetchXml=" + encodeURIComponent(xml));
+    return rows.map(row => ({
+      fullname: row["SU.fullname"] || row["su.fullname"] || "",
+      systemuserid: G(row["SU.systemuserid"] || row["su.systemuserid"]),
+      role_name: row.name || row["R.name"] || row["r.name"] || "",
+      role_businessunit: row["BU.name"] || row["bu.name"] || ""
+    }));
+  }
+  async function sqlUserTableByName(term, logicalName) {
+    const table = S(logicalName).toLowerCase();
+    if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw Error("Invalid table logical name in user privilege query.");
+    const xml = "<fetch top='5000' distinct='true'><entity name='systemuserroles'><attribute name='systemuserroleid'/><link-entity name='systemuser' to='systemuserid' from='systemuserid' alias='su' link-type='inner'><attribute name='fullname'/><attribute name='systemuserid'/><filter><condition attribute='fullname' operator='like' value='%" + X(term) + "%'/></filter></link-entity><link-entity name='role' to='roleid' from='roleid' alias='ur' link-type='inner'><attribute name='name'/><attribute name='roleid'/><link-entity name='businessunit' to='businessunitid' from='businessunitid' alias='bu' link-type='inner'><attribute name='name'/></link-entity></link-entity><link-entity name='role' to='parentrootroleid' from='parentrootroleid' alias='pr' link-type='inner'><attribute name='roleid'/><link-entity name='roleprivileges' to='roleid' from='roleid' alias='rp' link-type='inner'><attribute name='privilegedepthmask'/><attribute name='roleprivilegeid'/><link-entity name='privilege' to='privilegeid' from='privilegeid' alias='p' link-type='inner'><attribute name='name'/><attribute name='privilegeid'/><link-entity name='privilegeobjecttypecodes' to='privilegeid' from='privilegeid' alias='potc' link-type='inner'><link-entity name='entity' to='objecttypecode' from='objecttypecode' alias='e' link-type='inner'><attribute name='logicalname'/><filter><condition attribute='logicalname' operator='eq' value='" + X(table) + "'/></filter></link-entity></link-entity></link-entity></link-entity></link-entity></entity></fetch>";
+    const rows = await all("systemuserrolescollection?fetchXml=" + encodeURIComponent(xml));
+    return rows.map(row => ({
+      fullname: row["su.fullname"] || "",
+      role_name: row["ur.name"] || "",
+      role_businessunit: row["bu.name"] || "",
+      privilege_name: row["p.name"] || "",
+      depth: sqlDepth(row["rp.privilegedepthmask"]) || S(row["rp.privilegedepthmask"] || "")
+    }));
+  }
+
   async function sqlPrivilegesForTable(logicalName) {
     const table = S(logicalName).toLowerCase();
     if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw Error("Invalid table logical name in security query.");
@@ -335,13 +360,7 @@ function devLensSecurityAuditBridge(action, p) {
       kind = "user-roles";
       const term = sqlLikeTerm(query, /\bSU\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       if (term == null) throw Error("User-role query requires a SU.fullname LIKE string filter.");
-      const matchedUsers = await sqlUsersByName(term);
-      for (const user of matchedUsers) {
-        for (const role of await userRoles(user.id)) {
-          if (!user.name.toLowerCase().includes(term.toLowerCase())) continue;
-          rows.push({ fullname: user.name, systemuserid: user.id, role_name: role.name || "", role_businessunit: role.businessUnit || "" });
-        }
-      }
+      rows.push(...await sqlUserRolesByName(term));
       columns.push("fullname", "systemuserid", "role_name", "role_businessunit");
     } else if (/\bFROM\s+privilege\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query) && /\bentity\b/i.test(query)) {
       kind = "entity-privileges";
@@ -354,12 +373,7 @@ function devLensSecurityAuditBridge(action, p) {
       const term = sqlLikeTerm(query, /\bsu\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
       if (term == null || !table) throw Error("User privilege query requires fullname LIKE and entity logicalname filters.");
-      const matchedUsers = await sqlUsersByName(term);
-      for (const user of matchedUsers) {
-        for (const item of await userTable(user.id, table)) {
-          rows.push({ fullname: item.userName || user.name, role_name: item.roleName || "", role_businessunit: item.roleBusinessUnit || "", privilege_name: item.privilegeName || "", depth: item.depth || "" });
-        }
-      }
+      rows.push(...await sqlUserTableByName(term, table));
       columns.push("fullname", "role_name", "role_businessunit", "privilege_name", "depth");
     } else if (/\bFROM\s+role\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\bp\.name\s*=\s*'/i.test(query)) {
       kind = "roles-by-privilege";
