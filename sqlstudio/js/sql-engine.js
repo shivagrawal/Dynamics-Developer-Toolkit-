@@ -91,7 +91,7 @@
         const field=qualified();
         if (peek("IS")) { take(); const not=!!(peek("NOT")&&take()); expect("NULL"); return {type:"null",field,not}; }
         let not=false; if (peek("NOT")) { take(); not=true; }
-        if (peek("IN")) { take(); expect("("); const values=[]; do { values.push(literal()); if(!peek(","))break; take(); } while(true); expect(")"); if(not) fail("NOT IN is not supported in this engine version."); return {type:"in",field,values}; }
+        if (peek("IN")) { take(); expect("("); const values=[]; do { values.push(literal()); if(!peek(","))break; take(); } while(true); expect(")"); if(not) fail("NOT IN is not supported in this engine version."); if(values.some(value=>value.type==="null")) fail("NULL values in IN lists are not supported; handle NULL explicitly."); return {type:"in",field,values}; }
         if (peek("LIKE")) { take(); if(not) fail("NOT LIKE is not supported in this engine version."); const value=literal(); if(value.type!=="string") fail("LIKE requires a string literal."); return {type:"like",field,value:value.value}; }
         const op=take(); if (!OPS[op.value]) fail("Unsupported WHERE operator '" + op.value + "'.");
         const value=literal(); if(value.type==="null") fail("Use IS NULL or IS NOT NULL instead of comparing with NULL."); return {type:"compare",field,operator:OPS[op.value],value};
@@ -173,6 +173,7 @@
     validatePredicate(plan.where);
     const selected=plan.columns.some(c=>c.star)?(base.columns||[]).filter(c=>c.queryable!==false).map(c=>({column:c.logicalName})):plan.columns;
     if(plan.columns.some(c=>c.star)) {
+      if (!selected.length) fail("No queryable columns were found for SELECT * on '" + plan.table + "'.");
       for(const col of selected) attrs.push('<attribute name="'+escapeXml(col.column)+'"/>');
     } else {
       for(const c of plan.columns) {
