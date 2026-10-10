@@ -19,12 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Check JavaScript syntax
         run: |
@@ -35,4 +35,4 @@ jobs:
           node -e "JSON.parse(require('node:fs').readFileSync('manifest.json', 'utf8'))"
 
       - name: Run Query Studio regression suite
-        run: node --test tests/query-studio/sql-engine.test.mjs tests/query-studio/sql-front-end.test.mjs tests/query-studio/query-studio-regression.test.mjs
+        run: node --test tests/query-studio/sql-engine.test.mjs tests/query-studio/sql-front-end.test.mjs tests/query-studio/query-studio-regression.test.mjs tests/query-studio/security-query-corpus.test.mjs
