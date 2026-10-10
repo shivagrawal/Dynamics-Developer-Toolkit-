@@ -337,7 +337,7 @@ test("SELECT * exposes the columns Dataverse reports in response metadata", asyn
     },
   });
   const { result, requestedUrl } = await harness.runQuery("SELECT * FROM contact");
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, result.error);
   assert.ok(Array.from(result.columns).includes("contactid"));
   assert.ok(Array.from(result.columns).includes("fullname"));
   assert.equal(Object.keys(result.rows[0]).some((key) => key.includes("@")), false);
