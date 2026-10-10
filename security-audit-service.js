@@ -374,19 +374,34 @@ function devLensSecurityAuditBridge(action, p) {
     return { rows: sqlSort(output, [["createdon", "desc"], ["logicalname", "asc"]]), truncated };
   }
   function stripSqlComments(sql) {
-    let out = "", quote = "", line = false, block = false;
-    for (let i = 0; i < String(sql).length; i++) {
-      const ch = sql[i], next = sql[i + 1];
-      if (line) { if (ch === "\n" || ch === "\r") { line = false; out += ch; } else out += " "; continue; }
-      if (block) { if (ch === "*" && next === "/") { out += "  "; i++; block = false; } else out += ch === "\n" || ch === "\r" ? ch : " "; continue; }
-      if (quote) { out += ch; if (ch === quote && next === quote) { out += next; i++; } else if (ch === quote) quote = ""; continue; }
+    const input = String(sql || "");
+    let out = "", quote = "", line = false, blockDepth = 0;
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i], next = input[i + 1];
+      if (line) {
+        if (ch === "\n" || ch === "\r") { line = false; out += ch; }
+        else out += " ";
+        continue;
+      }
+      if (blockDepth > 0) {
+        if (ch === "/" && next === "*") { blockDepth++; out += "  "; i++; }
+        else if (ch === "*" && next === "/") { blockDepth--; out += "  "; i++; }
+        else out += ch === "\n" || ch === "\r" ? ch : " ";
+        continue;
+      }
+      if (quote) {
+        out += ch;
+        if (ch === quote && next === quote) { out += next; i++; }
+        else if (ch === quote) quote = "";
+        continue;
+      }
       if (ch === "'" || ch === '"') { quote = ch; out += ch; continue; }
       if (ch === "[") { quote = "]"; out += ch; continue; }
       if (ch === "-" && next === "-") { line = true; out += "  "; i++; continue; }
-      if (ch === "/" && next === "*") { block = true; out += "  "; i++; continue; }
+      if (ch === "/" && next === "*") { blockDepth = 1; out += "  "; i++; continue; }
       out += ch;
     }
-    if (block) throw Error("Unterminated SQL block comment.");
+    if (blockDepth > 0) throw Error("Unterminated SQL block comment.");
     if (quote) throw Error("Unterminated SQL quoted value or identifier.");
     return out;
   }
