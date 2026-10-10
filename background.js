@@ -803,7 +803,12 @@ function pageBridge(action, payload) {
     if (!entityMatch || entityMatch[1].toLowerCase() !== table) return { ok: false, error: "FetchXML base entity does not match the requested table." };
     if (/<(?:update|delete|create|upsert|insert)\b/i.test(fetchXml)) return { ok: false, error: "Only read-only FetchXML is accepted." };
 
-    const hasTop = /<fetch\b[^>]*\btop\s*=\s*["']/i.test(fetchXml);,    const offset = Number(offsetValue || 0);,    const limit = limitValue == null ? null : Number(limitValue);,    if (!Number.isInteger(offset) || offset < 0 || offset >= 10000) return { ok: false, error: "OFFSET must be an integer from 0 to 9999." };,    if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 5000 || offset + limit > 10000)) return { ok: false, error: "FETCH NEXT must be an integer from 1 to 5000 and fit within the 10,000-row safety cap." };,    if (hasTop && (offset > 0 || limit !== null)) return { ok: false, error: "TOP cannot be combined with OFFSET/FETCH." };
+    const hasTop = /<fetch\b[^>]*\btop\s*=\s*["']/i.test(fetchXml);
+    const offset = Number(offsetValue || 0);
+    const limit = limitValue == null ? null : Number(limitValue);
+    if (!Number.isInteger(offset) || offset < 0 || offset >= 10000) return { ok: false, error: "OFFSET must be an integer from 0 to 9999." };
+    if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 5000 || offset + limit > 10000)) return { ok: false, error: "FETCH NEXT must be an integer from 1 to 5000 and fit within the 10,000-row safety cap." };
+    if (hasTop && (offset > 0 || limit !== null)) return { ok: false, error: "TOP cannot be combined with OFFSET/FETCH." };
     const pageSize = 500;
     const maxPages = 20;
     const escapeXmlAttribute = value => String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
