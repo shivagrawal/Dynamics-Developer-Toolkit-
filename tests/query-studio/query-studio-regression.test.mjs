@@ -14,6 +14,7 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, metadataE
   let requestedUrl;
   const clientUrl = "https://example.crm.dynamics.com";
   const xrm = {
+    WebApi: { retrieveMultipleRecords: async (table, query, pageSize) => fetchXmlResponse || { entities: [], nextLink: null } },
     Utility: {
       getGlobalContext: () => ({
         getClientUrl: () => clientUrl,
