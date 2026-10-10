@@ -570,6 +570,37 @@ function devLensSecurityAuditBridge(action, p) {
     }
   }
 
+  function sqlOrderByStructure(sql) {
+    let depth = 0, quote = "", start = -1, clauseLength = 0;
+    for (let i = 0; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'") { quote = ch; continue; }
+      if (ch === "(") { depth++; continue; }
+      if (ch === ")") { depth--; continue; }
+      if (depth === 0 && /^ORDER\s+BY\b/i.test(sql.slice(i)) &&
+          (i === 0 || /\s/.test(sql[i - 1]))) {
+        start = i;
+        clauseLength = /^ORDER\s+BY\b/i.exec(sql.slice(i))[0].length;
+        break;
+      }
+    }
+    if (start < 0) return "";
+    let clause = sql.slice(start + clauseLength).trim().replace(/;\s*$/, "");
+    clause = clause.replace(/'(?:''|[^'])*'/g, "?").replace(/\s+/g, "").toUpperCase();
+    return clause.replace(/ASC$/, "");
+  }
+  function assertSqlOrderBy(sql, expected, shape) {
+    const actual = sqlOrderByStructure(sql);
+    if (actual !== expected) {
+      throw Error("Unsupported ORDER BY clause for " + shape + ". This compatibility handler cannot reorder results to match that clause.");
+    }
+  }
+
   async function sqlQuery(sql) {
     const original = S(sql);
     if (!original.trim()) throw Error("Read-only SQL mode accepts SELECT statements only.");
@@ -594,6 +625,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bR\.businessunitid\s*=\s*BU\.businessunitid\b/i, "the role business-unit relationship"]
       ]);
       assertSqlWhereStructure(query, "SU.FULLNAMELIKE?", kind);
+      assertSqlOrderBy(query, "", kind);
       const term = sqlLikeTerm(query, /\bSU\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       if (term == null) throw Error("User-role query requires a SU.fullname LIKE string filter.");
       const result = await sqlUserRolesByName(term);
@@ -609,6 +641,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\be\.logicalname\s*=/i, "the entity logical-name equality filter"]
       ]);
       assertSqlWhereStructure(query, "E.LOGICALNAME=?", kind);
+      assertSqlOrderBy(query, "P.NAME", kind);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
       if (!table) throw Error("Privilege query requires an e.logicalname equality filter.");
       const result = await sqlPrivilegesForTable(table);
@@ -638,6 +671,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\be\.logicalname\s*=/i, "the entity logical-name equality filter"]
       ]);
       assertSqlWhereStructure(query, "SU.FULLNAMELIKE?ANDE.LOGICALNAME=?", kind);
+      assertSqlOrderBy(query, "SU.FULLNAME,UR.NAME,P.NAME", kind);
       const term = sqlLikeTerm(query, /\bsu\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
       if (term == null || !table) throw Error("User privilege query requires fullname LIKE and entity logicalname filters.");
@@ -660,6 +694,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bp\.name\s*=/i, "the privilege-name equality filter"]
       ]);
       assertSqlWhereStructure(query, "P.NAME=?", kind);
+      assertSqlOrderBy(query, "R.NAME,BU.NAME", kind);
       const privilegeName = sqlLiteral(query, /\bp\.name\s*=\s*'((?:''|[^'])*)'/i);
       if (privilegeName == null) throw Error("Role privilege query requires a p.name equality filter.");
       const result = await sqlRolesByPrivilegeName(privilegeName);
@@ -678,6 +713,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\br\.name\s*=/i, "the role-name equality filter"]
       ]);
       assertSqlWhereStructure(query, "R.NAME=?", kind);
+      assertSqlOrderBy(query, "E.LOGICALNAME", kind);
       const roleName = sqlLiteral(query, /\br\.name\s*=\s*'((?:''|[^'])*)'/i);
       if (roleName == null) throw Error("Role access query requires an r.name equality filter.");
       const accessResult = await sqlRoleAccessRows(roleName);
@@ -724,6 +760,7 @@ function devLensSecurityAuditBridge(action, p) {
       const validJsonColumns = /\bWITH\s*\(\s*logicalname\s+NVARCHAR\s*\(\s*100\s*\)\s*'\$\.logicalName'\s*,\s*oldvalue\s+NVARCHAR\s*\(\s*MAX\s*\)\s*'\$\.oldValue'\s*,\s*newvalue\s+NVARCHAR\s*\(\s*MAX\s*\)\s*'\$\.newValue'\s*\)\s*ca\b/i.test(query);
       if (!validJsonColumns) throw Error("Audit query must map logicalName, oldValue, and newValue from changedAttributes.");
       assertSqlWhereStructure(query, "A.OBJECTID=?", kind);
+      assertSqlOrderBy(query, "A.CREATEDONDESC", kind);
       const id = sqlLiteral(query, /\ba\.objectid\s*=\s*'((?:''|[^'])*)'/i);
       if (!id) throw Error("Audit query requires an objectid GUID filter.");
       const auditResult = await sqlAuditRows(id);
