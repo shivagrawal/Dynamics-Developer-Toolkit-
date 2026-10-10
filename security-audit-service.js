@@ -556,7 +556,7 @@ function devLensSecurityAuditBridge(action, p) {
       if (ch === "'") { quote = ch; continue; }
       if (ch === "(") { depth++; continue; }
       if (ch === ")") { depth--; continue; }
-      if (depth === 0 && /\b(?:GROUP\s+BY|ORDER\s+BY)\b/i.test(sql.slice(i)) &&
+      if (depth === 0 && /^(?:GROUP\s+BY|ORDER\s+BY)\b/i.test(sql.slice(i)) &&
           (i === 0 || /\s/.test(sql[i - 1]))) { end = i; break; }
       if (ch === ";" && !sql.slice(i + 1).trim()) { end = i; break; }
     }
