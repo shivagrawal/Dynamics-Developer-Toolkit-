@@ -52,7 +52,7 @@ test("escapes string literals and translates null, IN, LIKE and boolean filters"
 });
 
 test("adds stable paging order for DISTINCT base projections",()=>{
- const q=engine.compileSql("SELECT DISTINCT fullname, statecode FROM contact",metadata);
+ const q=engine.compileSql("SELECT DISTINCT fullname, statecode FROM contact ORDER BY fullname",metadata);
  assert.match(q.fetchXml,/<fetch distinct="true">/);
  assert.match(q.fetchXml,/<order attribute="fullname"\/>/);
  assert.match(q.fetchXml,/<order attribute="statecode"\/>/);
@@ -68,6 +68,16 @@ test("compiles a simple left join with explicit joined projection",()=>{
  const q=engine.compileSql("SELECT c.fullname, a.name FROM contact AS c LEFT JOIN account AS a ON c.parentcustomerid = a.accountid",metadata);
  assert.ok(q.fetchXml.includes('<link-entity name="account" alias="a" from="accountid" to="parentcustomerid" link-type="outer"></link-entity>'));
  assert.match(q.fetchXml,/<attribute name="name" alias="a_name"\/>/);
+});
+
+test("adds a primary-key tie-breaker for non-unique ORDER BY values",()=>{
+ const q=engine.compileSql("SELECT fullname FROM contact ORDER BY fullname",metadata);
+ assert.match(q.fetchXml,/<order attribute="fullname"\/>[\\s\\S]*<order attribute="contactid"\/>/);
+});
+
+test("orders grouped aggregate rows when SQL omits ORDER BY",()=>{
+ const q=engine.compileSql("SELECT statecode, COUNT(*) AS contact_count FROM contact GROUP BY statecode",metadata);
+ assert.match(q.fetchXml,/<order alias="statecode"\/>/);
 });
 
 test("compiles COUNT and SUM with GROUP BY and aggregate output aliases",()=>{
