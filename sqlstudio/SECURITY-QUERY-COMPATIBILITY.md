@@ -1,37 +1,35 @@
 # Security SQL Query Compatibility
 
-This document tracks the six security/audit query shapes supplied for Query Studio.
-The query engine must fail clearly when a shape is not implemented; it must not silently
-rewrite the query or show results that do not match the requested projection.
+This document tracks the six security/audit query shapes supplied for Query Studio and distinguishes the generic SQL-to-FetchXML compiler from the JavaScript security-query compatibility adapter.
 
-## Runtime architecture discovered
+## Runtime architecture
 
-The current browser query path in `background.js` resolves the first table using
-`Xrm.Utility.getEntityMetadata(tableName)`, then sends SQL through the Dataverse SQL
-query endpoint. That is suitable only for tables exposed through that endpoint. The
-separate JavaScript SQL-to-FetchXML compiler has a limited SQL grammar and requires
-metadata for every table.
+The normal Query Studio path in `background.js` validates read-only SQL and uses the Dataverse SQL endpoint for supported ordinary-table queries. Queries referencing SQL4CDS security/metadata collections or audit JSON expansion are routed to `devLensSecurityAuditBridge("sqlQuery", ...)` in `security-audit-service.js`. That adapter uses authenticated-in-session Dataverse Web API/FetchXML requests and supported audit detail APIs; it has no .NET runtime dependency.
 
-The supplied queries include SQL4CDS metadata/system tables that are not ordinary
-Dataverse entity tables, plus SQL Server constructs that cannot be represented directly
-as FetchXML. Passing them through the existing generic path is not enough.
+The generic compiler in `sqlstudio/js/sql-engine.js` remains a bounded SQL subset. It does not generically compile SQL Server `CASE`, `ISNULL(MAX(CASE...))`, or `CROSS APPLY OPENJSON` to FetchXML. Instead, the adapter implements the six supplied query shapes with explicit data retrieval and JavaScript projection/aggregation. Unrecognized security SQL shapes fail closed rather than being silently sent to the ordinary-table SQL endpoint.
 
 ## Compatibility matrix
 
-| Query | Purpose | Current state | Work required |
+| Query | Purpose | Current state | Implementation and validation |
 |---|---|---|---|
-| 1 | User roles with role business unit; `LIKE`; three joins | Parser/compiler fixture passes against mocked SQL-visible metadata; not live-verified | Add a real Dataverse-backed relationship adapter for user-role membership and verify alias projection against a test environment |
-| 2 | Privilege names mapped to an entity | Parser/compiler fixture passes against mocked SQL-visible metadata; not live-verified | Resolve privilege/entity mappings through supported Dataverse metadata or organization APIs |
-| 3 | User roles and effective role privileges for an entity | Not implemented | Resolve roles and root-role inheritance; obtain role privileges; map privileges to entity and depth |
-| 4 | Roles containing a named privilege | Not implemented | Resolve roles and privilege assignments without scanning or leaking unnecessary security data |
-| 5 | Per-table CRUD/append/assign/share depth summary | Not implemented | Implement conditional aggregate semantics or equivalent safe client-side aggregation, plus entity/privilege mapping |
-| 6 | Audit attribute changes for a record GUID | Not implemented | Query audit rows and retrieve audit detail through supported Dataverse APIs; parse changed attributes in JavaScript instead of relying on SQL Server `OPENJSON` |
+| 1 | User roles with role business unit; `LIKE`; joins | Live integration passed | One bounded FetchXML request joins role membership, user and business unit; output aliases match the SQL projection. |
+| 2 | Privilege names mapped to an entity | Live integration passed | FetchXML joins privilege, privilege-object-type-code mapping and entity metadata; duplicate names are removed and results are ordered. |
+| 3 | User roles, business unit and entity privilege depth | Live integration passed after fixing a nested role-inheritance link | One bounded FetchXML request resolves user-role membership, root-role inheritance, privileges and entity mapping; depth masks are projected using the SQL CASE mapping. |
+| 4 | Roles containing a named privilege | Live integration passed | FetchXML filters the exact privilege name and returns role, business unit, privilege and depth. |
+| 5 | Per-table CRUD/append/assign/share depth summary | Live integration passed | FetchXML retrieves role privileges and entity mappings; JavaScript performs conditional aggregation and defaults missing access levels to `None`. |
+| 6 | Audit attribute changes for a record GUID | Live query path passed; detail expansion has offline fixture coverage | Queries read-only audit rows and calls `RetrieveAuditDetails` for each returned audit row, then flattens old/new attribute values. Live detail coverage depends on the target record having audit rows and the caller having audit-history permissions. |
 
-## Implementation rules
+## Test evidence
 
-- Keep all work on `feature/sql4cds-query-studio`; do not merge into `main` as part of this work.
-- Read-only execution only. Reject DML, multiple statements, unsupported functions and unsafe/unbounded execution.
-- Do not print record values, access tokens, audit payloads, or privilege assignments in CI logs.
-- Treat a passing parser/compiler fixture as a unit test only. End-to-end support requires a real Dataverse integration test.
-- Keep the on-demand integration harness separate from offline parser/compiler tests.
-- Query 6 must not assume `OPENJSON` or `CROSS APPLY` are supported by the Dataverse SQL endpoint. The intended adapter should use the Dataverse audit APIs and return equivalent rows.
+- Offline regression workflow: [Query Studio Regression Tests](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/query-studio-regression.yml)
+- Live Dataverse integration workflow: [Security SQL Live Dataverse Integration](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/security-query-integration.yml)
+- Live run with all six query projections passing: [run 4](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38084815776)
+- Test logs report status/projection/count metadata only; they do not print record values, audit payloads, tokens, or privilege assignments.
+
+## Safety and compatibility boundaries
+
+- Read-only execution only; writes and multiple SQL statements are rejected.
+- User/role FetchXML queries are bounded at 5,000 records; the audit query is bounded at 1,000 audit records per execution. These bounds must be surfaced as truncation warnings before treating very large results as complete.
+- The six supplied query shapes are implemented by an explicit compatibility adapter, not by a complete T-SQL interpreter. Other security SQL shapes and generic SQL Server constructs remain unsupported until they have a dedicated implementation and regression coverage.
+- Query 6 uses Dataverse audit APIs because audit history is not available through the Dataverse TDS/SQL endpoint. A caller needs the relevant audit-reading privileges.
+- Keep all work on `feature/sql4cds-query-studio`; do not merge into `main` without explicit approval.
