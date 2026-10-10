@@ -15,6 +15,7 @@ function createHost() {
     focus() {},
     setSelectionRange() {}
   };
+  const root = { activeElement: null };
   const host = {
     _html: "",
     _buttons: [],
@@ -25,16 +26,22 @@ function createHost() {
         dataset: { act: match[1] },
         disabled: /\bdisabled\b/.test(value.slice(match.index, value.indexOf(">", match.index))),
         addEventListener(type, handler) { if (type === "click") this.onClick = handler; },
-        click() { if (this.onClick) this.onClick(); }
+        getAttribute(name) { return name === "data-act" ? this.dataset.act : null; },
+        focus() { root.activeElement = this; },
+        click() { root.activeElement = this; if (this.onClick) this.onClick(); }
       }));
     },
-    querySelector(selector) { return selector === "textarea" ? editor : null; },
+    querySelector(selector) {
+      if (selector === "textarea") return editor;
+      const action = /\[data-act="([^"]+)"\]/.exec(selector)?.[1];
+      return action ? this._buttons.find(button => button.dataset.act === action) || null : null;
+    },
     querySelectorAll(selector) {
       if (selector === "[data-act]") return this._buttons;
       return [];
     },
-    getRootNode() { return { activeElement: null }; },
-    contains() { return false; }
+    getRootNode() { return root; },
+    contains(element) { return element === editor || this._buttons.includes(element); }
   };
   return host;
 }
@@ -103,12 +110,14 @@ test("Query Studio paginates large result sets without losing exportable results
   assert.match(host.innerHTML, /Rows 101–200 of 250/);
   assert.match(host.innerHTML, /Page 2 of 3/);
   assert.match(host.innerHTML, />Row 101</);
+  assert.equal(host.getRootNode().activeElement?.dataset.act, "nextPage", "Keyboard focus should stay on the active pagination control.");
 
   await click(host, "nextPage");
   assert.equal(rowCount(host.innerHTML), 50);
   assert.match(host.innerHTML, /Rows 201–250 of 250/);
   assert.match(host.innerHTML, /Page 3 of 3/);
   assert.match(host.innerHTML, /data-act="nextPage" disabled/);
+  assert.equal(host.getRootNode().activeElement?.dataset.act, "prevPage", "Focus should move to the available page control when Next becomes disabled.");
 
   await click(host, "prevPage");
   assert.match(host.innerHTML, /Rows 101–200 of 250/);
