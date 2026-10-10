@@ -9,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const backgroundPath = path.resolve(here, "../../background.js");
 const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
-function createHarness({ response, entityMetadata = {} } = {}) {
+function createHarness({ response, entityMetadata = {}, fetchResponse, metadataError } = {}) {
   let messageListener;
   let requestedUrl;
   const clientUrl = "https://example.crm.dynamics.com";
@@ -20,10 +20,14 @@ function createHarness({ response, entityMetadata = {} } = {}) {
         organizationSettings: { bapEnvironmentId: "test-environment" },
         userSettings: { userId: "test-user", userName: "Regression Test" },
       }),
-      getEntityMetadata: async (name) => ({
-        EntitySetName: entityMetadata[name]?.EntitySetName || (name === "contact" ? "contacts" : "accounts"),
-        PrimaryIdAttribute: entityMetadata[name]?.PrimaryIdAttribute || (name === "contact" ? "contactid" : "accountid"),
-      }),
+      getEntityMetadata: async (name) => {
+        if (metadataError) throw new Error(metadataError);
+        if (entityMetadata[name]?.missing) return {};
+        return {
+          EntitySetName: entityMetadata[name]?.EntitySetName || (name === "contact" ? "contacts" : "accounts"),
+          PrimaryIdAttribute: entityMetadata[name]?.PrimaryIdAttribute || (name === "contact" ? "contactid" : "accountid"),
+        };
+      },
     },
     Page: {
       data: { entity: { getEntityName: () => null, getId: () => null } },
@@ -46,6 +50,7 @@ function createHarness({ response, entityMetadata = {} } = {}) {
     Xrm: xrm,
     fetch: async (url) => {
       requestedUrl = String(url);
+      if (fetchResponse) return fetchResponse;
       return {
         ok: true,
         status: 200,
@@ -168,4 +173,84 @@ test("multiple SQL statements are rejected", async () => {
   assert.equal(result.ok, false);
   assert.match(result.error, /one SELECT statement at a time/i);
   assert.equal(requestedUrl, undefined);
+});
+
+
+test("nested OData expansions do not leak nested fields into the top-level projection", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#contacts(fullname,_parentcustomerid_value,parentcustomerid_account(accountid,name))",
+      value: [{ fullname: "Nested Expansion Contact", _parentcustomerid_value: "account-guid" }],
+    },
+  });
+  const { result } = await harness.runQuery("SELECT fullname, parentcustomerid FROM contact");
+  assert.equal(result.ok, true);
+  assert.deepEqual(Array.from(result.columns), ["fullname", "parentcustomerid"]);
+  assert.equal(result.rows[0].parentcustomerid, "account-guid");
+  assert.equal(result.columns.includes("accountid"), false);
+  assert.equal(result.columns.includes("name"), false);
+});
+
+test("simple projection fails closed when Dataverse omits verifiable OData context", async () => {
+  const harness = createHarness({
+    response: {
+      value: [{ fullname: "Unverified Contact", contactid: "contact-guid" }],
+    },
+  });
+  const { result } = await harness.runQuery("SELECT fullname FROM contact");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /verifiable SQL result projection/i);
+});
+
+test("empty SELECT input is rejected before any Dataverse request", async () => {
+  const harness = createHarness({ response: { value: [] } });
+  const { result, requestedUrl } = await harness.runQuery("   ");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Enter a SELECT query/i);
+  assert.equal(requestedUrl, undefined);
+});
+
+test("oversized query is rejected before any Dataverse request", async () => {
+  const harness = createHarness({ response: { value: [] } });
+  const { result, requestedUrl } = await harness.runQuery("SELECT " + "x".repeat(100001));
+  assert.equal(result.ok, false);
+  assert.match(result.error, /100,000 character limit/i);
+  assert.equal(requestedUrl, undefined);
+});
+
+test("missing table entity-set metadata returns a clear error", async () => {
+  const harness = createHarness({
+    response: { value: [] },
+    entityMetadata: { contact: { missing: true } },
+  });
+  const { result, requestedUrl } = await harness.runQuery("SELECT fullname FROM contact");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /entity set for contact/i);
+  assert.equal(requestedUrl, undefined);
+});
+
+test("Dataverse HTTP errors are surfaced instead of being treated as empty results", async () => {
+  const harness = createHarness({
+    fetchResponse: {
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      json: async () => ({ error: { message: "SQL projection is unsupported" } }),
+    },
+  });
+  const { result } = await harness.runQuery("SELECT fullname FROM contact");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /SQL projection is unsupported/i);
+});
+
+test("invalid SELECT response metadata is not silently accepted", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#contacts()",
+      value: [],
+    },
+  });
+  const { result } = await harness.runQuery("SELECT fullname FROM contact");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /verifiable SQL result projection/i);
 });
