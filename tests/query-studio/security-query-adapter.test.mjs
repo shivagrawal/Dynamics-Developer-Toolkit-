@@ -11,6 +11,7 @@ const AUDIT_ID = "33333333-3333-4333-8333-333333333333";
 
 function createBridge(options = {}) {
   const calls = [];
+  let activeAuditDetails = 0, maxConcurrentAuditDetails = 0;
   const mockFetch = async input => {
     const url = new URL(String(input));
     const path = url.pathname.split("/api/data/v9.2/")[1] + url.search;
@@ -39,9 +40,14 @@ function createBridge(options = {}) {
         ] };
       }
     } else if (path.startsWith("audits?")) {
-      body = { value: [{ auditid: AUDIT_ID, createdon: "2026-01-01T00:00:00Z", operation: options.auditOperation ?? 2, "_userid_value@OData.Community.Display.V1.FormattedValue": "Test Admin", objecttypecode: "account" }] };
+      const audit = { auditid: AUDIT_ID, createdon: "2026-01-01T00:00:00Z", operation: options.auditOperation ?? 2, "_userid_value@OData.Community.Display.V1.FormattedValue": "Test Admin", objecttypecode: "account" };
+      body = { value: options.bulkAudits ? Array.from({ length: options.bulkAudits }, () => ({ ...audit })) : [audit] };
     } else if (path.startsWith("audits(" + AUDIT_ID + ")/Microsoft.Dynamics.CRM.RetrieveAuditDetails")) {
+      activeAuditDetails++;
+      maxConcurrentAuditDetails = Math.max(maxConcurrentAuditDetails, activeAuditDetails);
+      if (options.auditDelayMs) await new Promise(resolve => setTimeout(resolve, options.auditDelayMs));
       body = { AuditDetail: { OldValue: { name: "Before", customfield: "old" }, NewValue: { name: "After", customfield: "new" } } };
+      activeAuditDetails--;
     }
     return { ok: true, status: 200, statusText: "OK", json: async () => body };
   };
@@ -52,7 +58,7 @@ function createBridge(options = {}) {
     console, setTimeout, clearTimeout
   };
   vm.runInNewContext(source, context, { filename: "security-audit-service.js" });
-  return { run: sql => context.devLensSecurityAuditBridge("sqlQuery", { sql }), calls };
+  return { run: sql => context.devLensSecurityAuditBridge("sqlQuery", { sql }), calls, get maxConcurrentAuditDetails() { return maxConcurrentAuditDetails; } };
 }
 
 const queries = {
@@ -227,6 +233,15 @@ test("conditional access aggregation treats unsupported depth masks as None", as
   const result = await createBridge().run(queries.roleAccess);
   const account = result.rows.find(row => row.table_name === "account");
   assert.equal(account.WriteAccess, "None");
+});
+
+test("audit detail expansion uses bounded concurrency and preserves all changed attributes", async () => {
+  const bridge = createBridge({ bulkAudits: 9, auditDelayMs: 10 });
+  const result = await bridge.run(queries.audit);
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 18);
+  assert.ok(bridge.maxConcurrentAuditDetails > 1, "Audit detail requests should not all run serially.");
+  assert.ok(bridge.maxConcurrentAuditDetails <= 4, "Audit detail concurrency exceeded the safety bound.");
 });
 
 test("audit event CASE casts operations other than Create and Update to their numeric string", async () => {
