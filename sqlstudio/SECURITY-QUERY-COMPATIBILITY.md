@@ -23,8 +23,8 @@ The generic compiler in `sqlstudio/js/sql-engine.js` remains a bounded SQL subse
 
 - Offline regression workflow: [Query Studio Regression Tests](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/query-studio-regression.yml)
 - Live Dataverse integration workflow: [Security SQL Live Dataverse Integration](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/security-query-integration.yml)
-- Live run with all six query projections passing: [run 4](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38084815776)
-- Test logs report status/projection/count metadata only; they do not print record values, audit payloads, tokens, or privilege assignments.
+- Live run with all six query projections and the audit-detail smoke test passing: [run 6](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38084922358)
+- Live run 6 completed 7 tests with 7 passed and 0 failed, including an actual `RetrieveAuditDetails` call against available audit data. Test logs report status/projection/count metadata only; they do not print record values, audit payloads, tokens, or privilege assignments.
 
 ## Safety and compatibility boundaries
 
