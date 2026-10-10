@@ -1526,7 +1526,10 @@ function pageBridge(action, payload) {
 }
 
 function isSecuritySqlCandidate(sql) {
-  const query = String(sql || "");
+  const query = String(sql || "")
+    .replace(/--[^\r\n]*/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/'(?:''|[^'])*'/g, "''");
   return /\bFROM\s+systemuserroles\b/i.test(query) ||
     (/\bFROM\s+privilege\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query)) ||
     /\broleprivileges\b/i.test(query) ||
