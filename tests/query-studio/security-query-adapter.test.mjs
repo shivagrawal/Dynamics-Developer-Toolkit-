@@ -162,6 +162,15 @@ test("security adapter rejects a projection it cannot faithfully return before a
   assert.equal(bridge.calls.length, 0);
 });
 
+test("security adapter rejects incomplete joins instead of inventing missing relationships", async () => {
+  const bridge = createBridge();
+  const sql = queries.userRoles.replace("INNER JOIN Role AS R ON SUR.roleid = R.roleid INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid", "");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Unsupported SQL structure/);
+  assert.equal(bridge.calls.length, 0);
+});
+
 test("security adapter treats semicolons inside string literals as data", async () => {
   const bridge = createBridge();
   const sql = queries.userRoles.replace("'%USD8%'", "'%USD8; Test%'");
