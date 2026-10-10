@@ -52,9 +52,10 @@ test("escapes string literals and translates null, IN, LIKE and boolean filters"
 });
 
 test("adds stable paging order for DISTINCT base projections",()=>{
- const q=engine.compileSql("SELECT DISTINCT fullname FROM contact",metadata);
+ const q=engine.compileSql("SELECT DISTINCT fullname, statecode FROM contact",metadata);
  assert.match(q.fetchXml,/<fetch distinct="true">/);
  assert.match(q.fetchXml,/<order attribute="fullname"\/>/);
+ assert.match(q.fetchXml,/<order attribute="statecode"\/>/);
 });
 
 test("resolves simple projection aliases in ORDER BY",()=>{
