@@ -558,6 +558,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bJOIN\s+systemuser\s+(?:AS\s+)?SU\b/i, "the SystemUser join"],
         [/\bJOIN\s+role\s+(?:AS\s+)?R\b/i, "the Role join"],
         [/\bJOIN\s+businessunit\s+(?:AS\s+)?BU\b/i, "the BusinessUnit join"],
+        [/\bSU\.fullname\s+LIKE\b/i, "the fullname LIKE filter"],
         [/\bSUR\.systemuserid\s*=\s*SU\.systemuserid\b/i, "the user-role membership relationship"],
         [/\bSUR\.roleid\s*=\s*R\.roleid\b/i, "the role relationship"],
         [/\bR\.businessunitid\s*=\s*BU\.businessunitid\b/i, "the role business-unit relationship"]
@@ -574,7 +575,7 @@ function devLensSecurityAuditBridge(action, p) {
       assertSqlShape(query, kind, [
         [/\bJOIN\s+privilegeobjecttypecodes\s+potc\s+ON\s+potc\.privilegeid\s*=\s*p\.privilegeid\b/i, "the privilege-object-type-code relationship"],
         [/\bJOIN\s+entity\s+e\s+ON\s+e\.objecttypecode\s*=\s*potc\.objecttypecode\b/i, "the entity mapping relationship"],
-        [/\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i, "an exact entity logical-name filter"]
+        [/\be\.logicalname\s*=/i, "the entity logical-name equality filter"]
       ]);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
       if (!table) throw Error("Privilege query requires an e.logicalname equality filter.");
@@ -601,7 +602,8 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bJOIN\s+privilegeobjecttypecodes\s+potc\s+ON\s+potc\.privilegeid\s*=\s*p\.privilegeid\b/i, "the privilege entity mapping"],
         [/\bJOIN\s+entity\s+e\s+ON\s+e\.objecttypecode\s*=\s*potc\.objecttypecode\b/i, "the entity logical-name mapping"],
         [/\bCASE\s+rp\.privilegedepthmask\b/i, "the privilege-depth CASE mapping"],
-        ...sqlDepthRequirements()
+        [/\bsu\.fullname\s+LIKE\b/i, "the user fullname LIKE filter"],
+        [/\be\.logicalname\s*=/i, "the entity logical-name equality filter"]
       ]);
       const term = sqlLikeTerm(query, /\bsu\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
@@ -622,7 +624,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bJOIN\s+roleprivileges\s+rp\s+ON\s+rp\.roleid\s*=\s*r\.roleid\b/i, "the role-privilege relationship"],
         [/\bJOIN\s+privilege\s+p\s+ON\s+p\.privilegeid\s*=\s*rp\.privilegeid\b/i, "the privilege relationship"],
         [/\bJOIN\s+businessunit\s+bu\s+ON\s+bu\.businessunitid\s*=\s*r\.businessunitid\b/i, "the role business-unit relationship"],
-        [/\bCASE\s+rp\.privilegedepthmask\b/i, "the privilege-depth CASE mapping"]
+        [/\bp\.name\s*=/i, "the privilege-name equality filter"]
       ]);
       const privilegeName = sqlLiteral(query, /\bp\.name\s*=\s*'((?:''|[^'])*)'/i);
       if (privilegeName == null) throw Error("Role privilege query requires a p.name equality filter.");
@@ -635,17 +637,7 @@ function devLensSecurityAuditBridge(action, p) {
       assertSqlProjection(query, ["table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess"], kind, roleAccessProjectionExpressions(), false);
       assertSqlShape(query, kind, [
         [/\bGROUP\s+BY\s+e\.logicalname\b/i, "GROUP BY e.logicalname"],
-        [/\bISNULL\s*\(\s*MAX\s*\(\s*CASE\b/i, "ISNULL(MAX(CASE...) aggregate semantics"],
-        [/'prvCreate%'/i, "the Create privilege prefix"],
-        [/'prvRead%'/i, "the Read privilege prefix"],
-        [/'prvWrite%'/i, "the Write privilege prefix"],
-        [/'prvDelete%'/i, "the Delete privilege prefix"],
-        [/'prvAppend%'/i, "the Append privilege prefix"],
-        [/'prvAppendTo%'/i, "the AppendTo privilege prefix"],
-        [/\bAND\s+p\.name\s+NOT\s+LIKE\s+'prvAppendTo%'/i, "the Append exclusion for AppendTo privileges"],
-        ...sqlDepthRequirements(),
-        [/'prvAssign%'/i, "the Assign privilege prefix"],
-        [/'prvShare%'/i, "the Share privilege prefix"]
+        [/\br\.name\s*=/i, "the role-name equality filter"]
       ]);
       const roleName = sqlLiteral(query, /\br\.name\s*=\s*'((?:''|[^'])*)'/i);
       if (roleName == null) throw Error("Role access query requires an r.name equality filter.");
@@ -685,10 +677,11 @@ function devLensSecurityAuditBridge(action, p) {
       ], false);
       assertSqlShape(query, kind, [
         [/\bCROSS\s+APPLY\s+OPENJSON\s*\(\s*a\.changedata/i, "audit changedata JSON expansion"],
-        [/'\$\.changedAttributes'/i, "the changedAttributes JSON path"],
         [/\bLEFT\s+JOIN\s+systemuser\s+u\s+ON\s+a\.userid\s*=\s*u\.systemuserid\b/i, "the changed-by user relationship"],
-        [/\bCASE\s+a\.operation\b/i, "the audit operation CASE mapping"]
+        [/\ba\.objectid\s*=/i, "the record objectid equality filter"]
       ]);
+      const jsonPath = sqlLiteral(query, /\bOPENJSON\s*\(\s*a\.changedata\s*,\s*'((?:''|[^'])*)'/i);
+      if (jsonPath !== "$.changedAttributes") throw Error("Audit query must expand the $.changedAttributes JSON path.");
       const id = sqlLiteral(query, /\ba\.objectid\s*=\s*'((?:''|[^'])*)'/i);
       if (!id) throw Error("Audit query requires an objectid GUID filter.");
       const auditResult = await sqlAuditRows(id);
