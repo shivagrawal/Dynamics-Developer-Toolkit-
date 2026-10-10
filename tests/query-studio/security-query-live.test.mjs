@@ -195,7 +195,7 @@ test("live privilege mapping returns privilege names for a standard table", asyn
   const result = await bridge.run(query);
   assert.equal(result.ok, true, "Account privilege mapping failed: " + (result.error || "unknown error"));
   assert.ok(result.rows.length > 0, "Expected Dataverse security metadata to expose privileges for the standard account table.");
-  assert.equal(new Set(result.rows.map(row => row.privilege_name).size, result.rows.length);
+  assert.equal(new Set(result.rows.map(row => row.privilege_name)).size, result.rows.length);
   for (const row of result.rows) assert.ok(String(row.privilege_name).startsWith("prv"));
   liveAccountPrivilegeName = result.rows.find(row => row.privilege_name === "prvReadAccount")?.privilege_name || result.rows[0].privilege_name;
   console.log("Live account privilege mapping: PASS; privileges=" + result.rowCount);
@@ -237,7 +237,7 @@ test("live user entity privilege query returns mapped account privileges", async
     if (!result.rows.some(row => row.fullname === fullname)) continue;
     for (const row of result.rows.filter(row => row.fullname === fullname)) {
       assert.ok(row.role_name && row.role_businessunit && row.privilege_name);
-      assert.match(String(row.depth), /^(User|Business Unit|Parent:Child BU|Organization|\\d+)$/);
+      assert.match(String(row.depth), /^(User|Business Unit|Parent:Child BU|Organization|\d+)$/);
     }
     console.log("Live user entity privilege adapter: PASS; matching rows=" + result.rowCount);
     return;
