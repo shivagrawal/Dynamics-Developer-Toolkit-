@@ -339,9 +339,9 @@ function devLensSecurityAuditBridge(action, p) {
     const auditRows = auditResult.rows;
     const truncated = auditResult.truncated || auditRows.length > 1000;
     const output = [];
-    for (const auditRow of auditRows.slice(0, 1000)) {
+    async function expandAuditRow(auditRow) {
       const auditId = G(auditRow.auditid);
-      if (!auditId) continue;
+      if (!auditId) return [];
       const response = await get("audits(" + auditId + ")/Microsoft.Dynamics.CRM.RetrieveAuditDetails");
       const detail = response.AuditDetail || {};
       const oldValues = detail.OldValue?.Attributes || detail.OldValue || {};
@@ -350,17 +350,26 @@ function devLensSecurityAuditBridge(action, p) {
         .filter(key => !key.startsWith("@") && !key.includes("@"));
       const changedBy = auditRow["_userid_value@OData.Community.Display.V1.FormattedValue"] || "";
       const event = ({ 1: "Create", 2: "Update" })[Number(auditRow.operation)] || S(auditRow.operation);
-      for (const key of keys) {
+      return keys.map(key => {
         const logicalName = key.startsWith("_") && key.endsWith("_value") ? key.slice(1, -6) : key;
-        output.push({
+        return {
           createdon: auditRow.createdon || "",
           ChangedBy: changedBy,
           Event: event,
           logicalname: logicalName,
           oldvalue: sqlAuditValue(oldValues, key),
           newvalue: sqlAuditValue(newValues, key)
-        });
-      }
+        };
+      });
+    }
+    // Keep concurrency low to avoid Dataverse service-protection spikes while
+    // preventing up to 1,000 audit-detail requests from running serially.
+    const auditLimit = Math.min(auditRows.length, 1000);
+    const concurrency = 4;
+    for (let offset = 0; offset < auditLimit; offset += concurrency) {
+      const batch = auditRows.slice(offset, Math.min(offset + concurrency, auditLimit));
+      const expanded = await Promise.all(batch.map(expandAuditRow));
+      output.push(...expanded.flat());
     }
     return { rows: sqlSort(output, [["createdon", "desc"], ["logicalname", "asc"]]), truncated };
   }
