@@ -131,7 +131,7 @@
     const aliasToken = fromTokens.length > 1 && fromTokens[1].value.toUpperCase() === "AS" ? fromTokens[2] : fromTokens[1];
     const alias = aliasToken && !["WHERE","JOIN","INNER","LEFT","RIGHT","FULL","CROSS","ON"].includes(aliasToken.value.toUpperCase()) ? unquoteIdentifier(aliasToken.value) : null;
     return { ok: true, statementType: "SELECT", projection, table, alias,
-      clauses: Object.fromEntries(Object.entries(clauses).map(([k,v]) => [k, v.map(t => t.value).join(" ")])),
+      clauses: Object.fromEntries(Object.entries(clauses).map(([k,v]) => [k, normalizeTokenText(v)])),
       tokens: all.map(t => ({ type: t.type, value: t.value, start: t.start, end: t.end })) };
   }
 
