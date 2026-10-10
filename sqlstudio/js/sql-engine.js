@@ -355,6 +355,12 @@
         orders += '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
       }
     }
+    if (plan.aggregateQuery && plan.groupBy.length && !orders) {
+      orders = plan.groupBy.map(group => {
+        const projection = plan.columns.find(column => !column.aggregate && column.column.toLowerCase() === group.column.toLowerCase());
+        return '<order alias="'+escapeXml(projection?.alias || group.column)+'"/>';
+      }).join("");
+    }
     // Deterministic ordering makes FetchXML paging stable when SQL leaves row order unspecified.
     if (!plan.aggregateQuery && !plan.top && !plan.distinct && !orders && base.primaryIdAttribute) orders = '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
     const filters=plan.where?conditionXml(plan.where,plan):"";
