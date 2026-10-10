@@ -135,7 +135,7 @@
     if (p !== tokens.length) fail("Unsupported SQL syntax near '" + tokens[p].value + "'.");
     if (columns.some(c=>c.star && !c.aggregate) && columns.length>1) fail("SELECT * cannot be combined with individual columns in this engine version.");
     const aggregateQuery = columns.some(c => c.aggregate) || groupBy.length > 0;
-    if (aggregateQuery && columns.some(c => c.star)) fail("SELECT * cannot be combined with GROUP BY or aggregate expressions.");
+    if (aggregateQuery && columns.some(c => c.star && !c.aggregate)) fail("SELECT * cannot be combined with GROUP BY or aggregate expressions.");
     if (aggregateQuery && distinct) fail("DISTINCT with aggregate expressions is not supported in this engine version.");
     if (aggregateQuery && top) fail("TOP with aggregate expressions is not supported in this engine version.");
     if (aggregateQuery && joins.length) fail("Aggregate queries with joins are not supported in this engine version.");
