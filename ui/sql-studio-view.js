@@ -14,12 +14,81 @@
     status: "Ready",
     durationMs: 0,
     lastQuery: "",
-    ctx: null
+    ctx: null,
+    schemaOpen: false,
+    schemaLoading: false,
+    schemaError: "",
+    tablesLoaded: false,
+    tables: [],
+    tableFilter: "",
+    selectedTable: "",
+    tableMeta: null,
+    columnsLoading: false,
+    columnsError: "",
+    columnFilter: "",
+    selectedColumns: [],
+    editorSelectionStart: 0,
+    editorSelectionEnd: 0
   };
   let host = null;
 
+  function schemaExplorerHtml() {
+    if (!state.schemaOpen) return "";
+    const tableMatches = state.tables.filter(table =>
+      [table.displayName, table.logicalName, table.schemaName].join(" ").toLowerCase().includes(state.tableFilter.toLowerCase())
+    ).slice(0, 250);
+    const tableRows = tableMatches.map(table =>
+      '<button class="ss-schema-table ' + (state.selectedTable === table.logicalName ? 'selected' : '') +
+      '" data-table="' + esc(table.logicalName) + '" title="' + esc(table.logicalName) + '">' +
+      '<span class="ss-schema-table-name">' + esc(table.displayName || table.logicalName) + '</span>' +
+      '<span class="ss-schema-table-logical">' + esc(table.logicalName) + '</span></button>'
+    ).join("");
+    const allColumns = state.tableMeta?.columns || [];
+    const visibleColumns = allColumns.filter(column =>
+      [column.displayName, column.logicalName, column.schemaName, column.attributeType].join(" ").toLowerCase().includes(state.columnFilter.toLowerCase())
+    );
+    const columnRows = visibleColumns.map(column => {
+      const checked = state.selectedColumns.includes(column.logicalName);
+      const badges = [
+        column.isPrimaryId ? '<span class="ss-schema-badge">Primary key</span>' : '',
+        column.isPrimaryName ? '<span class="ss-schema-badge">Primary name</span>' : '',
+        column.isCustom ? '<span class="ss-schema-badge">Custom</span>' : '',
+        column.validForRead === false ? '<span class="ss-schema-badge warn">Not readable</span>' : ''
+      ].join("");
+      const details = [
+        column.requiredLevel && column.requiredLevel !== "None" ? column.requiredLevel : "",
+        column.maxLength ? "Max " + column.maxLength : "",
+        column.format || ""
+      ].filter(Boolean).join(" · ");
+      return '<label class="ss-schema-column">' +
+        '<input type="checkbox" data-col-toggle="' + esc(column.logicalName) + '"' + (checked ? ' checked' : '') + '>' +
+        '<span class="ss-schema-column-main"><span class="ss-schema-column-title">' + esc(column.displayName || column.logicalName) + '</span>' +
+        '<code>' + esc(column.logicalName) + '</code><span class="ss-schema-column-type">' + esc(column.attributeType) +
+        (details ? ' · ' + esc(details) : '') + '</span><span class="ss-schema-badges">' + badges + '</span></span></label>';
+    }).join("");
+    const tableMeta = state.tableMeta;
+    return '<section class="ss-schema"><div class="ss-schema-head"><div><strong>Schema Explorer</strong><div class="ss-meta">Browse Dataverse tables and insert explicit column names.</div></div>' +
+      '<button class="ss-btn" data-act="loadTables" ' + (state.schemaLoading ? 'disabled' : '') + '>' + (state.tablesLoaded ? 'Reload tables' : 'Load tables') + '</button>' +
+      '<button class="ss-btn" data-act="closeSchema">Hide</button></div>' +
+      (state.schemaError ? '<div class="ss-status ss-error">' + esc(state.schemaError) + '</div>' : '') +
+      '<div class="ss-schema-grid"><div class="ss-schema-pane"><div class="ss-schema-pane-title">Tables ' + (state.tables.length ? '(' + state.tables.length + ')' : '') + '</div>' +
+      '<input class="ss-schema-search" data-schema-filter="tables" value="' + esc(state.tableFilter) + '" placeholder="Search display or logical name…">' +
+      '<div class="ss-schema-list">' + (state.schemaLoading && !state.tables.length ? '<div class="ss-empty">Loading tables…</div>' : tableRows || '<div class="ss-empty">No matching tables. Load tables to begin.</div>') + '</div>' +
+      (state.tables.length > 250 ? '<div class="ss-meta">Showing up to 250 matching tables. Refine your search.</div>' : '') + '</div>' +
+      '<div class="ss-schema-pane"><div class="ss-schema-pane-title">' + (tableMeta ? esc(tableMeta.displayName || tableMeta.logicalName) : 'Columns') + '</div>' +
+      (tableMeta ? '<div class="ss-schema-table-meta"><code>' + esc(tableMeta.logicalName) + '</code> · ' + esc(tableMeta.columns.length) + ' columns · ' + esc(tableMeta.entitySetName || '') + '</div>' : '<div class="ss-empty">Select a table to inspect its columns.</div>') +
+      (state.columnsError ? '<div class="ss-status ss-error">' + esc(state.columnsError) + '</div>' : '') +
+      (tableMeta ? '<input class="ss-schema-search" data-schema-filter="columns" value="' + esc(state.columnFilter) + '" placeholder="Search columns or data types…">' +
+      '<div class="ss-schema-actions"><button class="ss-btn" data-act="selectVisibleColumns">Select visible</button><button class="ss-btn" data-act="clearSelectedColumns">Clear selection</button><button class="ss-btn" data-act="insertSelected" ' + (!state.selectedColumns.length ? 'disabled' : '') + '>Insert selected</button><button class="ss-btn primary" data-act="generateSelect" ' + (!state.selectedColumns.length ? 'disabled' : '') + '>Generate SELECT</button><button class="ss-btn" data-act="generateAllSelect">Generate all readable</button></div>' +
+      '<div class="ss-schema-list ss-schema-columns">' + (state.columnsLoading ? '<div class="ss-empty">Loading columns…</div>' : columnRows || '<div class="ss-empty">No matching columns.</div>') + '</div>' +
+      '<div class="ss-meta">Selected ' + state.selectedColumns.length + ' · Click a column checkbox, then insert it or generate a query.</div>' : '') +
+      '</div></div></section>';
+  }
+
   function render() {
     if (!host) return;
+    const focusedFilter = host.contains(document.activeElement) ? document.activeElement.getAttribute("data-schema-filter") : null;
+    const focusedFilterStart = focusedFilter ? document.activeElement.selectionStart : null;
     const rows = state.results?.rows || [];
     const columns = state.results?.columns || [];
     host.innerHTML = `
@@ -40,9 +109,22 @@
           .ss-results th{position:sticky;top:0;background:#1e293b;color:#bfdbfe}
           .ss-empty{color:#94a3b8;padding:16px}.ss-meta{font-size:12px;color:#94a3b8}
           .ss-pill{border:1px solid #166534;color:#86efac;border-radius:999px;padding:2px 8px}
+          .ss-schema{border:1px solid #334155;border-radius:8px;padding:10px;background:#0b1220;display:flex;flex-direction:column;gap:8px}
+          .ss-schema-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.ss-schema-head>div{margin-right:auto}
+          .ss-schema-grid{display:grid;grid-template-columns:minmax(180px,.8fr) minmax(300px,1.5fr);gap:8px;min-height:220px}
+          .ss-schema-pane{border:1px solid #334155;border-radius:7px;min-width:0;padding:8px;display:flex;flex-direction:column;gap:7px}
+          .ss-schema-pane-title{font-weight:700;color:#bfdbfe}.ss-schema-search{box-sizing:border-box;width:100%;padding:7px 8px;background:#020617;color:#e2e8f0;border:1px solid #475569;border-radius:6px}
+          .ss-schema-list{overflow:auto;max-height:280px;min-height:70px}.ss-schema-table{display:flex;flex-direction:column;width:100%;text-align:left;gap:1px;background:transparent;border:1px solid transparent;border-radius:5px;color:#e2e8f0;padding:6px;cursor:pointer}
+          .ss-schema-table:hover,.ss-schema-table.selected{background:#172554;border-color:#3b82f6}.ss-schema-table-name{font-weight:600}.ss-schema-table-logical{font:11px ui-monospace,monospace;color:#94a3b8}
+          .ss-schema-table-meta{font-size:11px;color:#94a3b8}.ss-schema-actions{display:flex;flex-wrap:wrap;gap:5px}.ss-schema-actions .ss-btn{padding:5px 7px;font-size:11px}
+          .ss-schema-column{display:flex;align-items:flex-start;gap:7px;padding:7px 4px;border-bottom:1px solid #1e293b;cursor:pointer}.ss-schema-column input{margin-top:3px}
+          .ss-schema-column-main{display:flex;flex-direction:column;gap:2px;min-width:0}.ss-schema-column-title{font-weight:600}.ss-schema-column code{font-size:11px;color:#93c5fd;overflow-wrap:anywhere}
+          .ss-schema-column-type{font-size:11px;color:#94a3b8}.ss-schema-badges{display:flex;flex-wrap:wrap;gap:4px}.ss-schema-badge{font-size:10px;border:1px solid #475569;border-radius:999px;padding:1px 5px;color:#cbd5e1}.ss-schema-badge.warn{color:#fde68a}
+          @media(max-width:760px){.ss-schema-grid{grid-template-columns:1fr}.ss-schema-list{max-height:190px}}
         </style>
-        <div class="ss-top"><div class="ss-title">Query Studio</div><span class="ss-pill">READ ONLY</span><button class="ss-btn" data-act="context">Detect environment</button><button class="ss-btn primary" data-act="execute" ${state.running ? "disabled" : ""}>Execute (Ctrl+Enter)</button><button class="ss-btn" data-act="clear">Clear results</button></div>
+        <div class="ss-top"><div class="ss-title">Query Studio</div><span class="ss-pill">READ ONLY</span><button class="ss-btn" data-act="schema">Schema Explorer</button><button class="ss-btn" data-act="context">Detect environment</button><button class="ss-btn primary" data-act="execute" ${state.running ? "disabled" : ""}>Execute (Ctrl+Enter)</button><button class="ss-btn" data-act="clear">Clear results</button></div>
         <div class="ss-status">Execution: ${esc(state.status)} ${state.ctx ? " · " + esc(state.ctx.clientUrl) : ""} · ${state.results ? `${state.results.rows?.length || 0} rows · ${state.durationMs} ms` : "No results yet"}</div>
+        ${schemaExplorerHtml()}
         <textarea class="ss-editor" spellcheck="false" aria-label="SQL query editor">${esc(state.sql)}</textarea>
         <div class="ss-meta">Native Dataverse read-only SQL endpoint · one SELECT statement · columns must be named explicitly · no SQL4CDS-only features such as CTEs or DECLARE. Query runs as your current Dynamics user.</div>
         ${state.error ? `<div class="ss-status ss-error">${esc(state.error)}</div>` : ""}
@@ -56,6 +138,32 @@
       if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); void execute(); }
     });
     host.querySelectorAll("[data-act]").forEach(btn => btn.addEventListener("click", () => void act(btn.dataset.act)));
+    host.querySelectorAll("[data-schema-filter]").forEach(input => input.addEventListener("input", () => {
+      if (input.dataset.schemaFilter === "tables") state.tableFilter = input.value;
+      if (input.dataset.schemaFilter === "columns") state.columnFilter = input.value;
+      render();
+    }));
+    host.querySelectorAll("[data-table]").forEach(btn => btn.addEventListener("click", () => void loadSchemaTable(btn.dataset.table)));
+    host.querySelectorAll("[data-col-toggle]").forEach(input => input.addEventListener("change", () => {
+      const name = input.dataset.colToggle;
+      state.selectedColumns = input.checked
+        ? [...new Set([...state.selectedColumns, name])]
+        : state.selectedColumns.filter(item => item !== name);
+      render();
+    }));
+    const filterToRestore = focusedFilter ? host.querySelector('[data-schema-filter="' + focusedFilter + '"]') : null;
+    if (filterToRestore) {
+      filterToRestore.focus();
+      try { filterToRestore.setSelectionRange(focusedFilterStart, focusedFilterStart); } catch {}
+    }
+    const editor = host.querySelector(".ss-editor");
+    const rememberEditorSelection = () => {
+      state.editorSelectionStart = editor.selectionStart;
+      state.editorSelectionEnd = editor.selectionEnd;
+    };
+    editor.addEventListener("select", rememberEditorSelection);
+    editor.addEventListener("keyup", rememberEditorSelection);
+    editor.addEventListener("click", rememberEditorSelection);
   }
 
   function formatValue(value) {
@@ -85,6 +193,113 @@
       state.status = "Context unavailable";
     }
     render();
+  }
+
+  async function loadTables(force = false) {
+    if (state.schemaLoading) return;
+    if (state.tablesLoaded && !force) return;
+    state.schemaLoading = true;
+    state.schemaError = "";
+    state.status = "Loading Dataverse tables…";
+    render();
+    try {
+      const api = window.D365AnalyzerApi;
+      if (!api?.send) throw new Error("DevLens Dataverse bridge is not available. Reload the Dynamics tab.");
+      const response = await api.send("metadataTables");
+      if (!response?.ok) throw new Error(response?.error || "Could not load table metadata.");
+      state.tables = Array.isArray(response.data) ? response.data : [];
+      state.tablesLoaded = true;
+      state.status = "Loaded " + state.tables.length + " tables";
+      if (!state.selectedTable) {
+        const match = state.sql.match(/\\bFROM\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)?[A-Za-z_][A-Za-z0-9_]*)/i);
+        const candidate = match?.[1]?.split(".").pop()?.replace(/^[\\[\\"]|[\\]\\"]$/g, "").toLowerCase();
+        if (candidate && state.tables.some(table => table.logicalName === candidate)) {
+          state.selectedTable = candidate;
+          await loadSchemaTable(candidate);
+          return;
+        }
+      }
+    } catch (error) {
+      state.schemaError = error.message || String(error);
+      state.status = "Schema loading failed";
+    } finally {
+      state.schemaLoading = false;
+      render();
+    }
+  }
+
+  async function loadSchemaTable(logicalName) {
+    const table = String(logicalName || "").trim().toLowerCase();
+    if (!table) return;
+    if (state.tableMeta?.logicalName === table && !state.columnsError) {
+      state.selectedTable = table;
+      state.columnFilter = "";
+      state.selectedColumns = [];
+      render();
+      return;
+    }
+    state.selectedTable = table;
+    state.tableMeta = null;
+    state.columnsLoading = true;
+    state.columnsError = "";
+    state.columnFilter = "";
+    state.selectedColumns = [];
+    render();
+    try {
+      const api = window.D365AnalyzerApi;
+      if (!api?.send) throw new Error("DevLens Dataverse bridge is not available. Reload the Dynamics tab.");
+      const response = await api.send("schemaTable", { logicalName: table });
+      if (!response?.ok || !response.data) throw new Error(response?.error || "Could not load table columns.");
+      state.tableMeta = response.data;
+      state.status = "Loaded schema for " + table;
+    } catch (error) {
+      state.columnsError = error.message || String(error);
+      state.status = "Column metadata failed";
+    } finally {
+      state.columnsLoading = false;
+      render();
+    }
+  }
+
+  function generateSelect(allReadable) {
+    const columns = state.tableMeta?.columns || [];
+    const names = (allReadable ? columns.filter(column => column.validForRead !== false) :
+      columns.filter(column => state.selectedColumns.includes(column.logicalName) && column.validForRead !== false))
+      .map(column => column.logicalName);
+    if (!state.tableMeta || !names.length) {
+      state.schemaError = allReadable ? "No readable columns were returned for this table." : "Select at least one readable column first.";
+      render();
+      return;
+    }
+    state.sql = "SELECT TOP 100 " + names.join(", ") + "\\nFROM " + state.tableMeta.logicalName + ";";
+    state.editorSelectionStart = state.editorSelectionEnd = 0;
+    state.error = "";
+    state.results = null;
+    state.status = "SELECT generated from Dataverse metadata";
+    render();
+    const editor = host?.querySelector(".ss-editor");
+    if (editor) { editor.focus(); editor.setSelectionRange(0, 0); }
+  }
+
+  function insertSelectedColumns() {
+    const columns = (state.tableMeta?.columns || []).filter(column =>
+      state.selectedColumns.includes(column.logicalName) && column.validForRead !== false
+    ).map(column => column.logicalName);
+    if (!columns.length) {
+      state.schemaError = "Select at least one readable column to insert.";
+      render();
+      return;
+    }
+    const start = Math.min(state.editorSelectionStart, state.sql.length);
+    const end = Math.min(Math.max(state.editorSelectionEnd, start), state.sql.length);
+    const insertion = columns.join(", ");
+    state.sql = state.sql.slice(0, start) + insertion + state.sql.slice(end);
+    const caret = start + insertion.length;
+    state.editorSelectionStart = state.editorSelectionEnd = caret;
+    state.status = "Inserted " + columns.length + " column name(s)";
+    render();
+    const editor = host?.querySelector(".ss-editor");
+    if (editor) { editor.focus(); editor.setSelectionRange(caret, caret); }
   }
 
   async function execute() {
@@ -126,6 +341,26 @@
 
   async function act(action) {
     if (action === "context") return detectContext();
+    if (action === "schema") {
+      state.schemaOpen = !state.schemaOpen;
+      state.schemaError = "";
+      render();
+      if (state.schemaOpen && !state.tablesLoaded) await loadTables();
+      return;
+    }
+    if (action === "closeSchema") { state.schemaOpen = false; render(); return; }
+    if (action === "loadTables") return loadTables(true);
+    if (action === "selectVisibleColumns") {
+      const visible = (state.tableMeta?.columns || []).filter(column =>
+        [column.displayName, column.logicalName, column.schemaName, column.attributeType].join(" ").toLowerCase().includes(state.columnFilter.toLowerCase())
+      ).map(column => column.logicalName);
+      state.selectedColumns = [...new Set([...state.selectedColumns, ...visible])];
+      render(); return;
+    }
+    if (action === "clearSelectedColumns") { state.selectedColumns = []; render(); return; }
+    if (action === "insertSelected") return insertSelectedColumns();
+    if (action === "generateSelect") return generateSelect(false);
+    if (action === "generateAllSelect") return generateSelect(true);
     if (action === "execute") return execute();
     if (action === "clear") { state.results = null; state.error = ""; state.status = "Ready"; render(); return; }
     if (action === "csv") {
