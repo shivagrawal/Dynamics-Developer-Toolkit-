@@ -155,12 +155,12 @@
       for(const col of selected) attrs.push('<attribute name="'+escapeXml(col.column)+'"/>');
     } else {
       for(const c of plan.columns) {
-        if(c.alias && c.alias.toLowerCase()!==plan.alias.toLowerCase()) fail("Column aliases are not supported for joined fields yet.");
         const owner=(c.tableAlias||plan.alias).toLowerCase();
         if(owner!==plan.alias.toLowerCase()&&!plan.joins.some(j=>j.alias.toLowerCase()===owner))fail("Unknown table alias '"+owner+"'.");
         const entity=owner===plan.alias.toLowerCase()?base:entities[plan.joins.find(j=>j.alias.toLowerCase()===owner).table];
         if(!entity.columns?.some(x=>x.logicalName.toLowerCase()===c.column.toLowerCase()&&x.queryable!==false)) fail("Column '"+c.column+"' is not queryable on table '"+entity.logicalName+"'.");
-        attrs.push('<attribute name="'+escapeXml(c.column)+'"'+(owner!==plan.alias.toLowerCase()?' alias="'+escapeXml(owner+'_'+c.column)+'"':'')+'/>' );
+        const outputAlias = c.alias || (owner!==plan.alias.toLowerCase() ? owner+'_'+c.column : null);
+        attrs.push('<attribute name="'+escapeXml(c.column)+'"'+(outputAlias?' alias="'+escapeXml(outputAlias)+'"':'')+'/>' );
       }
     }
     const orders=plan.orderBy.map(o=>{const owner=(o.tableAlias||plan.alias).toLowerCase();if(owner!==plan.alias.toLowerCase())fail("ORDER BY on joined columns is not supported yet.");if(!base.columns?.some(c=>c.logicalName.toLowerCase()===o.column.toLowerCase()&&c.queryable!==false))fail("ORDER BY column '"+o.column+"' is not queryable.");return '<order attribute="'+escapeXml(o.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';}).join("");
