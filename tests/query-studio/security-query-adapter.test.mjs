@@ -54,15 +54,15 @@ function createBridge() {
 }
 
 const queries = {
-  userRoles: \`SELECT SU.fullname, SU.systemuserid, R.name AS role_name, BU.name AS role_businessunit
+  userRoles: `SELECT SU.fullname, SU.systemuserid, R.name AS role_name, BU.name AS role_businessunit
 FROM SystemUserRoles AS SUR INNER JOIN SystemUser AS SU ON SUR.systemuserid = SU.systemuserid
 INNER JOIN Role AS R ON SUR.roleid = R.roleid INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid
-WHERE SU.fullname LIKE '%USD8%'\`,
-  privileges: \`SELECT DISTINCT p.name AS privilege_name FROM privilege p
+WHERE SU.fullname LIKE '%USD8%'`,
+  privileges: `SELECT DISTINCT p.name AS privilege_name FROM privilege p
 INNER JOIN privilegeobjecttypecodes potc ON potc.privilegeid = p.privilegeid
 INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
-WHERE e.logicalname = 'salesorder' ORDER BY p.name\`,
-  userTable: \`SELECT DISTINCT su.fullname, ur.name AS role_name, bu.name AS role_businessunit, p.name AS privilege_name,
+WHERE e.logicalname = 'salesorder' ORDER BY p.name`,
+  userTable: `SELECT DISTINCT su.fullname, ur.name AS role_name, bu.name AS role_businessunit, p.name AS privilege_name,
 CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END AS depth
 FROM systemuser su INNER JOIN systemuserroles sur ON sur.systemuserid = su.systemuserid
 INNER JOIN role ur ON ur.roleid = sur.roleid INNER JOIN businessunit bu ON bu.businessunitid = ur.businessunitid
@@ -70,23 +70,23 @@ INNER JOIN role pr ON pr.parentrootroleid = ur.parentrootroleid INNER JOIN rolep
 INNER JOIN privilege p ON p.privilegeid = rp.privilegeid INNER JOIN privilegeobjecttypecodes potc ON potc.privilegeid = p.privilegeid
 INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
 WHERE su.fullname LIKE '%USD8%' AND e.logicalname = 'quote'
-ORDER BY su.fullname, ur.name, p.name\`,
-  rolesByPrivilege: \`SELECT DISTINCT r.name AS role_name, bu.name AS business_unit, p.name AS privilege_name,
+ORDER BY su.fullname, ur.name, p.name`,
+  rolesByPrivilege: `SELECT DISTINCT r.name AS role_name, bu.name AS business_unit, p.name AS privilege_name,
 CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END AS depth
 FROM role r INNER JOIN roleprivileges rp ON rp.roleid = r.roleid
 INNER JOIN privilege p ON p.privilegeid = rp.privilegeid INNER JOIN businessunit bu ON bu.businessunitid = r.businessunitid
-WHERE p.name = 'prvReadwesco_legalentity' ORDER BY r.name, bu.name\`,
-  roleAccess: \`SELECT e.logicalname AS table_name, ISNULL(MAX(CASE WHEN p.name LIKE 'prvCreate%' THEN
+WHERE p.name = 'prvReadwesco_legalentity' ORDER BY r.name, bu.name`,
+  roleAccess: `SELECT e.logicalname AS table_name, ISNULL(MAX(CASE WHEN p.name LIKE 'prvCreate%' THEN
 CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS CreateAccess
 FROM role r INNER JOIN roleprivileges rp ON rp.roleid = r.roleid INNER JOIN privilege p ON p.privilegeid = rp.privilegeid
 INNER JOIN privilegeobjecttypecodes potc ON potc.privilegeid = p.privilegeid
 INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
-WHERE r.name = 'Basic User' GROUP BY e.logicalname ORDER BY e.logicalname\`,
-  audit: \`SELECT a.createdon, u.fullname AS ChangedBy, CASE a.operation WHEN 1 THEN 'Create' WHEN 2 THEN 'Update' ELSE CAST(a.operation AS VARCHAR(10)) END AS Event,
+WHERE r.name = 'Basic User' GROUP BY e.logicalname ORDER BY e.logicalname`,
+  audit: `SELECT a.createdon, u.fullname AS ChangedBy, CASE a.operation WHEN 1 THEN 'Create' WHEN 2 THEN 'Update' ELSE CAST(a.operation AS VARCHAR(10)) END AS Event,
 ca.logicalname, ca.oldvalue, ca.newvalue FROM audit a
 CROSS APPLY OPENJSON(a.changedata, '$.changedAttributes') WITH (logicalname NVARCHAR(100) '$.logicalName', oldvalue NVARCHAR(MAX) '$.oldValue', newvalue NVARCHAR(MAX) '$.newValue') ca
 LEFT JOIN systemuser u ON a.userid = u.systemuserid
-WHERE a.objectid = '33333333-3333-4333-8333-333333333333' ORDER BY a.createdon DESC\`
+WHERE a.objectid = '33333333-3333-4333-8333-333333333333' ORDER BY a.createdon DESC`
 };
 
 test("security query 1 returns role membership and business unit", async () => {
