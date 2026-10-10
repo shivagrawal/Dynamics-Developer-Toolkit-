@@ -197,6 +197,24 @@ test("security adapter rejects a projection it cannot faithfully return before a
   assert.equal(bridge.calls.length, 0);
 });
 
+test("all six security adapters reject extra WHERE predicates they cannot execute", async () => {
+  const malformed = [
+    queries.userRoles.replace("WHERE SU.fullname LIKE '%USD8%'", "WHERE SU.fullname LIKE '%USD8%' AND SU.isdisabled = 0"),
+    queries.privileges.replace("WHERE e.logicalname = 'salesorder'", "WHERE e.logicalname = 'salesorder' AND e.logicalname <> 'account'"),
+    queries.userTable.replace("WHERE su.fullname LIKE '%USD8%' AND e.logicalname = 'quote'", "WHERE su.fullname LIKE '%USD8%' AND e.logicalname = 'quote' AND su.isdisabled = 0"),
+    queries.rolesByPrivilege.replace("WHERE p.name = 'prvReadwesco_legalentity'", "WHERE p.name = 'prvReadwesco_legalentity' AND r.name <> 'Other'"),
+    queries.roleAccess.replace("WHERE r.name = 'Basic User'", "WHERE r.name = 'Basic User' AND r.iscustomizable = 1"),
+    queries.audit.replace("WHERE a.objectid = '33333333-3333-4333-8333-333333333333'", "WHERE a.objectid = '33333333-3333-4333-8333-333333333333' AND a.operation = 2")
+  ];
+  for (const sql of malformed) {
+    const bridge = createBridge();
+    const result = await bridge.run(sql);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /Unsupported WHERE clause/);
+    assert.equal(bridge.calls.length, 0);
+  }
+});
+
 test("all six security adapters fail closed when required SQL semantics are changed", async () => {
   const malformed = [
     queries.userRoles.replace("SUR.roleid = R.roleid", "SUR.roleid = BU.businessunitid"),
