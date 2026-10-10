@@ -437,7 +437,8 @@
     if (action === "insertSelected") return insertSelectedColumns();
     if (action === "generateSelect") return generateSelect(false);
     if (action === "generateAllSelect") return generateSelect(true);
-    if (action === "execute") return execute();\n    if (action === "executeEngine") return executeEngine();
+    if (action === "execute") return execute();
+    if (action === "executeEngine") return executeEngine();
     if (action === "clear") { state.results = null; state.error = ""; state.status = "Ready"; render(); return; }
     if (action === "csv") {
       const columns = state.results?.columns || [];
