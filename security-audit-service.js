@@ -467,6 +467,7 @@ function devLensSecurityAuditBridge(action, p) {
     let truncated = false;
     if (/\bFROM\s+systemuserroles\b/i.test(query) && /\bJOIN\s+systemuser\b/i.test(query)) {
       kind = "user-roles";
+      assertSqlProjection(query, ["fullname", "systemuserid", "role_name", "role_businessunit"], kind);
       const term = sqlLikeTerm(query, /\bSU\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       if (term == null) throw Error("User-role query requires a SU.fullname LIKE string filter.");
       const result = await sqlUserRolesByName(term);
@@ -475,6 +476,7 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("fullname", "systemuserid", "role_name", "role_businessunit");
     } else if (/\bFROM\s+privilege\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query) && /\bentity\b/i.test(query)) {
       kind = "entity-privileges";
+      assertSqlProjection(query, ["privilege_name"], kind);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
       if (!table) throw Error("Privilege query requires an e.logicalname equality filter.");
       const result = await sqlPrivilegesForTable(table);
@@ -483,6 +485,7 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("privilege_name");
     } else if (/\bFROM\s+systemuser\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query)) {
       kind = "user-entity-privileges";
+      assertSqlProjection(query, ["fullname", "role_name", "role_businessunit", "privilege_name", "depth"], kind);
       const term = sqlLikeTerm(query, /\bsu\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
       if (term == null || !table) throw Error("User privilege query requires fullname LIKE and entity logicalname filters.");
@@ -492,6 +495,7 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("fullname", "role_name", "role_businessunit", "privilege_name", "depth");
     } else if (/\bFROM\s+role\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\bp\.name\s*=\s*'/i.test(query)) {
       kind = "roles-by-privilege";
+      assertSqlProjection(query, ["role_name", "business_unit", "privilege_name", "depth"], kind);
       const privilegeName = sqlLiteral(query, /\bp\.name\s*=\s*'((?:''|[^'])*)'/i);
       if (privilegeName == null) throw Error("Role privilege query requires a p.name equality filter.");
       const result = await sqlRolesByPrivilegeName(privilegeName);
@@ -500,6 +504,7 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("role_name", "business_unit", "privilege_name", "depth");
     } else if (/\bFROM\s+role\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\br\.name\s*=\s*'/i.test(query)) {
       kind = "role-table-access";
+      assertSqlProjection(query, ["table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess"], kind);
       const roleName = sqlLiteral(query, /\br\.name\s*=\s*'((?:''|[^'])*)'/i);
       if (roleName == null) throw Error("Role access query requires an r.name equality filter.");
       const accessResult = await sqlRoleAccessRows(roleName);
@@ -528,6 +533,7 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess");
     } else if (/\bFROM\s+audit\b/i.test(query) && /\bobjectid\s*=\s*'/i.test(query)) {
       kind = "record-audit";
+      assertSqlProjection(query, ["createdon", "ChangedBy", "Event", "logicalname", "oldvalue", "newvalue"], kind);
       const id = sqlLiteral(query, /\ba\.objectid\s*=\s*'((?:''|[^'])*)'/i);
       if (!id) throw Error("Audit query requires an objectid GUID filter.");
       const auditResult = await sqlAuditRows(id);
