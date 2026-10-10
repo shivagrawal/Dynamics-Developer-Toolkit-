@@ -72,6 +72,12 @@ test("compiles COUNT and SUM with GROUP BY and aggregate output aliases",()=>{
  assert.deepEqual(q.resultColumns.map(c=>c.label),["statecode","contact_count","income_count","total_income","avg_income","first_created","last_created"]);
 });
 
+test("compiles COUNT(DISTINCT column) with FetchXML distinct countcolumn",()=>{
+ const q=engine.compileSql("SELECT COUNT(DISTINCT parentcustomerid) AS unique_customers FROM contact",metadata);
+ assert.match(q.fetchXml,/<attribute name="parentcustomerid" aggregate="countcolumn" distinct="true" alias="unique_customers"\/>/);
+ assert.throws(()=>engine.plan("SELECT SUM(DISTINCT annualincome) FROM contact"),/DISTINCT is supported only for COUNT/);
+});
+
 test("resolves grouped output aliases in ORDER BY",()=>{
  const q=engine.compileSql("SELECT statecode AS state, COUNT(*) AS contact_count FROM contact GROUP BY statecode ORDER BY state DESC",metadata);
  assert.match(q.fetchXml,/<attribute name="statecode" groupby="true" alias="state"\/>/);
