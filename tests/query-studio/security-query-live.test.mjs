@@ -10,6 +10,7 @@ const clientSecret = process.env.DATAVERSE_CLIENT_SECRET || "";
 const source = await readFile(new URL("../../security-audit-service.js", import.meta.url), "utf8");
 let token = "";
 let bridge;
+let liveAccountPrivilegeName = "";
 const expectedColumns = [
   ["fullname", "systemuserid", "role_name", "role_businessunit"],
   ["privilege_name"],
@@ -194,9 +195,64 @@ test("live privilege mapping returns privilege names for a standard table", asyn
   const result = await bridge.run(query);
   assert.equal(result.ok, true, "Account privilege mapping failed: " + (result.error || "unknown error"));
   assert.ok(result.rows.length > 0, "Expected Dataverse security metadata to expose privileges for the standard account table.");
-  assert.equal(new Set(result.rows.map(row => row.privilege_name)).size, result.rows.length);
+  assert.equal(new Set(result.rows.map(row => row.privilege_name).size, result.rows.length);
   for (const row of result.rows) assert.ok(String(row.privilege_name).startsWith("prv"));
+  liveAccountPrivilegeName = result.rows.find(row => row.privilege_name === "prvReadAccount")?.privilege_name || result.rows[0].privilege_name;
   console.log("Live account privilege mapping: PASS; privileges=" + result.rowCount);
+});
+
+
+test("live user-role query returns membership for an active user", async t => {
+  const users = await bridge.get("systemusers?$select=fullname&$filter=statecode%20eq%200&$top=10");
+  for (const user of users.value || []) {
+    const fullname = String(user.fullname || "");
+    if (!fullname) continue;
+    const escaped = fullname.replace(/'/g, "''");
+    const query = queries[0].replace("%USD8%", "%" + escaped + "%");
+    const result = await bridge.run(query);
+    assert.equal(result.ok, true, "User-role query failed: " + (result.error || "unknown error"));
+    if (!result.rows.some(row => row.fullname === fullname)) continue;
+    for (const row of result.rows.filter(row => row.fullname === fullname)) {
+      assert.match(String(row.systemuserid), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      assert.ok(row.role_name && row.role_businessunit);
+    }
+    console.log("Live user-role adapter: PASS; matching rows=" + result.rowCount);
+    return;
+  }
+  t.skip("No active user with role membership was available in the test environment.");
+});
+
+test("live user entity privilege query returns mapped account privileges", async t => {
+  const users = await bridge.get("systemusers?$select=fullname&$filter=statecode%20eq%200&$top=10");
+  for (const user of users.value || []) {
+    const fullname = String(user.fullname || "");
+    if (!fullname) continue;
+    const escaped = fullname.replace(/'/g, "''");
+    const membership = await bridge.run(queries[0].replace("%USD8%", "%" + escaped + "%"));
+    assert.equal(membership.ok, true, "User membership lookup failed: " + (membership.error || "unknown error"));
+    if (!membership.rows.some(row => row.fullname === fullname)) continue;
+    const query = queries[2].replace("%USD8%", "%" + escaped + "%").replace("e.logicalname = 'quote'", "e.logicalname = 'account'");
+    const result = await bridge.run(query);
+    assert.equal(result.ok, true, "User entity privilege query failed: " + (result.error || "unknown error"));
+    if (!result.rows.some(row => row.fullname === fullname)) continue;
+    for (const row of result.rows.filter(row => row.fullname === fullname)) {
+      assert.ok(row.role_name && row.role_businessunit && row.privilege_name);
+      assert.match(String(row.depth), /^(User|Business Unit|Parent:Child BU|Organization|\\d+)$/);
+    }
+    console.log("Live user entity privilege adapter: PASS; matching rows=" + result.rowCount);
+    return;
+  }
+  t.skip("No active user with account privileges was available in the test environment.");
+});
+
+test("live roles-by-privilege query returns roles for a standard account privilege", async t => {
+  if (!liveAccountPrivilegeName) t.skip("Account privilege control did not discover a privilege.");
+  const query = queries[3].replace("prvReadwesco_legalentity", liveAccountPrivilegeName);
+  const result = await bridge.run(query);
+  assert.equal(result.ok, true, "Roles-by-privilege query failed: " + (result.error || "unknown error"));
+  assert.ok(result.rows.length > 0, "Expected at least one role to contain the selected standard account privilege.");
+  for (const row of result.rows) assert.ok(row.role_name && row.business_unit && row.privilege_name && row.depth);
+  console.log("Live roles-by-privilege adapter: PASS; matching rows=" + result.rowCount);
 });
 
 test("live audit detail expansion is exercised when the environment has audit rows", async t => {
