@@ -374,11 +374,21 @@ function devLensSecurityAuditBridge(action, p) {
     // Keep concurrency low to avoid Dataverse service-protection spikes while
     // preventing up to 1,000 audit-detail requests from running serially.
     const auditLimit = Math.min(auditRows.length, 1000);
+    const maxAttributeRows = 10000;
     const concurrency = 4;
+    let attributeLimitReached = false;
     for (let offset = 0; offset < auditLimit; offset += concurrency) {
       const batch = auditRows.slice(offset, Math.min(offset + concurrency, auditLimit));
       const expanded = await Promise.all(batch.map(expandAuditRow));
-      output.push(...expanded.flat());
+      for (const row of expanded.flat()) {
+        if (output.length >= maxAttributeRows) {
+          truncated = true;
+          attributeLimitReached = true;
+          break;
+        }
+        output.push(row);
+      }
+      if (attributeLimitReached) break;
     }
     return { rows: sqlSort(output, [["createdon", "desc"], ["logicalname", "asc"]]), truncated };
   }
