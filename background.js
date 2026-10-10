@@ -703,7 +703,7 @@ function pageBridge(action, payload) {
     const ctx = await context({ requireEntity: false, requireForm: false });
     const base = `${ctx.clientUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${escapeOData(requested)}')`;
     const definition = await fetchJson(
-      `${base}?$select=LogicalName,SchemaName,EntitySetName,MetadataId,DisplayName,PrimaryIdAttribute,PrimaryNameAttribute,IsCustomEntity&$expand=Attributes($select=LogicalName,SchemaName,DisplayName,AttributeType,IsCustomAttribute,IsValidForRead,IsValidForAdvancedFind,RequiredLevel,MaxLength,Precision,Format)`,
+      `${base}?$select=LogicalName,SchemaName,EntitySetName,MetadataId,DisplayName,PrimaryIdAttribute,PrimaryNameAttribute,IsCustomEntity&$expand=Attributes($select=LogicalName,SchemaName,DisplayName,AttributeType,IsCustomAttribute,IsValidForRead,IsValidForAdvancedFind,RequiredLevel)`,
     );
     const columns = (definition.Attributes || []).map((attribute) => ({
       logicalName: attribute.LogicalName || "",
@@ -711,12 +711,12 @@ function pageBridge(action, payload) {
       displayName: localizedLabel(attribute.DisplayName) || attribute.LogicalName || "",
       attributeType: attribute.AttributeType || "Unknown",
       isCustom: attribute.IsCustomAttribute === true,
-      validForRead: attribute.IsValidForRead !== false,
-      validForAdvancedFind: attribute.IsValidForAdvancedFind !== false,
+      validForRead: attribute.IsValidForRead?.Value ?? attribute.IsValidForRead ?? true,
+      validForAdvancedFind: attribute.IsValidForAdvancedFind?.Value ?? attribute.IsValidForAdvancedFind ?? true,
       requiredLevel: attribute.RequiredLevel?.Value || "None",
-      maxLength: attribute.MaxLength ?? null,
-      precision: attribute.Precision ?? null,
-      format: attribute.Format || "",
+      maxLength: null,
+      precision: null,
+      format: "",
       isPrimaryId: attribute.LogicalName === definition.PrimaryIdAttribute,
       isPrimaryName: attribute.LogicalName === definition.PrimaryNameAttribute
     })).sort((a, b) => a.logicalName.localeCompare(b.logicalName));
