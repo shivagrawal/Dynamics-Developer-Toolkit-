@@ -18,6 +18,11 @@ const metadata = {
   }
 };
 
+test("rejects unterminated quoted values even when the final character is an escaped quote",()=>{
+ assert.throws(()=>engine.plan("SELECT fullname FROM contact WHERE fullname = 'abc''"),/Unterminated SQL quoted value/);
+ assert.throws(()=>engine.plan("SELECT [fullname]] FROM contact"),/Unterminated bracketed identifier/);
+});
+
 test("accepts bracketed identifiers and ignores SQL comments safely",()=>{
  const q=engine.compileSql("/* start */ SELECT [fullname] FROM [contact] -- table\nWHERE [statecode] = 1",metadata);
  assert.match(q.fetchXml,/<entity name="contact">/);
