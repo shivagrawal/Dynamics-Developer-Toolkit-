@@ -37,7 +37,7 @@ const securityQueries = [
 test("all six security query shapes are detected for the specialized adapter", () => {
   const { context } = loadBackground();
   for (const sql of securityQueries) assert.equal(context.isSecuritySqlCandidate(sql), true, sql);
-  const commentedUserRoleQuery = "-- Gets all the role of the user along with role's BU\\nSELECT SU.fullname FROM SystemUserRoles SUR INNER JOIN SystemUser SU ON SUR.systemuserid = SU.systemuserid WHERE SU.fullname LIKE '%USD8%'";
+  const commentedUserRoleQuery = "-- Gets all the role of the user along with role's BU\nSELECT SU.fullname FROM SystemUserRoles SUR INNER JOIN SystemUser SU ON SUR.systemuserid = SU.systemuserid WHERE SU.fullname LIKE '%USD8%'";
   assert.equal(context.isSecuritySqlCandidate(commentedUserRoleQuery), true);
 });
 
