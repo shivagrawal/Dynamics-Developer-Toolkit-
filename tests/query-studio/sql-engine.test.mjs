@@ -59,5 +59,5 @@ test("rejects DML, unknown columns, unknown aliases, unsafe TOP and unsupported 
 
 test("requires metadata and refuses ambiguous joined predicates",()=>{
  assert.throws(()=>engine.compileSql("SELECT fullname FROM contact",{}),/Metadata is required/);
- assert.throws(()=>engine.compileSql("SELECT c.fullname FROM contact c JOIN account a ON c.statecode = a.accountid",metadata),/JOIN columns were not found/);
+ assert.throws(()=>engine.compileSql("SELECT c.fullname FROM contact c JOIN account a ON c.missingfield = a.accountid",metadata),/JOIN columns were not found/);
 });
