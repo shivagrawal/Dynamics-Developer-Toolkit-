@@ -45,7 +45,13 @@ function createBridge(options = {}) {
         body = { value: accessRows };
       }
     } else if (path.startsWith("audits?")) {
-      const audit = { auditid: AUDIT_ID, createdon: "2026-01-01T00:00:00Z", operation: options.auditOperation ?? 2, "_userid_value@OData.Community.Display.V1.FormattedValue": "Test Admin", objecttypecode: "account" };
+      const audit = {
+        auditid: AUDIT_ID,
+        createdon: options.missingAuditCreatedOn ? null : "2026-01-01T00:00:00Z",
+        operation: options.auditOperation ?? 2,
+        ...(options.missingAuditUserName ? {} : { "_userid_value@OData.Community.Display.V1.FormattedValue": "Test Admin" }),
+        objecttypecode: "account"
+      };
       body = { value: options.bulkAudits ? Array.from({ length: options.bulkAudits }, () => ({ ...audit })) : [audit] };
     } else if (path.startsWith("audits(" + AUDIT_ID + ")/Microsoft.Dynamics.CRM.RetrieveAuditDetails")) {
       activeAuditDetails++;
@@ -371,6 +377,13 @@ test("audit detail expansion uses bounded concurrency and preserves all changed 
   assert.equal(result.rows.length, 18);
   assert.ok(bridge.maxConcurrentAuditDetails > 1, "Audit detail requests should not all run serially.");
   assert.ok(bridge.maxConcurrentAuditDetails <= 4, "Audit detail concurrency exceeded the safety bound.");
+});
+
+test("audit rows preserve SQL NULL for unresolved ChangedBy and missing timestamps", async () => {
+  const result = await createBridge({ missingAuditUserName: true, missingAuditCreatedOn: true }).run(queries.audit);
+  assert.equal(result.ok, true);
+  assert.ok(result.rows.length > 0);
+  assert.ok(result.rows.every(row => row.ChangedBy === null && row.createdon === null));
 });
 
 test("audit CREATE projects absent old values as SQL NULL", async () => {
