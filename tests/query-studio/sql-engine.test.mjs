@@ -42,6 +42,19 @@ test("compiles a simple left join with explicit joined projection",()=>{
  assert.match(q.fetchXml,/<attribute name="name" alias="a_name"\/>/);
 });
 
+test("validates WHERE columns and preserves boolean filter grouping",()=>{
+ assert.throws(()=>engine.compileSql("SELECT fullname FROM contact WHERE notarealcolumn = 1",metadata),/not queryable/);
+ const q=engine.compileSql("SELECT fullname FROM contact WHERE (statecode = 0 OR statecode = 1) AND fullname LIKE 'A%'",metadata);
+ assert.match(q.fetchXml,/<filter type="and">/);
+ assert.match(q.fetchXml,/<filter type="or">/);
+});
+
+test("supports WHERE conditions against explicitly joined entities",()=>{
+ const q=engine.compileSql("SELECT c.fullname, a.name FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid WHERE a.name LIKE 'Contoso%'",metadata);
+ assert.match(q.fetchXml,/entityname="a"/);
+ assert.match(q.fetchXml,/Contoso%/);
+});
+
 test("supports SQL output aliases without confusing them with table aliases",()=>{
  const q=engine.compileSql("SELECT c.fullname AS ContactName FROM contact AS c",metadata);
  assert.ok(q.fetchXml.includes('<attribute name="fullname" alias="ContactName"/>'));
