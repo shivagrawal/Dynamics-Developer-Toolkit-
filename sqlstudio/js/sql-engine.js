@@ -150,23 +150,23 @@
     if (!entities[plan.table]) fail("Metadata is required for base table '" + plan.table + "'.");
     for(const j of plan.joins) if(!entities[j.table]) fail("Metadata is required for joined table '" + j.table + "'.");
     const base=entities[plan.table], attrs=[];
-    const selected=plan.columns.some(c=>c.star)?(base.columns||[]).filter(c=>c.queryable!==false).map(c=>({column:c.logicalName,alias:null,alias: null})):plan.columns.map(c=>({column:c.column,alias:c.alias,tableAlias:c.alias?null:c.alias,sourceAlias:c.alias?null:c.alias}));
+    const selected=plan.columns.some(c=>c.star)?(base.columns||[]).filter(c=>c.queryable!==false).map(c=>({column:c.logicalName})):plan.columns;
     if(plan.columns.some(c=>c.star)) {
       for(const col of selected) attrs.push('<attribute name="'+escapeXml(col.column)+'"/>');
     } else {
       for(const c of plan.columns) {
         if(c.alias && c.alias.toLowerCase()!==plan.alias.toLowerCase()) fail("Column aliases are not supported for joined fields yet.");
-        const owner=(c.alias||plan.alias).toLowerCase();
+        const owner=(c.tableAlias||plan.alias).toLowerCase();
         if(owner!==plan.alias.toLowerCase()&&!plan.joins.some(j=>j.alias.toLowerCase()===owner))fail("Unknown table alias '"+owner+"'.");
         const entity=owner===plan.alias.toLowerCase()?base:entities[plan.joins.find(j=>j.alias.toLowerCase()===owner).table];
         if(!entity.columns?.some(x=>x.logicalName.toLowerCase()===c.column.toLowerCase()&&x.queryable!==false)) fail("Column '"+c.column+"' is not queryable on table '"+entity.logicalName+"'.");
         attrs.push('<attribute name="'+escapeXml(c.column)+'"'+(owner!==plan.alias.toLowerCase()?' alias="'+escapeXml(owner+'_'+c.column)+'"':'')+'/>' );
       }
     }
-    const orders=plan.orderBy.map(o=>{const owner=(o.alias||plan.alias).toLowerCase();if(owner!==plan.alias.toLowerCase())fail("ORDER BY on joined columns is not supported yet.");if(!base.columns?.some(c=>c.logicalName.toLowerCase()===o.column.toLowerCase()&&c.queryable!==false))fail("ORDER BY column '"+o.column+"' is not queryable.");return '<order attribute="'+escapeXml(o.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';}).join("");
+    const orders=plan.orderBy.map(o=>{const owner=(o.tableAlias||plan.alias).toLowerCase();if(owner!==plan.alias.toLowerCase())fail("ORDER BY on joined columns is not supported yet.");if(!base.columns?.some(c=>c.logicalName.toLowerCase()===o.column.toLowerCase()&&c.queryable!==false))fail("ORDER BY column '"+o.column+"' is not queryable.");return '<order attribute="'+escapeXml(o.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';}).join("");
     const filters=plan.where?conditionXml(plan.where,plan):"";
     const links=plan.joins.map(j=>{
-      const left=j.left.alias||plan.alias, right=j.right.alias||plan.alias;
+      const left=j.left.tableAlias||plan.alias, right=j.right.tableAlias||plan.alias;
       let from,to;
       if(left.toLowerCase()===plan.alias.toLowerCase()&&right.toLowerCase()===j.alias.toLowerCase()){from=j.right.column;to=j.left.column;}
       else if(right.toLowerCase()===plan.alias.toLowerCase()&&left.toLowerCase()===j.alias.toLowerCase()){from=j.left.column;to=j.right.column;}
