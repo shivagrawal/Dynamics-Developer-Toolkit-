@@ -3,8 +3,8 @@
   "name": "Dynamics 365 & Dataverse DevLens",
   "short_name": "D365 DevLens",
   "version": "5.21.0.0",
-  "version_name": "5.21.0.0 SQL Query Studio Preview",
-  "description": "Developer diagnostics for Dynamics 365 and Dataverse with Query Studio preview, events, JavaScript, fields, metadata, process, custom control, security, audit, command palette, and developer toolkit capabilities.",
+  "version_name": "5.21.0.0 SQL Query Studio + Schema Explorer Preview",
+  "description": "Developer diagnostics for Dynamics 365 and Dataverse with Query Studio and Schema Explorer preview, events, JavaScript, fields, metadata, process, custom control, security, audit, command palette, and developer toolkit capabilities.",
   "permissions": [
     "scripting",
     "tabs",
