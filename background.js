@@ -1005,6 +1005,9 @@ function pageBridge(action, payload) {
     // OData context may omit aliased JOIN projections. Merge it with actual row fields
     // so joined columns are visible while context-only fields (including null projections) remain.
     const columns = [...new Set([...(contextColumns || []).filter(column => !projectedLookupBackings.has(column.toLowerCase())), ...rowColumns])];
+    const totalRecordCount = result["@Microsoft.Dynamics.CRM.totalrecordcount"] ?? null;
+    const totalRecordCountLimitExceeded = result["@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded"] ?? false;
+    const resultTruncated = truncated || totalRecordCountLimitExceeded === true;
     return {
       ok: true,
       clientUrl: ctx.clientUrl,
@@ -1013,10 +1016,10 @@ function pageBridge(action, payload) {
       columns,
       rows,
       responseContext: result["@odata.context"] || null,
-      totalRecordCount: result["@Microsoft.Dynamics.CRM.totalrecordcount"] ?? null,
-      totalRecordCountLimitExceeded: result["@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded"] ?? false,
-      truncated,
-      warning: truncated ? "Results reached the 10,000-row or 100-page safety limit and may be incomplete. Refine the query to retrieve a smaller result set." : ""
+      totalRecordCount,
+      totalRecordCountLimitExceeded,
+      truncated: resultTruncated,
+      warning: resultTruncated ? "Results may be incomplete because a Dataverse count limit or the 10,000-row/100-page safety limit was reached. Refine the query to retrieve a smaller result set." : ""
     };
   }
   function formLocation(attribute) {
