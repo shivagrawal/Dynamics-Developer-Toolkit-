@@ -499,6 +499,22 @@ function devLensSecurityAuditBridge(action, p) {
       if (!pattern.test(sql)) throw Error("Unsupported SQL structure for " + shape + ": expected " + description + ".");
     }
   }
+  function roleAccessProjectionExpressions() {
+    const depthCase = "CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END";
+    const aggregate = (condition, alias) => "ISNULL(MAX(CASE WHEN " + condition + " THEN " + depthCase + " END), 'None') AS " + alias;
+    return [
+      "e.logicalname AS table_name",
+      aggregate("p.name LIKE 'prvCreate%'", "CreateAccess"),
+      aggregate("p.name LIKE 'prvRead%'", "ReadAccess"),
+      aggregate("p.name LIKE 'prvWrite%'", "WriteAccess"),
+      aggregate("p.name LIKE 'prvDelete%'", "DeleteAccess"),
+      aggregate("p.name LIKE 'prvAppend%' AND p.name NOT LIKE 'prvAppendTo%'", "AppendAccess"),
+      aggregate("p.name LIKE 'prvAppendTo%'", "AppendToAccess"),
+      aggregate("p.name LIKE 'prvAssign%'", "AssignAccess"),
+      aggregate("p.name LIKE 'prvShare%'", "ShareAccess")
+    ];
+  }
+
   function sqlDepthRequirements() {
     return [
       [/\bWHEN\s+1\s+THEN\s+'User'/i, "the User depth mapping"],
@@ -520,7 +536,7 @@ function devLensSecurityAuditBridge(action, p) {
     let truncated = false;
     if (/\bFROM\s+systemuserroles\b/i.test(query) && /\bJOIN\s+systemuser\b/i.test(query)) {
       kind = "user-roles";
-      assertSqlProjection(query, ["fullname", "systemuserid", "role_name", "role_businessunit"], kind);
+      assertSqlProjection(query, ["fullname", "systemuserid", "role_name", "role_businessunit"], kind, ["SU.fullname", "SU.systemuserid", "R.name AS role_name", "BU.name AS role_businessunit"], false);
       assertSqlShape(query, kind, [
         [/\bJOIN\s+systemuser\s+(?:AS\s+)?SU\b/i, "the SystemUser join"],
         [/\bJOIN\s+role\s+(?:AS\s+)?R\b/i, "the Role join"],
@@ -537,7 +553,7 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("fullname", "systemuserid", "role_name", "role_businessunit");
     } else if (/\bFROM\s+privilege\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query) && /\bentity\b/i.test(query)) {
       kind = "entity-privileges";
-      assertSqlProjection(query, ["privilege_name"], kind);
+      assertSqlProjection(query, ["privilege_name"], kind, ["p.name AS privilege_name"], true);
       assertSqlShape(query, kind, [
         [/\bJOIN\s+privilegeobjecttypecodes\s+potc\s+ON\s+potc\.privilegeid\s*=\s*p\.privilegeid\b/i, "the privilege-object-type-code relationship"],
         [/\bJOIN\s+entity\s+e\s+ON\s+e\.objecttypecode\s*=\s*potc\.objecttypecode\b/i, "the entity mapping relationship"],
@@ -551,7 +567,13 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("privilege_name");
     } else if (/\bFROM\s+systemuser\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query)) {
       kind = "user-entity-privileges";
-      assertSqlProjection(query, ["fullname", "role_name", "role_businessunit", "privilege_name", "depth"], kind);
+      assertSqlProjection(query, ["fullname", "role_name", "role_businessunit", "privilege_name", "depth"], kind, [
+        "su.fullname",
+        "ur.name AS role_name",
+        "bu.name AS role_businessunit",
+        "p.name AS privilege_name",
+        "CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' ELSE CAST(rp.privilegedepthmask AS VARCHAR(10)) END AS depth"
+      ], true);
       assertSqlShape(query, kind, [
         [/\bJOIN\s+systemuserroles\s+sur\s+ON\s+sur\.systemuserid\s*=\s*su\.systemuserid\b/i, "the user-role membership relationship"],
         [/\bJOIN\s+role\s+ur\s+ON\s+ur\.roleid\s*=\s*sur\.roleid\b/i, "the user's role relationship"],
@@ -573,7 +595,12 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("fullname", "role_name", "role_businessunit", "privilege_name", "depth");
     } else if (/\bFROM\s+role\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\bp\.name\s*=\s*'/i.test(query)) {
       kind = "roles-by-privilege";
-      assertSqlProjection(query, ["role_name", "business_unit", "privilege_name", "depth"], kind);
+      assertSqlProjection(query, ["role_name", "business_unit", "privilege_name", "depth"], kind, [
+        "r.name AS role_name",
+        "bu.name AS business_unit",
+        "p.name AS privilege_name",
+        "CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' ELSE CAST(rp.privilegedepthmask AS VARCHAR(10)) END AS depth"
+      ], true);
       assertSqlShape(query, kind, [
         [/\bJOIN\s+roleprivileges\s+rp\s+ON\s+rp\.roleid\s*=\s*r\.roleid\b/i, "the role-privilege relationship"],
         [/\bJOIN\s+privilege\s+p\s+ON\s+p\.privilegeid\s*=\s*rp\.privilegeid\b/i, "the privilege relationship"],
@@ -588,7 +615,7 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("role_name", "business_unit", "privilege_name", "depth");
     } else if (/\bFROM\s+role\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\br\.name\s*=\s*'/i.test(query)) {
       kind = "role-table-access";
-      assertSqlProjection(query, ["table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess"], kind);
+      assertSqlProjection(query, ["table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess"], kind, roleAccessProjectionExpressions(), false);
       assertSqlShape(query, kind, [
         [/\bGROUP\s+BY\s+e\.logicalname\b/i, "GROUP BY e.logicalname"],
         [/\bISNULL\s*\(\s*MAX\s*\(\s*CASE\b/i, "ISNULL(MAX(CASE...) aggregate semantics"],
@@ -631,7 +658,14 @@ function devLensSecurityAuditBridge(action, p) {
       columns.push("table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess");
     } else if (/\bFROM\s+audit\b/i.test(query) && /\bobjectid\s*=\s*'/i.test(query)) {
       kind = "record-audit";
-      assertSqlProjection(query, ["createdon", "ChangedBy", "Event", "logicalname", "oldvalue", "newvalue"], kind);
+      assertSqlProjection(query, ["createdon", "ChangedBy", "Event", "logicalname", "oldvalue", "newvalue"], kind, [
+        "a.createdon",
+        "u.fullname AS ChangedBy",
+        "CASE a.operation WHEN 1 THEN 'Create' WHEN 2 THEN 'Update' ELSE CAST(a.operation AS VARCHAR(10)) END AS Event",
+        "ca.logicalname",
+        "ca.oldvalue",
+        "ca.newvalue"
+      ], false);
       assertSqlShape(query, kind, [
         [/\bCROSS\s+APPLY\s+OPENJSON\s*\(\s*a\.changedata/i, "audit changedata JSON expansion"],
         [/'\$\.changedAttributes'/i, "the changedAttributes JSON path"],
