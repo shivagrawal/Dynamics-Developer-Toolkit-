@@ -150,6 +150,25 @@
     if (!entities[plan.table]) fail("Metadata is required for base table '" + plan.table + "'.");
     for(const j of plan.joins) if(!entities[j.table]) fail("Metadata is required for joined table '" + j.table + "'.");
     const base=entities[plan.table], attrs=[];
+    const resolveEntity = owner => {
+      const normalized = String(owner || plan.alias).toLowerCase();
+      if (normalized === plan.alias.toLowerCase()) return base;
+      const join = plan.joins.find(item => item.alias.toLowerCase() === normalized);
+      if (!join) fail("Unknown table alias '" + normalized + "'.");
+      return entities[join.table];
+    };
+    const validateField = field => {
+      const entity = resolveEntity(field.tableAlias);
+      if (!entity.columns?.some(column => column.logicalName.toLowerCase() === field.column.toLowerCase() && column.queryable !== false)) {
+        fail("Column '" + field.column + "' is not queryable on table '" + entity.logicalName + "'.");
+      }
+    };
+    const validatePredicate = node => {
+      if (!node) return;
+      if (node.type === "and" || node.type === "or") { validatePredicate(node.left); validatePredicate(node.right); return; }
+      validateField(node.field);
+    };
+    validatePredicate(plan.where);
     const selected=plan.columns.some(c=>c.star)?(base.columns||[]).filter(c=>c.queryable!==false).map(c=>({column:c.logicalName})):plan.columns;
     if(plan.columns.some(c=>c.star)) {
       for(const col of selected) attrs.push('<attribute name="'+escapeXml(col.column)+'"/>');
