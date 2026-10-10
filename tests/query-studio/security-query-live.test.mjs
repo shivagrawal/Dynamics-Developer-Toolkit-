@@ -188,9 +188,16 @@ for (let index = 0; index < queries.length; index++) {
     }
     if (index === 2 || index === 3) {
       for (const row of result.rows) assert.match(String(row.depth), /^(User|Business Unit|Parent:Child BU|Organization|\d+)$/, "Privilege depth CASE mapping is invalid.");
+      const distinctKeys = result.rows.map(row => JSON.stringify(index === 2
+        ? [row.fullname, row.role_name, row.role_businessunit, row.privilege_name, row.depth]
+        : [row.role_name, row.business_unit, row.privilege_name, row.depth]));
+      assert.equal(new Set(distinctKeys).size, distinctKeys.length, "SELECT DISTINCT query returned duplicate rows.");
     }
     if (index === 4) {
       const accessLevels = new Set(["User", "Business Unit", "Parent:Child BU", "Organization", "None"]);
+      const tableNames = result.rows.map(row => row.table_name);
+      assert.ok(tableNames.every(Boolean), "Table-access aggregate returned an empty logical name.");
+      assert.equal(new Set(tableNames).size, tableNames.length, "GROUP BY e.logicalname returned duplicate table rows.");
       for (const row of result.rows) for (const column of expectedColumns[index].slice(1)) {
         assert.ok(accessLevels.has(row[column]), "Access summary returned an unknown depth label.");
       }
