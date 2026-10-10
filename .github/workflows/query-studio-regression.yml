@@ -29,10 +29,11 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check background.js
+          node --check security-audit-service.js
           node --check ui/sql-studio-view.js
           node --check sqlstudio/js/sql-front-end.js
           node --check sqlstudio/js/sql-engine.js
           node -e "JSON.parse(require('node:fs').readFileSync('manifest.json', 'utf8'))"
 
       - name: Run Query Studio regression suite
-        run: node --test tests/query-studio/sql-engine.test.mjs tests/query-studio/sql-front-end.test.mjs tests/query-studio/query-studio-regression.test.mjs tests/query-studio/security-query-corpus.test.mjs
+        run: node --test tests/query-studio/sql-engine.test.mjs tests/query-studio/sql-front-end.test.mjs tests/query-studio/query-studio-regression.test.mjs tests/query-studio/security-query-corpus.test.mjs tests/query-studio/security-query-adapter.test.mjs
