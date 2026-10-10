@@ -1530,7 +1530,7 @@ function stripSqlLiteralsAndComments(sql) {
   let output = "";
   let inString = false;
   let inLineComment = false;
-  let inBlockComment = false;
+  let blockDepth = 0;
   for (let i = 0; i < input.length; i++) {
     const current = input[i];
     const next = input[i + 1];
@@ -1541,12 +1541,16 @@ function stripSqlLiteralsAndComments(sql) {
       } else output += " ";
       continue;
     }
-    if (inBlockComment) {
-      if (current === "*" && next === "/") {
+    if (blockDepth > 0) {
+      if (current === "/" && next === "*") {
         output += "  ";
         i++;
-        inBlockComment = false;
-      } else output += " ";
+        blockDepth++;
+      } else if (current === "*" && next === "/") {
+        output += "  ";
+        i++;
+        blockDepth--;
+      } else output += current === "\n" || current === "\r" ? current : " ";
       continue;
     }
     if (inString) {
@@ -1571,7 +1575,7 @@ function stripSqlLiteralsAndComments(sql) {
       continue;
     }
     if (current === "/" && next === "*") {
-      inBlockComment = true;
+      blockDepth = 1;
       output += "  ";
       i++;
       continue;
