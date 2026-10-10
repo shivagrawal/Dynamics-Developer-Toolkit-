@@ -802,13 +802,21 @@ function pageBridge(action, payload) {
         };
       }
     }
-    const rows = result.value || [];
-    const rowColumns = [...new Set(rows.flatMap(row => Object.keys(row).filter(key =>
-      !key.startsWith("@") && !key.endsWith("@OData.Community.Display.V1.AttributeName") && key !== "@odata.etag"
-    )))];
-    // Prefer the server's declared projection so selected columns that are null for every
-    // returned record still appear in the grid. The primary key may also be included by Dataverse.
-    const columns = contextColumns || rowColumns;
+    const rows = (result.value || []).map(row => {
+      const normalized = {};
+      for (const [key, value] of Object.entries(row)) {
+        // Keep data fields, but omit OData annotations and metadata-only properties.
+        if (key.startsWith("@") || key.includes("@OData.") || key === "@odata.etag") continue;
+        // Dataverse encodes dotted SQL table aliases in row keys, e.g. a_x002e_name.
+        const displayKey = key.replace(/_x002e_/gi, ".");
+        normalized[displayKey] = value;
+      }
+      return normalized;
+    });
+    const rowColumns = [...new Set(rows.flatMap(row => Object.keys(row)))];
+    // OData context may omit aliased JOIN projections. Merge it with actual row fields
+    // so joined columns are visible while context-only fields (including null projections) remain.
+    const columns = [...new Set([...(contextColumns || []), ...rowColumns])];
     return {
       ok: true,
       clientUrl: ctx.clientUrl,
