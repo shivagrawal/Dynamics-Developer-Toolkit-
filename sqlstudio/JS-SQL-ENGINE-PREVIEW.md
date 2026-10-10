@@ -8,13 +8,13 @@ The Query Studio JavaScript engine is an original, bounded SQL-to-FetchXML imple
 - Explicit column projections, SELECT * expansion from metadata, AS output aliases, DISTINCT, and integer TOP from 1 through 5000.
 - One base table with simple INNER JOIN / LEFT JOIN clauses using equality joins to the base table or a previously introduced joined table. Chained joins compile to nested FetchXML link entities.
 - WHERE comparisons (=, !=, <>, >, >=, <, <=), IS NULL, IS NOT NULL, IN, BETWEEN, LIKE, parentheses, AND, and OR, using string, numeric, boolean, and NULL literals where valid.
-- Base-table ORDER BY with ASC or DESC.\n- Basic FetchXML aggregates: COUNT(*), COUNT(column), SUM, AVG, MIN, MAX, and GROUP BY over base-table columns. Every non-aggregate projection must be listed in GROUP BY.
+- Base-table ORDER BY with ASC or DESC, plus bounded OFFSET / FETCH NEXT paging (up to 10,000 rows combined).\n- Basic FetchXML aggregates: COUNT(*), COUNT(column), SUM, AVG, MIN, MAX, and GROUP BY over base-table columns. Every non-aggregate projection must be listed in GROUP BY.
 - Metadata validation for projected columns, filter columns, and join columns.
 - FetchXML value escaping and a read-only execution path using the current Dynamics user's authorized Web API context.
 
 ## Intentionally unsupported for now
 
-CTEs, subqueries, UNION, HAVING, scalar functions and computed expressions, CASE, variables, OFFSET/FETCH, COUNT(DISTINCT), NOT IN, NOT BETWEEN, NOT LIKE, non-equality joins, aggregate queries with joins, and ORDER BY on joined columns are rejected or not implemented. Do not assume SQL4CDS compatibility outside the supported subset.
+CTEs, subqueries, UNION, HAVING, scalar functions and computed expressions, CASE, variables, COUNT(DISTINCT), NOT IN, NOT BETWEEN, NOT LIKE, non-equality joins, aggregate queries with joins, and ORDER BY on joined columns are rejected or not implemented. Do not assume SQL4CDS compatibility outside the supported subset.
 
 ## Safety and result limits
 
