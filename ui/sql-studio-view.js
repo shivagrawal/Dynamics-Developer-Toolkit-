@@ -90,6 +90,26 @@
     render();
   }
 
+  async function resolveEntitySet(clientUrl, logicalName) {
+    const cached = state.ctx?.entitySets?.[logicalName.toLowerCase()];
+    if (cached) return cached;
+    const metadataUrl = new URL("/api/data/v9.2/EntityDefinitions", clientUrl);
+    metadataUrl.searchParams.set("$select", "LogicalName,EntitySetName");
+    metadataUrl.searchParams.set("$filter", `LogicalName eq '${logicalName.replace(/'/g, "''")}'`);
+    const response = await fetch(metadataUrl.toString(), {
+      credentials: "same-origin",
+      headers: {Accept:"application/json","OData-MaxVersion":"4.0","OData-Version":"4.0"},
+      cache: "no-store"
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.error?.message || `Could not resolve table metadata (${response.status}).`);
+    const entitySet = payload.value?.[0]?.EntitySetName;
+    if (!entitySet) throw new Error(`No entity set was found for logical table '${logicalName}'.`);
+    state.ctx.entitySets ||= {};
+    state.ctx.entitySets[logicalName.toLowerCase()] = entitySet;
+    return entitySet;
+  }
+
   async function execute() {
     if (state.running) return;
     if (!state.sql.trim()) { state.error = "Enter a SELECT query first."; render(); return; }
@@ -111,7 +131,13 @@
       if (/\b(DECLARE|INSERT|UPDATE|DELETE|MERGE|EXEC|EXECUTE|ALTER|DROP|CREATE|WITH)\b/i.test(query)) {
         throw new Error("Unsupported for the native endpoint: use one SELECT without DECLARE or CTEs.");
       }
-      const url = new URL("/api/data/v9.2/accounts", clientUrl);
+      // The base entity set must correspond to the query's first FROM table.
+      // Explicitly derive it from the SQL identifier; never accept an arbitrary URL.
+      const fromMatch = query.match(/\\bFROM\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)?[A-Za-z_][A-Za-z0-9_]*)/i);
+      if (!fromMatch) throw new Error("Could not identify the base table in FROM.");
+      const baseTable = fromMatch[1].split(".").pop();
+      const entitySet = await resolveEntitySet(clientUrl, baseTable);
+      const url = new URL(`/api/data/v9.2/${entitySet}`, clientUrl);
       url.searchParams.set("sql", query);
       const response = await fetch(url.toString(), {
         method: "GET",
