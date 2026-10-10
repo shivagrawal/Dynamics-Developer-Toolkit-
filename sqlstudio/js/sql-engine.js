@@ -122,10 +122,10 @@
 
   function escapeXml(value) { return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;"); }
   function attributeName(field, plan) {
-    if (field.alias && field.alias.toLowerCase() !== plan.alias.toLowerCase()) {
-      const join=plan.joins.find(j=>j.alias.toLowerCase()===field.alias.toLowerCase());
-      if (!join) fail("Unknown table alias '" + field.alias + "'.");
-      return {name:field.column,entityAlias:field.alias};
+    if (field.tableAlias && field.tableAlias.toLowerCase() !== plan.alias.toLowerCase()) {
+      const join=plan.joins.find(j=>j.alias.toLowerCase()===field.tableAlias.toLowerCase());
+      if (!join) fail("Unknown table alias '" + field.tableAlias + "'.");
+      return {name:field.column,entityAlias:field.tableAlias};
     }
     return {name:field.column};
   }
