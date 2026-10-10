@@ -21,7 +21,7 @@ function createBridge(options = {}) {
       body = { value: [{ systemuserid: USER_ID, fullname: "USD8 Test User" }] };
     } else if (path.startsWith("roles?fetchXml=")) {
       const roleRow = { roleid: ROLE_ID, name: "Sales Representative", _parentrootroleid_value: ROLE_ID, "bu.name": "Sales BU", "SU.fullname": "USD8 Test User", "SU.systemuserid": USER_ID, "BU.name": "Sales BU" };
-      body = { value: options.bulkRoles ? Array.from({ length: 5000 }, () => ({ ...roleRow })) : [roleRow] };
+      body = { value: options.bulkRoles ? Array.from({ length: 5000 }, () => ({ ...roleRow })) : options.duplicateRoles ? [roleRow, { ...roleRow }] : [roleRow] };
     } else if (path.startsWith("privileges?fetchXml=")) {
       body = { value: [{ name: "prvReadSalesOrder" }, { name: "prvWriteSalesOrder" }, { name: "prvReadSalesOrder" }] };
     } else if (path.startsWith("systemuserrolescollection?fetchXml=")) {
@@ -230,6 +230,14 @@ test("security adapter rejects incomplete joins instead of inventing missing rel
   assert.equal(result.ok, false);
   assert.match(result.error, /Unsupported SQL structure/);
   assert.equal(bridge.calls.length, 0);
+});
+
+test("DISTINCT inside a string literal does not alter query result deduplication", async () => {
+  const bridge = createBridge({ duplicateRoles: true });
+  const sql = queries.userRoles.replace("'%USD8%'", "'%DISTINCT%'");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 2, "A non-DISTINCT SELECT must preserve duplicate rows even when a filter literal contains the word DISTINCT.");
 });
 
 test("security adapter preserves SQL LIKE prefix matching instead of widening it to contains", async () => {
