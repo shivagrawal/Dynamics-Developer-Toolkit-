@@ -164,7 +164,7 @@
     if (aggregateQuery && distinct) fail("DISTINCT with aggregate expressions is not supported in this engine version.");
     if (aggregateQuery && top) fail("TOP with aggregate expressions is not supported in this engine version.");
     if (hasOffset && top) fail("TOP cannot be combined with OFFSET/FETCH in this engine version.");
-    if (offset && aggregateQuery) fail("OFFSET/FETCH with aggregate queries is not supported in this engine version.");
+    if (hasOffset && aggregateQuery) fail("OFFSET/FETCH with aggregate queries is not supported in this engine version.");
     if (aggregateQuery && joins.length) fail("Aggregate queries with joins are not supported in this engine version.");
     if (groupBy.some(g => g.tableAlias && g.tableAlias.toLowerCase() !== baseAlias.toLowerCase())) fail("GROUP BY on joined columns is not supported yet.");
     if (groupBy.some(g => !columns.some(c => !c.aggregate && c.column?.toLowerCase() === g.column.toLowerCase() && (!c.tableAlias || c.tableAlias.toLowerCase() === baseAlias.toLowerCase())))) fail("Every GROUP BY column must appear in the SELECT projection.");
