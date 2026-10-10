@@ -374,6 +374,27 @@ test("FetchXML action runs read-only queries and filters annotation fields", asy
   assert.equal(Object.keys(result.rows[0]).some(key => key.includes("@")), false);
 });
 
+test("FetchXML action applies SQL OFFSET/FETCH after paging", async () => {
+  const firstPage = Array.from({ length: 500 }, (_, index) => ({ contactid: "contact-" + index }));
+  const cookie = '<cookie pagenumber="2" pagingcookie="%253ccookie%2520page%253d%25221%2522%253e%253ccontactid%2520last%253d%2522abc%2522%252f%253e%253c%252fcookie%253e" istracking="False" />';
+  const secondPage = Array.from({ length: 100 }, (_, index) => ({ contactid: "contact-" + (500 + index) }));
+  const harness = createHarness({ fetchXmlResponse: [
+    { entities: firstPage, fetchXmlPagingCookie: cookie },
+    { entities: secondPage }
+  ] });
+  const { result } = await harness.runAction("queryFetchXml", {
+    tableName: "contact",
+    fetchXml: '<fetch><entity name="contact"><attribute name="contactid"/></entity></fetch>',
+    offset: 500,
+    limit: 50
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 50);
+  assert.equal(result.rows[0].contactid, "contact-500");
+  assert.equal(result.rows[49].contactid, "contact-549");
+  assert.equal(result.moreRecords, true);
+});
+
 test("FetchXML action rejects aggregate and mutation-like payloads", async () => {
   const harness = createHarness({ fetchXmlResponse: { entities: [] } });
   const aggregate = await harness.runAction("queryFetchXml", {
