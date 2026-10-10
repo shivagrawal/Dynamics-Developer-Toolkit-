@@ -1525,14 +1525,26 @@ function pageBridge(action, payload) {
   }));
 }
 
+function isSecuritySqlCandidate(sql) {
+  const query = String(sql || "");
+  return /\\bFROM\\s+systemuserroles\\b/i.test(query) ||
+    (/\\bFROM\\s+privilege\\b/i.test(query) && /\\bprivilegeobjecttypecodes\\b/i.test(query)) ||
+    /\\broleprivileges\\b/i.test(query) ||
+    (/\\bFROM\\s+audit\\b/i.test(query) && /\\bCROSS\\s+APPLY\\s+OPENJSON\\b/i.test(query));
+}
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "DEVLENS_ACTION") return;
+  const securitySql = message.action === "querySql" &&
+    isSecuritySqlCandidate(message.payload?.sql) &&
+    typeof devLensSecurityAuditBridge === "function";
   chrome.scripting
     .executeScript({
       target: { tabId: sender.tab.id, allFrames: message.action !== "tool" },
       world: "MAIN",
-      func: pageBridge,
-      args: [message.action, message.payload || {}],
+      func: securitySql ? devLensSecurityAuditBridge : pageBridge,
+      args: securitySql
+        ? ["sqlQuery", { sql: message.payload.sql }]
+        : [message.action, message.payload || {}],
     })
     .then((results) =>
       reply(
