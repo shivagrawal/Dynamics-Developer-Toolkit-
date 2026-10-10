@@ -127,11 +127,11 @@
           .ss-schema-column-type{font-size:11px;color:#94a3b8}.ss-schema-badges{display:flex;flex-wrap:wrap;gap:4px}.ss-schema-badge{font-size:10px;border:1px solid #475569;border-radius:999px;padding:1px 5px;color:#cbd5e1}.ss-schema-badge.warn{color:#fde68a}
           @media(max-width:760px){.ss-schema-grid{grid-template-columns:1fr}.ss-schema-list{max-height:190px}}
         </style>
-        <div class="ss-top"><div class="ss-title">Query Studio</div><span class="ss-pill">READ ONLY</span><button class="ss-btn" data-act="schema">Schema Explorer</button><button class="ss-btn" data-act="context">Detect environment</button><button class="ss-btn primary" data-act="execute" ${state.running ? "disabled" : ""}>Execute (Ctrl+Enter)</button><button class="ss-btn" data-act="clear">Clear results</button></div>
+        <div class="ss-top"><div class="ss-title">Query Studio</div><span class="ss-pill">READ ONLY</span><button class="ss-btn" data-act="schema">Schema Explorer</button><button class="ss-btn" data-act="context">Detect environment</button><button class="ss-btn primary" data-act="execute" ${state.running ? "disabled" : ""}>Execute (native SQL)</button><button class="ss-btn" data-act="executeEngine" ${state.running ? "disabled" : ""}>Execute JS engine (preview)</button><button class="ss-btn" data-act="clear">Clear results</button></div>
         <div class="ss-status">Execution: ${esc(state.status)} ${state.ctx ? " · " + esc(state.ctx.clientUrl) : ""} · ${state.results ? `${state.results.rows?.length || 0} rows · ${state.durationMs} ms` : "No results yet"}</div>
         ${schemaExplorerHtml()}
         <textarea class="ss-editor" spellcheck="false" aria-label="SQL query editor">${esc(state.sql)}</textarea>
-        <div class="ss-meta">Native Dataverse read-only SQL endpoint · one SELECT statement · SELECT * returns the columns exposed by the endpoint · no SQL4CDS-only features such as CTEs or DECLARE. Query runs as your current Dynamics user.</div>
+        <div class="ss-meta">Native Dataverse SQL endpoint remains the default. JS engine preview compiles its supported SELECT subset to FetchXML; unsupported SQL is rejected. Both paths are read-only and run as your current Dynamics user.</div>
         ${state.error ? `<div class="ss-status ss-error">${esc(state.error)}</div>` : ""}
         ${state.results ? `<div class="ss-meta">Query: ${esc(state.lastQuery)} · ${state.results.truncated ? "Results limited" : "Server response received"}</div>` : ""}
         ${state.results ? `<div class="ss-results"><table><thead><tr>${columns.map(c=>`<th title="${esc(c)}">${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td title="${esc(row[c])}">${esc(formatValue(row[c]))}</td>`).join("")}</tr>`).join("")}</tbody></table>${rows.length ? "" : '<div class="ss-empty">The query returned no rows.</div>'}</div><div class="ss-top"><button class="ss-btn" data-act="csv">Export CSV</button><button class="ss-btn" data-act="copy">Copy JSON</button></div>` : ""}
@@ -351,6 +351,70 @@
     }
   }
 
+  async function executeEngine() {
+    if (state.running) return;
+    if (!window.DevLensSqlEngine) { state.error = "JavaScript SQL engine did not load. Reload the Dynamics tab."; render(); return; }
+    state.running = true;
+    state.error = "";
+    state.results = null;
+    state.lastQuery = state.sql + "  [JavaScript SQL engine]";
+    state.status = "Planning SQL and loading metadata…";
+    const started = performance.now();
+    render();
+    try {
+      const api = window.D365AnalyzerApi;
+      if (!api?.send) throw new Error("DevLens Dataverse bridge is not available. Reload the Dynamics tab.");
+      const plan = window.DevLensSqlEngine.plan(state.sql);
+      const names = [...new Set([plan.table, ...plan.joins.map(j => j.table)])];
+      const metadata = { entities: {} };
+      for (const logicalName of names) {
+        const response = await api.send("schemaTable", { logicalName });
+        if (!response?.ok || !response.data) throw new Error(response?.error || "Could not load metadata for " + logicalName + ".");
+        const data = response.data;
+        metadata.entities[logicalName] = {
+          logicalName: data.logicalName,
+          entitySetName: data.entitySetName,
+          primaryIdAttribute: data.primaryIdAttribute,
+          columns: (data.columns || []).map(column => ({
+            logicalName: column.logicalName,
+            queryable: column.validForRead !== false && String(column.attributeType || "").toLowerCase() !== "virtual"
+          }))
+        };
+      }
+      const compiled = window.DevLensSqlEngine.compile(plan, metadata);
+      state.status = "Executing compiled FetchXML…";
+      render();
+      const response = await api.send("queryFetchXml", { tableName: plan.table, fetchXml: compiled.fetchXml });
+      if (!response?.ok) throw new Error(response?.error || "Compiled FetchXML execution failed.");
+      const sourceRows = response.rows || [];
+      const projections = plan.columns.some(column => column.star)
+        ? metadata.entities[plan.table].columns.filter(column => column.queryable).map(column => ({label: column.logicalName, key: column.logicalName}))
+        : plan.columns.map(column => {
+            const label = column.alias || (column.tableAlias ? column.tableAlias + "." : "") + column.column;
+            const key = column.tableAlias && column.tableAlias.toLowerCase() !== plan.alias.toLowerCase()
+              ? column.tableAlias + "_" + column.column
+              : column.column;
+            return { label, key };
+          });
+      const columns = [...new Set(projections.map(p => p.label))];
+      const rows = sourceRows.map(row => {
+        const output = {};
+        for (const projection of projections) output[projection.label] = row[projection.key] ?? row[projection.label] ?? null;
+        return output;
+      });
+      state.results = { columns, rows, truncated: response.moreRecords === true, totalRecordCount: response.rowCount ?? rows.length };
+      state.status = "JavaScript SQL engine completed (" + rows.length + " rows)" + (response.moreRecords ? " · more records available" : "");
+      state.durationMs = Math.round(performance.now() - started);
+    } catch (e) {
+      state.error = e.message || String(e);
+      state.status = "JavaScript SQL engine failed";
+      state.durationMs = Math.round(performance.now() - started);
+    } finally {
+      state.running = false;
+      render();
+    }
+  }
+
   async function act(action) {
     if (action === "context") return detectContext();
     if (action === "schema") {
@@ -373,7 +437,7 @@
     if (action === "insertSelected") return insertSelectedColumns();
     if (action === "generateSelect") return generateSelect(false);
     if (action === "generateAllSelect") return generateSelect(true);
-    if (action === "execute") return execute();
+    if (action === "execute") return execute();\n    if (action === "executeEngine") return executeEngine();
     if (action === "clear") { state.results = null; state.error = ""; state.status = "Ready"; render(); return; }
     if (action === "csv") {
       const columns = state.results?.columns || [];
