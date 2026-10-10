@@ -75,6 +75,11 @@ test("adds a primary-key tie-breaker for non-unique ORDER BY values",()=>{
  assert.ok(q.fetchXml.indexOf('<order attribute="fullname"/>') < q.fetchXml.indexOf('<order attribute="contactid"/>'));
 });
 
+test("adds remaining GROUP BY columns as deterministic aggregate tie-breakers",()=>{
+ const q=engine.compileSql("SELECT statecode, fullname, COUNT(*) AS contact_count FROM contact GROUP BY statecode, fullname ORDER BY statecode",metadata);
+ assert.ok(q.fetchXml.indexOf('<order alias="statecode"/>') < q.fetchXml.indexOf('<order alias="fullname"/>'));
+});
+
 test("orders grouped aggregate rows when SQL omits ORDER BY",()=>{
  const q=engine.compileSql("SELECT statecode, COUNT(*) AS contact_count FROM contact GROUP BY statecode",metadata);
  assert.match(q.fetchXml,/<order alias="statecode"\/>/);
