@@ -12,7 +12,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  const KEYWORDS = new Set(("SELECT DISTINCT TOP FROM WHERE ORDER BY GROUP HAVING ASC DESC AS INNER LEFT JOIN ON AND OR IS NULL NOT LIKE IN BETWEEN").split(/\s+/));
+  const KEYWORDS = new Set(("SELECT DISTINCT TOP FROM WHERE ORDER BY GROUP HAVING ASC DESC AS INNER LEFT JOIN ON AND OR IS NULL NOT LIKE IN BETWEEN OFFSET FETCH NEXT ROWS ONLY").split(/\s+/));
   const OPS = { "=": "eq", "!=": "ne", "<>": "ne", ">": "gt", ">=": "ge", "<": "lt", "<=": "le" };
 
   function tokenize(sql) {
@@ -138,6 +138,22 @@
     if (hasOrder) {
       do { const field=qualified(); let direction="asc"; if(peek("ASC"))take();else if(peek("DESC")){take();direction="desc";} orderBy.push({ ...field,direction }); if(!peek(","))break;take(); } while(true);
     }
+    let offset = 0, fetch = null;
+    if (peek("OFFSET")) {
+      take();
+      if (!tokens[p] || tokens[p].type !== "number") fail("OFFSET requires an integer literal.");
+      offset = Number(take().value);
+      if (!Number.isInteger(offset) || offset < 0 || offset > 100000) fail("OFFSET must be an integer from 0 to 100000.");
+      expect("ROWS");
+      if (peek("FETCH")) {
+        take(); expect("NEXT");
+        if (!tokens[p] || tokens[p].type !== "number") fail("FETCH NEXT requires an integer literal.");
+        fetch = Number(take().value);
+        if (!Number.isInteger(fetch) || fetch < 1 || fetch > 5000) fail("FETCH NEXT must be an integer from 1 to 5000.");
+        expect("ROWS"); expect("ONLY");
+      }
+      if (!hasOrder) fail("OFFSET/FETCH requires ORDER BY for deterministic paging.");
+    }
     if (peek(";")) take();
     if (p !== tokens.length) fail("Unsupported SQL syntax near '" + tokens[p].value + "'.");
     if (columns.some(c=>c.star && !c.aggregate) && columns.length>1) fail("SELECT * cannot be combined with individual columns in this engine version.");
@@ -145,13 +161,15 @@
     if (aggregateQuery && columns.some(c => c.star && !c.aggregate)) fail("SELECT * cannot be combined with GROUP BY or aggregate expressions.");
     if (aggregateQuery && distinct) fail("DISTINCT with aggregate expressions is not supported in this engine version.");
     if (aggregateQuery && top) fail("TOP with aggregate expressions is not supported in this engine version.");
+    if (offset && top) fail("TOP cannot be combined with OFFSET/FETCH in this engine version.");
+    if (offset && aggregateQuery) fail("OFFSET/FETCH with aggregate queries is not supported in this engine version.");
     if (aggregateQuery && joins.length) fail("Aggregate queries with joins are not supported in this engine version.");
     if (groupBy.some(g => g.tableAlias && g.tableAlias.toLowerCase() !== baseAlias.toLowerCase())) fail("GROUP BY on joined columns is not supported yet.");
     if (groupBy.some(g => !columns.some(c => !c.aggregate && c.column?.toLowerCase() === g.column.toLowerCase() && (!c.tableAlias || c.tableAlias.toLowerCase() === baseAlias.toLowerCase())))) fail("Every GROUP BY column must appear in the SELECT projection.");
     if (aggregateQuery && columns.some(c => !c.aggregate && !groupBy.some(g => g.column.toLowerCase() === c.column.toLowerCase()))) fail("Non-aggregate SELECT columns must appear in GROUP BY.");
     const aliases = [baseAlias.toLowerCase(), ...joins.map(join => join.alias.toLowerCase())];
     if (new Set(aliases).size !== aliases.length) fail("Table aliases must be unique within a query.");
-    return {type:"select",table,alias:baseAlias,columns,distinct,top,where,orderBy,joins,groupBy,aggregateQuery};
+    return {type:"select",table,alias:baseAlias,columns,distinct,top,where,orderBy,joins,groupBy,aggregateQuery,offset,fetch};
   }
 
   function escapeXml(value) { return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;"); }
