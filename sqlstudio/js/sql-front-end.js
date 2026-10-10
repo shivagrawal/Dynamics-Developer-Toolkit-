@@ -17,7 +17,7 @@
 
   const KEYWORDS = new Set(("SELECT DISTINCT TOP FROM WHERE JOIN INNER LEFT RIGHT FULL OUTER CROSS ON " +
     "AS AND OR NOT NULL IS LIKE IN EXISTS BETWEEN GROUP BY HAVING ORDER ASC DESC OFFSET FETCH " +
-    "UNION ALL INSERT INTO VALUES UPDATE SET DELETE EXEC EXECUTE WITH").split(/\\s+/));
+    "UNION ALL INSERT INTO VALUES UPDATE SET DELETE EXEC EXECUTE WITH").split(/\s+/));
 
   function tokenize(sql) {
     sql = String(sql || "");
@@ -26,8 +26,8 @@
     const push = (type, start, end) => tokens.push({ type, value: sql.slice(start, end), start, end });
     while (i < sql.length) {
       const start = i, c = sql[i], n = sql[i + 1];
-      if (/\\s/.test(c)) { i++; while (i < sql.length && /\\s/.test(sql[i])) i++; push("whitespace", start, i); continue; }
-      if (c === "-" && n === "-") { i += 2; while (i < sql.length && sql[i] !== "\\n") i++; push("comment", start, i); continue; }
+      if (/\s/.test(c)) { i++; while (i < sql.length && /\s/.test(sql[i])) i++; push("whitespace", start, i); continue; }
+      if (c === "-" && n === "-") { i += 2; while (i < sql.length && sql[i] !== "\n") i++; push("comment", start, i); continue; }
       if (c === "/" && n === "*") {
         i += 2; let depth = 1;
         while (i < sql.length && depth) {
@@ -56,7 +56,7 @@
         const value = sql.slice(start, i);
         push(KEYWORDS.has(value.toUpperCase()) ? "keyword" : "word", start, i); continue;
       }
-      if (/\\d/.test(c)) { i++; while (i < sql.length && /[\\d.]/.test(sql[i])) i++; push("number", start, i); continue; }
+      if (/\d/.test(c)) { i++; while (i < sql.length && /[\d.]/.test(sql[i])) i++; push("number", start, i); continue; }
       const two = sql.slice(i, i + 2);
       if (["<=", ">=", "<>", "!=", "!<", "!>"].includes(two)) { i += 2; push("operator", start, i); continue; }
       i++; push("punctuation", start, i);
