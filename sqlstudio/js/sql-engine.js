@@ -23,8 +23,25 @@
       if (/\s/.test(c)) { i++; while (i < sql.length && /\s/.test(sql[i])) i++; continue; }
       if (c === "-" && n === "-") { i += 2; while (i < sql.length && sql[i] !== "\n") i++; continue; }
       if (c === "/" && n === "*") { i += 2; let d = 1; while (i < sql.length && d) { if (sql[i] === "/" && sql[i+1] === "*") { d++; i+=2; } else if (sql[i] === "*" && sql[i+1] === "/") { d--; i+=2; } else i++; } if (d) throw Error("Unterminated SQL block comment."); continue; }
-      if (c === "'" || c === '"') { const q = c; i++; while (i < sql.length) { if (sql[i] === q && sql[i+1] === q) { i+=2; continue; } if (sql[i] === q) { i++; break; } i++; } if (sql[i-1] !== q) throw Error("Unterminated SQL quoted value."); add(q === "'" ? "string" : "identifier", s, i); continue; }
-      if (c === "[") { i++; while (i < sql.length) { if (sql[i] === "]" && sql[i+1] === "]") { i+=2; continue; } if (sql[i++] === "]") break; } if (sql[i-1] !== "]") throw Error("Unterminated bracketed identifier."); add("identifier",s,i); continue; }
+      if (c === "'" || c === '"') {
+        const q = c; let closed = false; i++;
+        while (i < sql.length) {
+          if (sql[i] === q && sql[i+1] === q) { i+=2; continue; }
+          if (sql[i] === q) { i++; closed = true; break; }
+          i++;
+        }
+        if (!closed) throw Error("Unterminated SQL quoted value.");
+        add(q === "'" ? "string" : "identifier", s, i); continue;
+      }
+      if (c === "[") {
+        let closed = false; i++;
+        while (i < sql.length) {
+          if (sql[i] === "]" && sql[i+1] === "]") { i+=2; continue; }
+          if (sql[i++] === "]") { closed = true; break; }
+        }
+        if (!closed) throw Error("Unterminated bracketed identifier.");
+        add("identifier",s,i); continue;
+      }
       if (/[A-Za-z_]/.test(c)) { i++; while (i < sql.length && /[A-Za-z0-9_$]/.test(sql[i])) i++; const v=sql.slice(s,i); add(KEYWORDS.has(v.toUpperCase())?"keyword":"identifier",s,i); continue; }
       if (/\d/.test(c) || (c === "-" && /\d/.test(n || ""))) { i++; while (i < sql.length && /[\d.]/.test(sql[i])) i++; add("number",s,i); continue; }
       const two=sql.slice(i,i+2); if (["<=",">=","<>","!="].includes(two)) { i+=2; add("operator",s,i); continue; }
