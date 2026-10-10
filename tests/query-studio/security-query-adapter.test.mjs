@@ -57,9 +57,15 @@ function createBridge(options = {}) {
       activeAuditDetails++;
       maxConcurrentAuditDetails = Math.max(maxConcurrentAuditDetails, activeAuditDetails);
       if (options.auditDelayMs) await new Promise(resolve => setTimeout(resolve, options.auditDelayMs));
-      body = { AuditDetail: (options.auditOperation ?? 2) === 1
-        ? { OldValue: {}, NewValue: { name: "After", customfield: "new" } }
-        : { OldValue: { name: "Before", customfield: "old" }, NewValue: { name: "After", customfield: "new" } } };
+      if (options.bulkAuditAttributes) {
+        const oldValues = {};
+        for (let index = 0; index < 1001; index++) oldValues["field" + index] = "old" + index;
+        body = { AuditDetail: { OldValue: oldValues, NewValue: {} } };
+      } else {
+        body = { AuditDetail: (options.auditOperation ?? 2) === 1
+          ? { OldValue: {}, NewValue: { name: "After", customfield: "new" } }
+          : { OldValue: { name: "Before", customfield: "old" }, NewValue: { name: "After", customfield: "new" } } };
+      }
       activeAuditDetails--;
     }
     return { ok: true, status: 200, statusText: "OK", json: async () => body };
@@ -373,6 +379,14 @@ test("audit result cap is explicit when more than 1,000 audit records are availa
   const result = await bridge.run(queries.audit);
   assert.equal(result.ok, true);
   assert.equal(result.rows.length, 2000);
+  assert.equal(result.truncated, true);
+  assert.match(result.warning, /may be incomplete/);
+});
+
+test("audit attribute row cap bounds expanded details and reports truncation", async () => {
+  const result = await createBridge({ bulkAudits: 20, bulkAuditAttributes: true }).run(queries.audit);
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 10000);
   assert.equal(result.truncated, true);
   assert.match(result.warning, /may be incomplete/);
 });
