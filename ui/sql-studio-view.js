@@ -78,10 +78,7 @@
     render();
     try {
       const response = await activeContext();
-      // The shell context normally contains clientUrl; fail clearly if the environment is unavailable.
-      const clientUrl = response.clientUrl || response.data?.clientUrl;
-      if (!clientUrl) throw new Error("Environment URL was not returned by DevLens context.");
-      state.ctx = { ...response, clientUrl };
+      state.ctx = { ...response, clientUrl: response.clientUrl };
       state.status = "Environment detected";
     } catch (e) {
       state.error = e.message || String(e);
@@ -90,77 +87,32 @@
     render();
   }
 
-  async function resolveEntitySet(clientUrl, logicalName) {
-    const cached = state.ctx?.entitySets?.[logicalName.toLowerCase()];
-    if (cached) return cached;
-    const metadataUrl = new URL("/api/data/v9.2/EntityDefinitions", clientUrl);
-    metadataUrl.searchParams.set("$select", "LogicalName,EntitySetName");
-    metadataUrl.searchParams.set("$filter", `LogicalName eq '${logicalName.replace(/'/g, "''")}'`);
-    const response = await fetch(metadataUrl.toString(), {
-      credentials: "same-origin",
-      headers: {Accept:"application/json","OData-MaxVersion":"4.0","OData-Version":"4.0"},
-      cache: "no-store"
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.error?.message || `Could not resolve table metadata (${response.status}).`);
-    const entitySet = payload.value?.[0]?.EntitySetName;
-    if (!entitySet) throw new Error(`No entity set was found for logical table '${logicalName}'.`);
-    state.ctx.entitySets ||= {};
-    state.ctx.entitySets[logicalName.toLowerCase()] = entitySet;
-    return entitySet;
-  }
-
   async function execute() {
     if (state.running) return;
     if (!state.sql.trim()) { state.error = "Enter a SELECT query first."; render(); return; }
-    state.running = true; state.error = ""; state.results = null; state.lastQuery = state.sql; state.status = "Executing…";
-    const started = performance.now(); render();
+    state.running = true;
+    state.error = "";
+    state.results = null;
+    state.lastQuery = state.sql;
+    state.status = "Executing…";
+    const started = performance.now();
+    render();
+
     try {
-      if (!state.ctx?.clientUrl) {
-        const response = await activeContext();
-        const clientUrl = response.clientUrl || response.data?.clientUrl;
-        if (!clientUrl) throw new Error("Environment URL unavailable. Use Detect environment and retry.");
-        state.ctx = { ...response, clientUrl };
-      }
-      const { clientUrl } = state.ctx;
-      const query = state.sql.trim();
-      // Client-side guard is UX only; Dataverse enforces SELECT-only at the endpoint.
-      if (!/^SELECT\b/i.test(query) || /;\s*\S/.test(query.replace(/;\s*$/, ""))) {
-        throw new Error("This endpoint accepts a single SELECT statement only.");
-      }
-      if (/\b(DECLARE|INSERT|UPDATE|DELETE|MERGE|EXEC|EXECUTE|ALTER|DROP|CREATE|WITH)\b/i.test(query)) {
-        throw new Error("Unsupported for the native endpoint: use one SELECT without DECLARE or CTEs.");
-      }
-      // The base entity set must correspond to the query's first FROM table.
-      // Explicitly derive it from the SQL identifier; never accept an arbitrary URL.
-      const fromMatch = query.match(/\bFROM\s+((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)/i);
-      if (!fromMatch) throw new Error("Could not identify the base table in FROM.");
-      const baseTable = fromMatch[1].split(".").pop();
-      const entitySet = await resolveEntitySet(clientUrl, baseTable);
-      const url = new URL(`/api/data/v9.2/${entitySet}`, clientUrl);
-      url.searchParams.set("sql", query);
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        credentials: "same-origin",
-        headers: {
-          Accept: "application/json",
-          "OData-MaxVersion": "4.0",
-          "OData-Version": "4.0",
-          Prefer: 'odata.include-annotations="*"'
-        },
-        cache: "no-store"
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error?.message || `Dataverse SQL request failed (${response.status}).`);
-      const data = Array.isArray(payload.value) ? payload.value : [];
-      const excluded = new Set(["@odata.etag"]);
-      const cols = [...new Set(data.flatMap(row => Object.keys(row).filter(k => !k.startsWith("@") && !k.endsWith("@OData.Community.Display.V1.AttributeName") && !excluded.has(k))))];
+      const api = window.D365AnalyzerApi;
+      if (!api?.send) throw new Error("DevLens Dataverse bridge is not available. Reload the Dynamics tab.");
+      const response = await api.send("querySql", { sql: state.sql });
+      if (!response?.ok) throw new Error(response?.error || "Query failed.");
+      state.ctx = { clientUrl: response.clientUrl, environmentId: response.environmentId, currentUser: response.currentUser };
+      const rows = response.rows || [];
+      const columns = response.columns || [];
       state.results = {
-        columns: cols,
-        rows: data.map(row => Object.fromEntries(cols.map(key => [key, row[key] ?? null]))),
-        truncated: false
+        columns,
+        rows: rows.map(row => Object.fromEntries(columns.map(key => [key, row[key] ?? null]))),
+        truncated: response.totalRecordCountLimitExceeded === true,
+        totalRecordCount: response.totalRecordCount ?? null
       };
-      state.status = "Query completed";
+      state.status = "Query completed as " + (response.currentUser?.name || "current Dynamics user");
       state.durationMs = Math.round(performance.now() - started);
     } catch (e) {
       state.error = e.message || String(e);
