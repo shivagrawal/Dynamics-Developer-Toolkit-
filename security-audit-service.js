@@ -251,6 +251,7 @@ function devLensSecurityAuditBridge(action, p) {
   }
   function sqlDistinct(rows, keys) {
     const seen = new Set();
+    // Approximate the Dataverse SQL surface's usual case/accent-insensitive string comparison.
     const collationKey = value => {
       if (typeof value !== "string") return value ?? null;
       return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
