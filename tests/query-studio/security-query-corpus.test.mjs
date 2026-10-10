@@ -66,7 +66,7 @@ test("security query 1: user roles, role business unit, aliases and LIKE", () =>
   assert.match(result.fetchXml, /<link-entity name="businessunit" alias="BU"/);
   assert.match(result.fetchXml, /operator="like"/);
   assert.deepEqual(result.resultColumns.map(column => column.label), [
-    "SU.fullname", "SU.systemuserid", "role_name", "role_businessunit"
+    "su.fullname", "su.systemuserid", "role_name", "role_businessunit"
   ]);
 });
 
@@ -77,7 +77,7 @@ test("security query 2: distinct privilege names by entity and ORDER BY", () => 
   assert.match(result.fetchXml, /<entity name="privilege">/);
   assert.match(result.fetchXml, /<link-entity name="privilegeobjecttypecodes" alias="potc"/);
   assert.match(result.fetchXml, /<link-entity name="entity" alias="e"/);
-  assert.match(result.fetchXml, /attribute="logicalname" operator="eq"><value>salesorder<\/value>/);
+  assert.match(result.fetchXml, /attribute="logicalname" operator="eq" entityname="e"><value>salesorder<\/value>/);
   assert.ok(result.fetchXml.includes('<order attribute="name"'));
   assert.deepEqual(result.resultColumns.map(column => column.label), ["privilege_name"]);
 });
