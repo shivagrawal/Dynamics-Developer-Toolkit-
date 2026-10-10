@@ -144,6 +144,16 @@ function createLiveBridge() {
       const body = await response.json().catch(() => ({}));
       assert.equal(response.ok, true, "Dataverse API request failed (HTTP " + response.status + "): " + (body.error?.message || "no details"));
       return body;
+    },
+    request: async (method, path, payload) => {
+      const response = await authenticatedFetch(baseUrl + "/api/data/v9.2/" + path, {
+        method,
+        headers: { "Content-Type": "application/json", Prefer: "return=representation" },
+        body: payload === undefined ? undefined : JSON.stringify(payload)
+      });
+      const body = await response.json().catch(() => ({}));
+      assert.equal(response.ok, true, "Dataverse fixture request failed (HTTP " + response.status + "): " + (body.error?.message || "no details"));
+      return body;
     }
   };
 }
@@ -253,6 +263,34 @@ test("live roles-by-privilege query returns roles for a standard account privile
   assert.ok(result.rows.length > 0, "Expected at least one role to contain the selected standard account privilege.");
   for (const row of result.rows) assert.ok(row.role_name && row.business_unit && row.privilege_name && row.depth);
   console.log("Live roles-by-privilege adapter: PASS; matching rows=" + result.rowCount);
+});
+
+test("live audit adapter expands a disposable record's actual audited attribute change", async t => {
+  const unique = "DevLens SQL Studio audit integration " + new Date().toISOString() + " " + Math.random().toString(36).slice(2, 8);
+  let accountId = "";
+  try {
+    const created = await bridge.request("POST", "accounts", { name: unique, description: "DevLens audit fixture before update" });
+    accountId = String(created.accountid || "").replace(/[{}]/g, "");
+    assert.match(accountId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "Dataverse did not return the temporary account ID.");
+    await bridge.request("PATCH", "accounts(" + accountId + ")", { description: "DevLens audit fixture after update" });
+    const query = queries[5].replace("bb20fca4-e8a2-f111-b8db-7c1e5280e98a", accountId);
+    const result = await bridge.run(query);
+    assert.equal(result.ok, true, "Audit adapter failed for the temporary record: " + (result.error || "unknown error"));
+    assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")), "Audit details API was not called.");
+    const descriptionChange = result.rows.find(row => row.logicalname === "description" &&
+      String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
+    if (!descriptionChange) {
+      const auditRows = await bridge.get("audits?$select=auditid&$filter=_objectid_value%20eq%20" + accountId + "&$top=5");
+      if (!(auditRows.value || []).length) {
+        t.skip("Dataverse auditing is disabled or no audit history is available for the disposable fixture.");
+        return;
+      }
+      assert.ok(descriptionChange, "Audit details were returned but the known description change was not reconstructed.");
+    }
+    console.log("Live disposable audit fixture: PASS; audit attribute rows=" + result.rowCount);
+  } finally {
+    if (accountId) await bridge.request("DELETE", "accounts(" + accountId + ")");
+  }
 });
 
 test("live audit detail expansion is exercised when the environment has audit rows", async t => {
