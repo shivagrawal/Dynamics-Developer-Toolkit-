@@ -819,6 +819,8 @@ function pageBridge(action, payload) {
           error: "Dataverse did not return a verifiable SQL result projection. Query Studio has stopped this result rather than displaying potentially unrelated columns. Check whether the SQL query option is supported by this environment."
         };
       }
+      // SELECT * is verified by the response context itself; it defines the retrievable result columns.
+      if (!(expectedProjection.length === 1 && expectedProjection[0] === "*")) {
       const actual = new Set(contextColumns.map(column => column.toLowerCase()));
       const expected = new Set(expectedProjection);
       const primaryId = String(metadata.PrimaryIdAttribute || "").toLowerCase();
@@ -853,6 +855,7 @@ function pageBridge(action, payload) {
             expectedProjection.join(", ") + ". Returned metadata: " + contextColumns.join(", ") +
             ". " + details + ". Query Studio has stopped this result rather than displaying unrelated columns. Check the SQL endpoint response and the table/column names."
         };
+      }
       }
     }
     const rows = (result.value || []).map(row => {
