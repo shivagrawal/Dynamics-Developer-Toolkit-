@@ -14,7 +14,7 @@ The Query Studio JavaScript engine is an original, bounded SQL-to-FetchXML imple
 
 ## Intentionally unsupported for now
 
-CTEs, subqueries, UNION, HAVING, scalar functions and computed expressions, CASE, variables, NOT IN, NOT BETWEEN, NOT LIKE, non-equality joins, aggregate queries with joins, and ORDER BY on joined columns are rejected or not implemented. Do not assume SQL4CDS compatibility outside the supported subset.
+CTEs, subqueries, UNION, HAVING, scalar functions and computed expressions, CASE, variables, NOT IN, NOT BETWEEN, NOT LIKE, non-equality joins and aggregate queries with joins are rejected or not implemented. Do not assume SQL4CDS compatibility outside the supported subset.
 
 ## Safety and result limits
 
