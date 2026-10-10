@@ -334,6 +334,27 @@
         return '<order attribute="'+escapeXml(column.column)+'"'+entityName+'/>';
       }).join("");
     }
+    // Add tie-breakers so paged results remain deterministic when SQL orders by non-unique values.
+    if (!plan.top && !plan.aggregateQuery && plan.orderBy.length) {
+      const orderKeys = new Set(plan.orderBy.map(order => {
+        const projection = plan.columns.find(column => !column.aggregate && column.alias && column.alias.toLowerCase() === order.column.toLowerCase());
+        const owner = (order.tableAlias || projection?.tableAlias || plan.alias).toLowerCase();
+        return owner + "." + String(projection?.column || order.column).toLowerCase();
+      }));
+      if (plan.distinct) {
+        for (const column of selected.filter(item => !item.aggregate)) {
+          const owner = (column.tableAlias || plan.alias).toLowerCase();
+          const key = owner + "." + String(column.column).toLowerCase();
+          if (orderKeys.has(key)) continue;
+          const entityName = owner === plan.alias.toLowerCase() ? "" : ' entityname="'+escapeXml(owner)+'"';
+          orders += '<order attribute="'+escapeXml(column.column)+'"'+entityName+'/>';
+          orderKeys.add(key);
+        }
+      } else if (base.primaryIdAttribute &&
+          !orderKeys.has(plan.alias.toLowerCase() + "." + base.primaryIdAttribute.toLowerCase())) {
+        orders += '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
+      }
+    }
     // Deterministic ordering makes FetchXML paging stable when SQL leaves row order unspecified.
     if (!plan.aggregateQuery && !plan.top && !plan.distinct && !orders && base.primaryIdAttribute) orders = '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
     const filters=plan.where?conditionXml(plan.where,plan):"";
