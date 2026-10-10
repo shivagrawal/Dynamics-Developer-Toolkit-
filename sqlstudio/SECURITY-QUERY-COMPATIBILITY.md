@@ -29,7 +29,7 @@ The generic compiler in `sqlstudio/js/sql-engine.js` remains a bounded SQL subse
 ## Safety and compatibility boundaries
 
 - Read-only execution only; writes and multiple SQL statements are rejected.
-- User/role FetchXML queries are bounded at 5,000 records; the audit query is bounded at 1,000 audit records per execution. These bounds must be surfaced as truncation warnings before treating very large results as complete.
+- User-role and user-privilege FetchXML queries are bounded at 5,000 rows; entity/role privilege queries are bounded at 10,000 rows; audit retrieval examines at most 1,000 audit records per execution. The adapter returns a truncation warning when a configured cap is reached, and Query Studio displays that warning with the result metadata.
 - The six supplied query shapes are implemented by an explicit compatibility adapter, not by a complete T-SQL interpreter. Other security SQL shapes and generic SQL Server constructs remain unsupported until they have a dedicated implementation and regression coverage.
 - Query 6 uses Dataverse audit APIs because audit history is not available through the Dataverse TDS/SQL endpoint. A caller needs the relevant audit-reading privileges.
 - Keep all work on `feature/sql4cds-query-studio`; do not merge into `main` without explicit approval.
