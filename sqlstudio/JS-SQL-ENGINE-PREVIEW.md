@@ -7,7 +7,7 @@ The Query Studio JavaScript engine is an original, bounded SQL-to-FetchXML imple
 - Read-only single SELECT statements.
 - Explicit column projections, SELECT * expansion from metadata, AS output aliases, DISTINCT, and integer TOP from 1 through 5000.
 - One base table with simple INNER JOIN / LEFT JOIN clauses using equality joins to the base table or a previously introduced joined table. Chained joins compile to nested FetchXML link entities.
-- WHERE comparisons (=, !=, <>, >, >=, <, <=), IS NULL, IS NOT NULL, IN, BETWEEN, LIKE, parentheses, AND, and OR, using string, numeric, boolean, and NULL literals where valid.
+- WHERE comparisons (=, !=, <>, >, >=, <, <=), IS NULL, IS NOT NULL, IN / NOT IN, BETWEEN / NOT BETWEEN, LIKE / NOT LIKE, parentheses, AND, and OR, using string, numeric, boolean, and NULL literals where valid.
 - Base-table ORDER BY with ASC or DESC, plus bounded OFFSET / FETCH NEXT paging (up to 10,000 rows combined).\n- Basic FetchXML aggregates: COUNT(*), COUNT(column), COUNT(DISTINCT column), SUM, AVG, MIN, MAX, and GROUP BY over base-table columns. Every non-aggregate projection must be listed in GROUP BY.
 - Metadata validation for projected columns, filter columns, and join columns.
 - FetchXML value escaping and a read-only execution path using the current Dynamics user's authorized Web API context.
