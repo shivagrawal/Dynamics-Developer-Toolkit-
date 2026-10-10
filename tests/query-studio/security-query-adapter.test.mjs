@@ -171,6 +171,16 @@ test("security adapter rejects incomplete joins instead of inventing missing rel
   assert.equal(bridge.calls.length, 0);
 });
 
+test("security adapter preserves SQL LIKE prefix matching instead of widening it to contains", async () => {
+  const bridge = createBridge();
+  const sql = queries.userRoles.replace("'%USD8%'", "'USD8%'");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, true);
+  const fetchXml = decodeURIComponent(bridge.calls.find(path => path.startsWith("roles?fetchXml=")));
+  assert.match(fetchXml, /operator='like' value='USD8%'/);
+  assert.doesNotMatch(fetchXml, /operator='like' value='%USD8%'/);
+});
+
 test("security adapter treats semicolons inside string literals as data", async () => {
   const bridge = createBridge();
   const sql = queries.userRoles.replace("'%USD8%'", "'%USD8; Test%'");
