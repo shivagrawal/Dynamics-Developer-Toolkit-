@@ -835,7 +835,7 @@ function pageBridge(action, payload) {
         .filter(mapping =>
           actual.has(mapping.backing) &&
           rowKeys.has(mapping.backing) &&
-          new RegExp("(?:^|[,(])\\s*" + mapping.column.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\new RegExp("(?:^|[,(])\\s*" + mapping.column + "_[A-Za-z0-9_]*\\s*\\(", "i").test(result["@odata.context"] || "")") + "_[A-Za-z0-9_]*\\s*\\(", "i").test(result["@odata.context"] || "")
+          new RegExp("(?:^|[,(])\\s*" + mapping.column.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&") + "_[A-Za-z0-9_]*\\s*\\(", "i").test(result["@odata.context"] || "")
         );
       const lookupBackingFields = new Set(lookupMappings.map(mapping => mapping.backing));
       const lookupColumns = new Set(lookupMappings.map(mapping => mapping.column));
