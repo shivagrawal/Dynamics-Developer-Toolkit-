@@ -364,11 +364,43 @@ function devLensSecurityAuditBridge(action, p) {
     }
     return { rows: sqlSort(output, [["createdon", "desc"], ["logicalname", "asc"]]), truncated };
   }
+  function stripSqlComments(sql) {
+    let out = "", quote = "", line = false, block = false;
+    for (let i = 0; i < String(sql).length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (line) { if (ch === "\n" || ch === "\r") { line = false; out += ch; } else out += " "; continue; }
+      if (block) { if (ch === "*" && next === "/") { out += "  "; i++; block = false; } else out += ch === "\n" || ch === "\r" ? ch : " "; continue; }
+      if (quote) { out += ch; if (ch === quote && next === quote) { out += next; i++; } else if (ch === quote) quote = ""; continue; }
+      if (ch === "'" || ch === '"') { quote = ch; out += ch; continue; }
+      if (ch === "[") { quote = "]"; out += ch; continue; }
+      if (ch === "-" && next === "-") { line = true; out += "  "; i++; continue; }
+      if (ch === "/" && next === "*") { block = true; out += "  "; i++; continue; }
+      out += ch;
+    }
+    if (block) throw Error("Unterminated SQL block comment.");
+    if (quote) throw Error("Unterminated SQL quoted value or identifier.");
+    return out;
+  }
+  function hasMultipleSqlStatements(sql) {
+    let quote = "", ended = false;
+    for (let i = 0; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (quote) { if (ch === quote && next === quote) { i++; continue; } if (ch === quote) quote = ""; continue; }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (ch === "[") { quote = "]"; continue; }
+      if (ch === ";") { ended = true; continue; }
+      if (ended && !/\s/.test(ch)) return true;
+    }
+    return false;
+  }
+
   async function sqlQuery(sql) {
-    const query = S(sql).trim();
-    if (!query || !/^SELECT\b/i.test(query)) throw Error("Read-only SQL mode accepts SELECT statements only.");
-    if (/;\s*\S/.test(query.replace(/;\s*$/, ""))) throw Error("Run one SELECT statement at a time.");
-    if (query.length > 100000) throw Error("Query exceeds the 100,000 character limit.");
+    const original = S(sql);
+    if (!original.trim()) throw Error("Read-only SQL mode accepts SELECT statements only.");
+    if (original.length > 100000) throw Error("Query exceeds the 100,000 character limit.");
+    const query = stripSqlComments(original).trim();
+    if (!query || !/^SELECT\\b/i.test(query)) throw Error("Read-only SQL mode accepts SELECT statements only.");
+    if (hasMultipleSqlStatements(query)) throw Error("Run one SQL statement at a time.");
     const columns = [], rows = [];
     let kind = "";
     let truncated = false;
