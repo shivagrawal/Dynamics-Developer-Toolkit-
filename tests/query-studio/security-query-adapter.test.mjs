@@ -162,6 +162,15 @@ test("security adapter rejects a projection it cannot faithfully return before a
   assert.equal(bridge.calls.length, 0);
 });
 
+test("security adapter preserves exact SQL output alias casing", async () => {
+  const bridge = createBridge();
+  const sql = queries.userRoles.replace("AS role_name", "AS Role_Name");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Unsupported SELECT projection/);
+  assert.equal(bridge.calls.length, 0);
+});
+
 test("security adapter rejects incomplete joins instead of inventing missing relationships", async () => {
   const bridge = createBridge();
   const sql = queries.userRoles.replace("INNER JOIN Role AS R ON SUR.roleid = R.roleid INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid", "");
