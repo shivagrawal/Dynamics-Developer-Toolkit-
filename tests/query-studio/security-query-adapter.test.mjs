@@ -31,13 +31,18 @@ function createBridge(options = {}) {
       if (decoded.includes("prvReadwesco_legalentity")) {
         body = { value: [{ "r.roleid": ROLE_ID, "r.name": "Sales Representative", "bu.name": "Sales BU", "p.name": "prvReadwesco_legalentity", privilegedepthmask: options.roleDepthMask ?? 8 }] };
       } else {
-        body = { value: [
+        const accessRows = [
           { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvCreateAccount", privilegedepthmask: 1, "e.logicalname": "account" },
           { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvReadAccount", privilegedepthmask: 2, "e.logicalname": "account" },
           { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvWriteAccount", privilegedepthmask: 0, "e.logicalname": "account" },
           { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvAppendToAccount", privilegedepthmask: 4, "e.logicalname": "account" },
           { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvReadContact", privilegedepthmask: 8, "e.logicalname": "contact" }
-        ] };
+        ];
+        if (options.extraReadDepth != null) accessRows.push({
+          "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU",
+          "p.name": "prvReadAccount", privilegedepthmask: options.extraReadDepth, "e.logicalname": "account"
+        });
+        body = { value: accessRows };
       }
     } else if (path.startsWith("audits?")) {
       const audit = { auditid: AUDIT_ID, createdon: "2026-01-01T00:00:00Z", operation: options.auditOperation ?? 2, "_userid_value@OData.Community.Display.V1.FormattedValue": "Test Admin", objecttypecode: "account" };
@@ -144,10 +149,18 @@ test("security query 5 calculates per-table access and defaults missing values t
   const contact = result.rows.find(row => row.table_name === "contact");
   assert.equal(account.CreateAccess, "User");
   assert.equal(account.ReadAccess, "Business Unit");
+  assert.equal(account.AppendAccess, "None");
   assert.equal(account.AppendToAccess, "Parent:Child BU");
   assert.equal(account.DeleteAccess, "None");
   assert.equal(contact.CreateAccess, "None");
   assert.equal(contact.ReadAccess, "Organization");
+});
+
+test("MAX over access-depth labels matches SQL string aggregate ordering", async () => {
+  const result = await createBridge({ extraReadDepth: 1 }).run(queries.roleAccess);
+  assert.equal(result.ok, true);
+  const account = result.rows.find(row => row.table_name === "account");
+  assert.equal(account.ReadAccess, "User");
 });
 
 test("security query 6 expands audit details to one row per changed attribute", async () => {
