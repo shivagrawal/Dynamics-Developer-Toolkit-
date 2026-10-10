@@ -268,6 +268,12 @@ test("live roles-by-privilege query returns roles for a standard account privile
 test("live audit adapter expands a disposable record's actual audited attribute change", async t => {
   const unique = "DevLens SQL Studio audit integration " + new Date().toISOString() + " " + Math.random().toString(36).slice(2, 8);
   let accountId = "";
+  const organization = await bridge.get("organizations?$select=isauditenabled&$top=1");
+  const accountMetadata = await bridge.get("EntityDefinitions(LogicalName='account')?$select=LogicalName,IsAuditEnabled");
+  if (organization.value?.[0]?.isauditenabled !== true || accountMetadata.IsAuditEnabled?.Value !== true) {
+    t.skip("Organization-level or account-level auditing is disabled; skipping the write-based audit fixture without changing environment settings.");
+    return;
+  }
   try {
     const created = await bridge.request("POST", "accounts", { name: unique, description: "DevLens audit fixture before update" });
     accountId = String(created.accountid || "").replace(/[{}]/g, "");
