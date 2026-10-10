@@ -144,6 +144,10 @@ test("security query 6 expands audit details to one row per changed attribute", 
 
 test("security adapter rejects writes and multiple statements", async () => {
   const bridge = createBridge();
-  await assert.rejects(bridge.run("DELETE FROM account"), /SELECT statements only/);
-  await assert.rejects(bridge.run("SELECT name FROM account; SELECT name FROM contact"), /one SELECT statement/);
+  const write = await bridge.run("DELETE FROM account");
+  assert.equal(write.ok, false);
+  assert.match(write.error, /SELECT statements only/);
+  const multiple = await bridge.run("SELECT name FROM account; SELECT name FROM contact");
+  assert.equal(multiple.ok, false);
+  assert.match(multiple.error, /one SELECT statement/);
 });
