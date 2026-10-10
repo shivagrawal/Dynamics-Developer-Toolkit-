@@ -133,7 +133,7 @@
       }
       // The base entity set must correspond to the query's first FROM table.
       // Explicitly derive it from the SQL identifier; never accept an arbitrary URL.
-      const fromMatch = query.match(/\\bFROM\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)?[A-Za-z_][A-Za-z0-9_]*)/i);
+      const fromMatch = query.match(/\bFROM\s+((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)/i);
       if (!fromMatch) throw new Error("Could not identify the base table in FROM.");
       const baseTable = fromMatch[1].split(".").pop();
       const entitySet = await resolveEntitySet(clientUrl, baseTable);
