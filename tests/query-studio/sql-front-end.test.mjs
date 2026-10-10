@@ -22,7 +22,7 @@ test("SELECT parser splits projections only at top level", () => {
 });
 
 test("completion context resolves table aliases to logical tables", () => {
-  const query = "SELECT c.full";
+  const query = "SELECT fullname FROM contact WHERE full";
   const ctx = sql.completionContext(query, query.length);
   assert.equal(ctx.kind, "column");
   assert.equal(ctx.prefix, "full");
