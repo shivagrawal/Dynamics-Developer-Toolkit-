@@ -854,7 +854,7 @@ function pageBridge(action, payload) {
         continue;
       }
       if (pageEntities.length < pageSize) { moreRecords = false; break; }
-      // Without a cookie, FetchXML simple paging is limited to 50,000 rows.
+      // Without a cookie, fall back to simple paging, still bounded by the 10,000-row engine cap.
       if (page >= 100) { moreRecords = true; break; }
       pagingCookie = null;
       page++;
