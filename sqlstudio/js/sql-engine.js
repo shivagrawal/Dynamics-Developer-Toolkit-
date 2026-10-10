@@ -197,9 +197,41 @@
     };
     validatePredicate(plan.where);
     const selected=plan.columns.some(c=>c.star)?(base.columns||[]).filter(c=>c.queryable!==false).map(c=>({column:c.logicalName})):plan.columns;
+    const resultColumns = [];
     if(plan.columns.some(c=>c.star)) {
       if (!selected.length) fail("No queryable columns were found for SELECT * on '" + plan.table + "'.");
-      for(const col of selected) attrs.push('<attribute name="'+escapeXml(col.column)+'"/>');
+      for(const col of selected) {
+        attrs.push('<attribute name="'+escapeXml(col.column)+'"/>');
+        resultColumns.push({label:col.column,key:col.column});
+      }
+    } else if (plan.aggregateQuery) {
+      const groupNames = new Set(plan.groupBy.map(field => field.column.toLowerCase()));
+      for (const field of plan.groupBy) {
+        const column = base.columns?.find(item => item.logicalName.toLowerCase() === field.column.toLowerCase() && item.queryable !== false);
+        if (!column) fail("GROUP BY column '" + field.column + "' is not queryable.");
+      }
+      for (const c of plan.columns) {
+        if (c.aggregate) {
+          if (!["COUNT","SUM","AVG","MIN","MAX"].includes(c.aggregate)) fail("Unsupported aggregate function '" + c.aggregate + "'.");
+          if (c.aggregate === "COUNT" && c.star) {
+            if (!base.primaryIdAttribute) fail("COUNT(*) requires the table primary ID metadata.");
+          } else {
+            if (!c.column) fail("Aggregate function requires a column.");
+            if (c.tableAlias && c.tableAlias.toLowerCase() !== plan.alias.toLowerCase()) fail("Aggregate expressions on joined columns are not supported.");
+            if (!base.columns?.some(x => x.logicalName.toLowerCase() === c.column.toLowerCase() && x.queryable !== false)) fail("Aggregate column '" + c.column + "' is not queryable.");
+          }
+          const sourceColumn = c.aggregate === "COUNT" && c.star ? base.primaryIdAttribute : c.column;
+          const outputAlias = c.alias || (c.aggregate === "COUNT" && c.star ? "count" : c.aggregate.toLowerCase() + "_" + sourceColumn);
+          attrs.push('<attribute name="'+escapeXml(sourceColumn)+'" aggregate="'+c.aggregate.toLowerCase()+'" alias="'+escapeXml(outputAlias)+'"/>');
+          resultColumns.push({label:outputAlias,key:outputAlias});
+        } else {
+          if (!groupNames.has(c.column.toLowerCase())) fail("Non-aggregate SELECT columns must appear in GROUP BY.");
+          if (c.tableAlias && c.tableAlias.toLowerCase() !== plan.alias.toLowerCase()) fail("GROUP BY on joined columns is not supported.");
+          const outputAlias = c.alias || c.column;
+          attrs.push('<attribute name="'+escapeXml(c.column)+'" groupby="true" alias="'+escapeXml(outputAlias)+'"/>');
+          resultColumns.push({label:outputAlias,key:outputAlias});
+        }
+      }
     } else {
       for(const c of plan.columns) {
         const owner=(c.tableAlias||plan.alias).toLowerCase();
@@ -208,11 +240,23 @@
         if(!entity.columns?.some(x=>x.logicalName.toLowerCase()===c.column.toLowerCase()&&x.queryable!==false)) fail("Column '"+c.column+"' is not queryable on table '"+entity.logicalName+"'.");
         const outputAlias = c.alias || (owner!==plan.alias.toLowerCase() ? owner+'_'+c.column : null);
         attrs.push('<attribute name="'+escapeXml(c.column)+'"'+(outputAlias?' alias="'+escapeXml(outputAlias)+'"':'')+'/>' );
+        resultColumns.push({label:c.alias || (owner!==plan.alias.toLowerCase() ? owner+'.'+c.column : c.column),key:outputAlias || c.column});
       }
     }
-    let orders=plan.orderBy.map(o=>{const owner=(o.tableAlias||plan.alias).toLowerCase();if(owner!==plan.alias.toLowerCase())fail("ORDER BY on joined columns is not supported yet.");if(!base.columns?.some(c=>c.logicalName.toLowerCase()===o.column.toLowerCase()&&c.queryable!==false))fail("ORDER BY column '"+o.column+"' is not queryable.");return '<order attribute="'+escapeXml(o.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';}).join("");
+    let orders=plan.orderBy.map(o=>{
+      if (plan.aggregateQuery) {
+        if (o.tableAlias) fail("ORDER BY with aggregates must use a grouped column name.");
+        const group = plan.groupBy.find(g => g.column.toLowerCase() === o.column.toLowerCase());
+        if (!group) fail("ORDER BY in aggregate queries is limited to GROUP BY columns.");
+        return '<order alias="'+escapeXml(group.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';
+      }
+      const owner=(o.tableAlias||plan.alias).toLowerCase();
+      if(owner!==plan.alias.toLowerCase())fail("ORDER BY on joined columns is not supported yet.");
+      if(!base.columns?.some(c=>c.logicalName.toLowerCase()===o.column.toLowerCase()&&c.queryable!==false))fail("ORDER BY column '"+o.column+"' is not queryable.");
+      return '<order attribute="'+escapeXml(o.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';
+    }).join("");
     // Deterministic ordering makes FetchXML paging stable when SQL leaves row order unspecified.
-    if (!plan.top && !plan.distinct && !orders && base.primaryIdAttribute) orders = '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
+    if (!plan.aggregateQuery && !plan.top && !plan.distinct && !orders && base.primaryIdAttribute) orders = '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
     const filters=plan.where?conditionXml(plan.where,plan):"";
     const joinNodes = [];
     const nodesByAlias = new Map();
@@ -246,8 +290,8 @@
         node.children.map(renderJoin).join("")+'</link-entity>';
     };
     const links = joinNodes.filter(node => node.parentAlias === plan.alias.toLowerCase()).map(renderJoin).join("");
-    const xml='<fetch'+(plan.top?' top="'+plan.top+'"':'')+(plan.distinct?' distinct="true"':'')+'><entity name="'+escapeXml(base.logicalName)+'">'+attrs.join("")+orders+filters+links+'</entity></fetch>';
-    return {fetchXml:xml,plan,entitySetName:base.entitySetName,primaryIdAttribute:base.primaryIdAttribute,readOnly:true};
+    const xml='<fetch'+(plan.aggregateQuery?' aggregate="true"':'')+(plan.top?' top="'+plan.top+'"':'')+(plan.distinct?' distinct="true"':'')+'><entity name="'+escapeXml(base.logicalName)+'">'+attrs.join("")+orders+filters+links+'</entity></fetch>';
+    return {fetchXml:xml,plan,entitySetName:base.entitySetName,primaryIdAttribute:base.primaryIdAttribute,resultColumns,readOnly:true};
   }
 
   function plan(sql) { return parse(sql); }
