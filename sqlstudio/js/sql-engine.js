@@ -52,7 +52,7 @@
     const take = () => tokens[p++];
     const expect = v => { if (!peek(v)) fail("Expected " + v + (tokens[p] ? " near '" + tokens[p].value + "'." : " at end of query.")); return take(); };
     const identifier = () => { if (!tokens[p] || !["identifier","keyword"].includes(tokens[p].type) || ["SELECT","FROM","WHERE","ORDER","BY","JOIN","LEFT","INNER","ON","AND","OR","AS","TOP","DISTINCT","ASC","DESC","IS","NULL","NOT","LIKE","IN"].includes(tokens[p].value.toUpperCase())) fail("Expected an identifier."); return unquote(take()); };
-    const qualified = () => { const first = identifier(); if (peek(".")) { take(); return {alias:first, column:identifier()}; } return {alias:null,column:first}; };
+    const qualified = () => { const first = identifier(); if (peek(".")) { take(); return {tableAlias:first, column:identifier()}; } return {tableAlias:null,column:first}; };
     expect("SELECT");
     const distinct = !!(peek("DISTINCT") && take());
     let top = null;
@@ -94,7 +94,7 @@
         if (peek("IN")) { take(); expect("("); const values=[]; do { values.push(literal()); if(!peek(","))break; take(); } while(true); expect(")"); if(not) fail("NOT IN is not supported in this engine version."); return {type:"in",field,values}; }
         if (peek("LIKE")) { take(); if(not) fail("NOT LIKE is not supported in this engine version."); const value=literal(); if(value.type!=="string") fail("LIKE requires a string literal."); return {type:"like",field,value:value.value}; }
         const op=take(); if (!OPS[op.value]) fail("Unsupported WHERE operator '" + op.value + "'.");
-        const value=literal(); return {type:"compare",field,operator:OPS[op.value],value};
+        const value=literal(); if(value.type==="null") fail("Use IS NULL or IS NOT NULL instead of comparing with NULL."); return {type:"compare",field,operator:OPS[op.value],value};
       };
       const parseAnd=()=>{let n=parseAtom();while(peek("AND")){take();n={type:"and",left:n,right:parseAtom()};}return n;};
       const parseOr=()=>{let n=parseAnd();while(peek("OR")){take();n={type:"or",left:n,right:parseAnd()};}return n;};
