@@ -138,18 +138,20 @@
     if (hasOrder) {
       do { const field=qualified(); let direction="asc"; if(peek("ASC"))take();else if(peek("DESC")){take();direction="desc";} orderBy.push({ ...field,direction }); if(!peek(","))break;take(); } while(true);
     }
-    let offset = 0, fetch = null;
+    let offset = 0, fetch = null, hasOffset = false;
     if (peek("OFFSET")) {
+      hasOffset = true;
       take();
       if (!tokens[p] || tokens[p].type !== "number") fail("OFFSET requires an integer literal.");
       offset = Number(take().value);
-      if (!Number.isInteger(offset) || offset < 0 || offset >= 10000) fail("OFFSET must be an integer from 0 to 100000.");
+      if (!Number.isInteger(offset) || offset < 0 || offset >= 10000) fail("OFFSET must be an integer from 0 to 9999.");
       expect("ROWS");
       if (peek("FETCH")) {
         take(); expect("NEXT");
         if (!tokens[p] || tokens[p].type !== "number") fail("FETCH NEXT requires an integer literal.");
         fetch = Number(take().value);
-        if (!Number.isInteger(fetch) || fetch < 1 || fetch > 5000) fail("FETCH NEXT must be an integer from 1 to 5000.");\n        if (offset + fetch > 10000) fail("OFFSET plus FETCH NEXT cannot exceed the 10,000-row safety cap.");
+        if (!Number.isInteger(fetch) || fetch < 1 || fetch > 5000) fail("FETCH NEXT must be an integer from 1 to 5000.");
+        if (offset + fetch > 10000) fail("OFFSET plus FETCH NEXT cannot exceed the 10,000-row safety cap.");
         expect("ROWS"); expect("ONLY");
       }
       if (!hasOrder) fail("OFFSET/FETCH requires ORDER BY for deterministic paging.");
