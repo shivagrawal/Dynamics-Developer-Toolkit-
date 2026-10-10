@@ -357,13 +357,13 @@ function devLensSecurityAuditBridge(action, p) {
       const newValues = detail.NewValue?.Attributes || detail.NewValue || {};
       const keys = [...new Set([...Object.keys(oldValues), ...Object.keys(newValues)])]
         .filter(key => !key.startsWith("@") && !key.includes("@"));
-      const changedBy = auditRow["_userid_value@OData.Community.Display.V1.FormattedValue"] || "";
-      const event = ({ 1: "Create", 2: "Update" })[Number(auditRow.operation)] || S(auditRow.operation);
+      const changedBy = auditRow["_userid_value@OData.Community.Display.V1.FormattedValue"];
+      const event = auditRow.operation == null ? null : (({ 1: "Create", 2: "Update" })[Number(auditRow.operation)] || S(auditRow.operation));
       return keys.map(key => {
         const logicalName = key.startsWith("_") && key.endsWith("_value") ? key.slice(1, -6) : key;
         return {
-          createdon: auditRow.createdon || "",
-          ChangedBy: changedBy,
+          createdon: auditRow.createdon == null ? null : S(auditRow.createdon),
+          ChangedBy: changedBy == null ? null : S(changedBy),
           Event: event,
           logicalname: logicalName,
           oldvalue: sqlAuditValue(oldValues, key),
