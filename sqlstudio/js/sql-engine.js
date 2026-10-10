@@ -360,6 +360,17 @@
         const projection = plan.columns.find(column => !column.aggregate && column.column.toLowerCase() === group.column.toLowerCase());
         return '<order alias="'+escapeXml(projection?.alias || group.column)+'"/>';
       }).join("");
+    } else if (plan.aggregateQuery && plan.groupBy.length && plan.orderBy.length) {
+      const orderedGroups = new Set(plan.orderBy.map(order => {
+        const group = plan.groupBy.find(item => item.column.toLowerCase() === order.column.toLowerCase() ||
+          plan.columns.some(column => !column.aggregate && column.alias && column.alias.toLowerCase() === order.column.toLowerCase() && column.column.toLowerCase() === item.column.toLowerCase()));
+        return group?.column.toLowerCase();
+      }).filter(Boolean));
+      for (const group of plan.groupBy) {
+        if (orderedGroups.has(group.column.toLowerCase())) continue;
+        const projection = plan.columns.find(column => !column.aggregate && column.column.toLowerCase() === group.column.toLowerCase());
+        orders += '<order alias="'+escapeXml(projection?.alias || group.column)+'"/>';
+      }
     }
     // Deterministic ordering makes FetchXML paging stable when SQL leaves row order unspecified.
     if (!plan.aggregateQuery && !plan.top && !plan.distinct && !orders && base.primaryIdAttribute) orders = '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
