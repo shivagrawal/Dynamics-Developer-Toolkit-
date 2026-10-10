@@ -1,6 +1,13 @@
 name: Dataverse On-demand SQL Test Harness
 
 on:
+  push:
+    branches:
+      - feature/sql4cds-query-studio
+    paths:
+      - ".github/workflows/dataverse-on-demand-query.yml"
+      - "tests/query-studio/on-demand-query.mjs"
+      - "sqlstudio/js/sql-engine.js"
   workflow_dispatch:
     inputs:
       sql_query:
