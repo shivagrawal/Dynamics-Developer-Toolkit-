@@ -7,7 +7,7 @@ const engine = require("../../sqlstudio/js/sql-engine.js");
 const metadata = {
   entities: {
     contact: { logicalName:"contact", entitySetName:"contacts", primaryIdAttribute:"contactid", columns:[
-      {logicalName:"contactid",queryable:true},{logicalName:"fullname",queryable:true},{logicalName:"statecode",queryable:true},{logicalName:"parentcustomerid",queryable:true},{logicalName:"createdon",queryable:true}
+      {logicalName:"contactid",queryable:true},{logicalName:"fullname",queryable:true},{logicalName:"statecode",queryable:true},{logicalName:"parentcustomerid",queryable:true},{logicalName:"createdon",queryable:true},{logicalName:"annualincome",queryable:true}
     ]},
     account: { logicalName:"account", entitySetName:"accounts", primaryIdAttribute:"accountid", columns:[
       {logicalName:"accountid",queryable:true},{logicalName:"name",queryable:true},{logicalName:"accountnumber",queryable:true}
@@ -50,6 +50,21 @@ test("compiles a simple left join with explicit joined projection",()=>{
  const q=engine.compileSql("SELECT c.fullname, a.name FROM contact AS c LEFT JOIN account AS a ON c.parentcustomerid = a.accountid",metadata);
  assert.ok(q.fetchXml.includes('<link-entity name="account" alias="a" from="accountid" to="parentcustomerid" link-type="outer"></link-entity>'));
  assert.match(q.fetchXml,/<attribute name="name" alias="a_name"\/>/);
+});
+
+test("compiles COUNT and SUM with GROUP BY and aggregate output aliases",()=>{
+ const q=engine.compileSql("SELECT statecode, COUNT(*) AS contact_count, SUM(annualincome) AS total_income FROM contact GROUP BY statecode ORDER BY statecode",metadata);
+ assert.match(q.fetchXml,/<fetch aggregate="true">/);
+ assert.match(q.fetchXml,/<attribute name="statecode" groupby="true" alias="statecode"\/>/);
+ assert.match(q.fetchXml,/<attribute name="contactid" aggregate="count" alias="contact_count"\/>/);
+ assert.match(q.fetchXml,/<attribute name="annualincome" aggregate="sum" alias="total_income"\/>/);
+ assert.match(q.fetchXml,/<order alias="statecode"/);
+ assert.deepEqual(q.resultColumns.map(c=>c.label),["statecode","contact_count","total_income"]);
+});
+
+test("rejects HAVING and invalid aggregate grouping rather than guessing",()=>{
+ assert.throws(()=>engine.plan("SELECT statecode, COUNT(*) FROM contact GROUP BY statecode HAVING COUNT(*) > 1"),/HAVING is not supported/);
+ assert.throws(()=>engine.plan("SELECT fullname, COUNT(*) FROM contact"),/Non-aggregate SELECT columns must appear in GROUP BY/);
 });
 
 test("compiles chained joins as nested FetchXML link entities",()=>{
