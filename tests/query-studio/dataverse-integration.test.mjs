@@ -80,11 +80,15 @@ async function entityMetadata(logicalName) {
   };
 }
 
-test("Dataverse environment is reachable and application user is authorized", async () => {
+test.before(async () => {
   requireConfiguration();
   token = await acquireToken();
   const who = await api("WhoAmI");
   assert.ok(who.UserId, "WhoAmI response did not include UserId");
+});
+
+test("Dataverse environment is reachable and application user is authorized", () => {
+  assert.ok(token, "Dataverse authentication setup completed");
 });
 
 test("JavaScript SQL engine compiles and executes a real Account query", async () => {
