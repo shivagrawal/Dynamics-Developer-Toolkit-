@@ -251,8 +251,12 @@ function devLensSecurityAuditBridge(action, p) {
   }
   function sqlDistinct(rows, keys) {
     const seen = new Set();
+    const collationKey = value => {
+      if (typeof value !== "string") return value ?? null;
+      return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    };
     return rows.filter(row => {
-      const key = JSON.stringify(keys.map(name => row[name] ?? null));
+      const key = JSON.stringify(keys.map(name => collationKey(row[name])));
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
