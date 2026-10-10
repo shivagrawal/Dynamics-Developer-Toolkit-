@@ -399,7 +399,11 @@
       const columns = [...new Set(projections.map(p => p.label))];
       const rows = sourceRows.map(row => {
         const output = {};
-        for (const projection of projections) output[projection.label] = row[projection.key] ?? row[projection.label] ?? null;
+        for (const projection of projections) {
+          const key = Object.keys(row).find(candidate => candidate.toLowerCase() === projection.key.toLowerCase());
+          const labelKey = Object.keys(row).find(candidate => candidate.toLowerCase() === projection.label.toLowerCase());
+          output[projection.label] = (key ? row[key] : undefined) ?? (labelKey ? row[labelKey] : undefined) ?? null;
+        }
         return output;
       });
       state.results = { columns, rows, truncated: response.moreRecords === true, totalRecordCount: response.rowCount ?? rows.length };
