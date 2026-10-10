@@ -73,6 +73,7 @@
       ["compare", "Compare"],
       ["metadata", "Metadata Browser"],
       ["processes", "Process Explorer"],
+      ["sqlstudio", "Query Studio"],
       ["tools", "Developer Toolkit"],
       ["about", "About & Guide"],
     ]
@@ -161,7 +162,7 @@
       "snapshots",
       "tools",
     ].includes(view);
-    byId("toolbar").style.display = ["metadata", "processes", "compare", "about"].includes(
+    byId("toolbar").style.display = ["metadata", "processes", "compare", "about", "sqlstudio"].includes(
       view,
     )
       ? "none"
@@ -1207,6 +1208,13 @@
   async function render() {
     configure();
     const hasFormReport = !!report?.formId;
+    if (view === "sqlstudio") {
+      byId("subtabs").innerHTML = "";
+      byId("status").textContent = "Read-only SQL4CDS integration (local companion required).";
+      window.DevLensSqlStudioView?.renderInto?.(byId("body"));
+      if (!window.DevLensSqlStudioView) byId("body").innerHTML = '<div class="card">Query Studio view failed to load. Reload the Dynamics tab.</div>';
+      return;
+    }
     if (!hasFormReport && ["events", "js", "fields"].includes(view)) {
       byId("subtabs").innerHTML = "";
       byId("body").innerHTML =
