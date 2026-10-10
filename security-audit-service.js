@@ -452,7 +452,17 @@ function devLensSecurityAuditBridge(action, p) {
       else if (kind === "role-table-access") sqlSort(rows, [["table_name", "asc"]]);
       else if (kind === "record-audit") sqlSort(rows, [["createdon", "desc"]]);
     }
-    return { ok: true, provider: "dataverse-security-query-adapter", compatibilityMode: kind, columns, rows, rowCount: rows.length, readOnly: true, truncated, warning: truncated ? "Results reached a configured safety limit and may be incomplete. Refine the query to avoid truncation." : "" };
+    const globalContext = Xrm.Utility.getGlobalContext();
+    return {
+      ok: true,
+      provider: "dataverse-security-query-adapter",
+      compatibilityMode: kind,
+      clientUrl: base,
+      environmentId: G(globalContext.organizationSettings?.bapEnvironmentId),
+      currentUser: { id: G(globalContext.userSettings?.userId), name: globalContext.userSettings?.userName || "" },
+      columns, rows, rowCount: rows.length, readOnly: true, truncated,
+      warning: truncated ? "Results reached a configured safety limit and may be incomplete. Refine the query to avoid truncation." : ""
+    };
   }
 
   return (async () => {
