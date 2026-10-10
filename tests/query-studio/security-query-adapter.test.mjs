@@ -168,6 +168,23 @@ test("security adapter rejects a projection it cannot faithfully return before a
   assert.equal(bridge.calls.length, 0);
 });
 
+test("all six security adapters fail closed when required SQL semantics are changed", async () => {
+  const malformed = [
+    queries.userRoles.replace("SUR.roleid = R.roleid", "SUR.roleid = BU.businessunitid"),
+    queries.privileges.replace("potc.objecttypecode", "p.privilegeid"),
+    queries.userTable.replace("pr.parentrootroleid = ur.parentrootroleid", "pr.roleid = ur.roleid"),
+    queries.rolesByPrivilege.replace("bu.businessunitid = r.businessunitid", "bu.businessunitid = rp.roleid"),
+    queries.roleAccess.replace("GROUP BY e.logicalname", "GROUP BY r.name"),
+    queries.audit.replace("$.changedAttributes", "$.unrecognizedAttributes")
+  ];
+  for (const sql of malformed) {
+    const bridge = createBridge();
+    const result = await bridge.run(sql);
+    assert.equal(result.ok, false);
+    assert.equal(bridge.calls.length, 0, "Unsupported SQL must be rejected before any Dataverse request.");
+  }
+});
+
 test("security adapter preserves exact SQL output alias casing", async () => {
   const bridge = createBridge();
   const sql = queries.userRoles.replace("AS role_name", "AS Role_Name");
