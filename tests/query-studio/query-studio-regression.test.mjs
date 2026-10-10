@@ -132,6 +132,21 @@ test("native SQL follows same-origin Dataverse paging links", async () => {
   assert.equal(harness.requestedUrls.length, 2);
 });
 
+test("native SQL stops on a repeated paging link instead of looping", async () => {
+  const context = "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)";
+  const nextLink = "https://example.crm.dynamics.com/api/data/v9.2/accounts?sql=SELECT%20accountid%2C%20name%20FROM%20account&$skiptoken=repeat";
+  const harness = createHarness({
+    fetchPages: [
+      { "@odata.context": context, "@odata.nextLink": nextLink, value: [{ accountid: "a1", name: "First" }] },
+      { "@odata.context": context, "@odata.nextLink": nextLink, value: [{ accountid: "a2", name: "Second" }] }
+    ]
+  });
+  const { result } = await harness.runQuery("SELECT accountid, name FROM account");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /repeated paging link/i);
+  assert.equal(harness.requestedUrls.length, 2);
+});
+
 test("native SQL rejects cross-origin paging links without following them", async () => {
   const harness = createHarness({
     fetchPages: [{
