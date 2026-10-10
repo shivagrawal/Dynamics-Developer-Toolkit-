@@ -32,7 +32,7 @@
   };
   let host = null;
 
-  function schemaExplorerHtml() {
+  function isQueryableColumn(column) {\n    return column?.validForRead !== false && String(column?.attributeType || "").toLowerCase() !== "virtual";\n  }\n\n  function schemaExplorerHtml() {
     if (!state.schemaOpen) return "";
     const tableMatches = state.tables.filter(table =>
       [table.displayName, table.logicalName, table.schemaName].join(" ").toLowerCase().includes(state.tableFilter.toLowerCase())
@@ -43,7 +43,7 @@
       '<span class="ss-schema-table-name">' + esc(table.displayName || table.logicalName) + '</span>' +
       '<span class="ss-schema-table-logical">' + esc(table.logicalName) + '</span></button>'
     ).join("");
-    const allColumns = state.tableMeta?.columns || [];
+    const allColumns = (state.tableMeta?.columns || []).filter(isQueryableColumn);
     const visibleColumns = allColumns.filter(column =>
       [column.displayName, column.logicalName, column.schemaName, column.attributeType].join(" ").toLowerCase().includes(state.columnFilter.toLowerCase())
     );
@@ -127,7 +127,7 @@
         <div class="ss-status">Execution: ${esc(state.status)} ${state.ctx ? " · " + esc(state.ctx.clientUrl) : ""} · ${state.results ? `${state.results.rows?.length || 0} rows · ${state.durationMs} ms` : "No results yet"}</div>
         ${schemaExplorerHtml()}
         <textarea class="ss-editor" spellcheck="false" aria-label="SQL query editor">${esc(state.sql)}</textarea>
-        <div class="ss-meta">Native Dataverse read-only SQL endpoint · one SELECT statement · columns must be named explicitly · no SQL4CDS-only features such as CTEs or DECLARE. Query runs as your current Dynamics user.</div>
+        <div class="ss-meta">Native Dataverse read-only SQL endpoint · one SELECT statement · SELECT * returns the columns exposed by the endpoint · no SQL4CDS-only features such as CTEs or DECLARE. Query runs as your current Dynamics user.</div>
         ${state.error ? `<div class="ss-status ss-error">${esc(state.error)}</div>` : ""}
         ${state.results ? `<div class="ss-meta">Query: ${esc(state.lastQuery)} · ${state.results.truncated ? "Results limited" : "Server response received"}</div>` : ""}
         ${state.results ? `<div class="ss-results"><table><thead><tr>${columns.map(c=>`<th title="${esc(c)}">${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td title="${esc(row[c])}">${esc(formatValue(row[c]))}</td>`).join("")}</tr>`).join("")}</tbody></table>${rows.length ? "" : '<div class="ss-empty">The query returned no rows.</div>'}</div><div class="ss-top"><button class="ss-btn" data-act="csv">Export CSV</button><button class="ss-btn" data-act="copy">Copy JSON</button></div>` : ""}
@@ -283,7 +283,7 @@
 
   function insertSelectedColumns() {
     const columns = (state.tableMeta?.columns || []).filter(column =>
-      state.selectedColumns.includes(column.logicalName) && column.validForRead !== false
+      state.selectedColumns.includes(column.logicalName) && isQueryableColumn(column)
     ).map(column => column.logicalName);
     if (!columns.length) {
       state.schemaError = "Select at least one readable column to insert.";
@@ -351,7 +351,7 @@
     if (action === "closeSchema") { state.schemaOpen = false; render(); return; }
     if (action === "loadTables") return loadTables();
     if (action === "selectVisibleColumns") {
-      const visible = (state.tableMeta?.columns || []).filter(column =>
+      const visible = (state.tableMeta?.columns || []).filter(isQueryableColumn).filter(column =>
         [column.displayName, column.logicalName, column.schemaName, column.attributeType].join(" ").toLowerCase().includes(state.columnFilter.toLowerCase())
       ).map(column => column.logicalName);
       state.selectedColumns = [...new Set([...state.selectedColumns, ...visible])];
