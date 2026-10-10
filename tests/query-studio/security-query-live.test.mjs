@@ -1,0 +1,153 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import vm from "node:vm";
+
+const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\/+$/, "");
+const tenantId = process.env.DATAVERSE_TENANT_ID || "";
+const clientId = process.env.DATAVERSE_CLIENT_ID || "";
+const clientSecret = process.env.DATAVERSE_CLIENT_SECRET || "";
+const source = await readFile(new URL("../../security-audit-service.js", import.meta.url), "utf8");
+let token = "";
+let bridge;
+const expectedColumns = [
+  ["fullname", "systemuserid", "role_name", "role_businessunit"],
+  ["privilege_name"],
+  ["fullname", "role_name", "role_businessunit", "privilege_name", "depth"],
+  ["role_name", "business_unit", "privilege_name", "depth"],
+  ["table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess"],
+  ["createdon", "ChangedBy", "Event", "logicalname", "oldvalue", "newvalue"]
+];
+
+const queries = [
+  `SELECT SU.fullname, SU.systemuserid, R.name AS role_name, BU.name AS role_businessunit
+FROM SystemUserRoles AS SUR
+INNER JOIN SystemUser AS SU ON SUR.systemuserid = SU.systemuserid
+INNER JOIN Role AS R ON SUR.roleid = R.roleid
+INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid
+WHERE SU.fullname LIKE '%USD8%'`,
+  `SELECT DISTINCT p.name AS privilege_name
+FROM privilege p
+INNER JOIN privilegeobjecttypecodes potc ON potc.privilegeid = p.privilegeid
+INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
+WHERE e.logicalname = 'salesorder'
+ORDER BY p.name`,
+  `SELECT DISTINCT su.fullname, ur.name AS role_name, bu.name AS role_businessunit, p.name AS privilege_name,
+CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit'
+WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization'
+ELSE CAST(rp.privilegedepthmask AS VARCHAR(10)) END AS depth
+FROM systemuser su
+INNER JOIN systemuserroles sur ON sur.systemuserid = su.systemuserid
+INNER JOIN role ur ON ur.roleid = sur.roleid
+INNER JOIN businessunit bu ON bu.businessunitid = ur.businessunitid
+INNER JOIN role pr ON pr.parentrootroleid = ur.parentrootroleid
+INNER JOIN roleprivileges rp ON rp.roleid = pr.roleid
+INNER JOIN privilege p ON p.privilegeid = rp.privilegeid
+INNER JOIN privilegeobjecttypecodes potc ON potc.privilegeid = p.privilegeid
+INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
+WHERE su.fullname LIKE '%USD8%' AND e.logicalname = 'quote'
+ORDER BY su.fullname, ur.name, p.name`,
+  `SELECT DISTINCT r.name AS role_name, bu.name AS business_unit, p.name AS privilege_name,
+CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit'
+WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization'
+ELSE CAST(rp.privilegedepthmask AS VARCHAR(10)) END AS depth
+FROM role r
+INNER JOIN roleprivileges rp ON rp.roleid = r.roleid
+INNER JOIN privilege p ON p.privilegeid = rp.privilegeid
+INNER JOIN businessunit bu ON bu.businessunitid = r.businessunitid
+WHERE p.name = 'prvReadwesco_legalentity'
+ORDER BY r.name, bu.name`,
+  `SELECT e.logicalname AS table_name,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvCreate%' THEN CASE rp.privilegedepthmask
+WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS CreateAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvRead%' THEN CASE rp.privilegedepthmask
+WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS ReadAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvWrite%' THEN CASE rp.privilegedepthmask
+WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS WriteAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvDelete%' THEN CASE rp.privilegedepthmask
+WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS DeleteAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvAppend%' AND p.name NOT LIKE 'prvAppendTo%' THEN CASE rp.privilegedepthmask
+WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS AppendAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvAppendTo%' THEN CASE rp.privilegedepthmask
+WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS AppendToAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvAssign%' THEN CASE rp.privilegedepthmask
+WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS AssignAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvShare%' THEN CASE rp.privilegedepthmask
+WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS ShareAccess
+FROM role r
+INNER JOIN roleprivileges rp ON rp.roleid = r.roleid
+INNER JOIN privilege p ON p.privilegeid = rp.privilegeid
+INNER JOIN privilegeobjecttypecodes potc ON potc.privilegeid = p.privilegeid
+INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
+WHERE r.name = 'Basic User'
+GROUP BY e.logicalname
+ORDER BY e.logicalname`,
+  `SELECT a.createdon, u.fullname AS ChangedBy,
+CASE a.operation WHEN 1 THEN 'Create' WHEN 2 THEN 'Update'
+ELSE CAST(a.operation AS VARCHAR(10)) END AS Event,
+ca.logicalname, ca.oldvalue, ca.newvalue
+FROM audit a
+CROSS APPLY OPENJSON(a.changedata, '$.changedAttributes')
+WITH (logicalname NVARCHAR(100) '$.logicalName', oldvalue NVARCHAR(MAX) '$.oldValue', newvalue NVARCHAR(MAX) '$.newValue') ca
+LEFT JOIN systemuser u ON a.userid = u.systemuserid
+WHERE a.objectid = 'bb20fca4-e8a2-f111-b8db-7c1e5280e98a'
+ORDER BY a.createdon DESC`
+];
+
+function requireConfiguration() {
+  const missing = [
+    ["DATAVERSE_URL", baseUrl], ["DATAVERSE_TENANT_ID", tenantId],
+    ["DATAVERSE_CLIENT_ID", clientId], ["DATAVERSE_CLIENT_SECRET", clientSecret]
+  ].filter(([, value]) => !value).map(([name]) => name);
+  assert.deepEqual(missing, [], "Missing GitHub Actions secrets: " + missing.join(", "));
+  const parsed = new URL(baseUrl);
+  assert.equal(parsed.protocol, "https:", "Dataverse URL must use HTTPS.");
+}
+
+async function acquireToken() {
+  const response = await fetch("https://login.microsoftonline.com/" + encodeURIComponent(tenantId) + "/oauth2/v2.0/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId, client_secret: clientSecret, grant_type: "client_credentials",
+      scope: baseUrl + "/.default"
+    })
+  });
+  const body = await response.json().catch(() => ({}));
+  assert.equal(response.ok, true, "Entra token request failed (HTTP " + response.status + "): " + (body.error_description || body.error || "no details"));
+  assert.equal(typeof body.access_token, "string", "Entra response did not contain an access token.");
+  return body.access_token;
+}
+
+function createLiveBridge() {
+  const authenticatedFetch = (input, init = {}) => fetch(input, {
+    ...init,
+    headers: { ...(init.headers || {}), Authorization: "Bearer " + token, Accept: "application/json" }
+  });
+  const context = {
+    URL, fetch: authenticatedFetch, window: {},
+    Xrm: { Utility: { getGlobalContext: () => ({ getClientUrl: () => baseUrl, organizationSettings: {} }) } },
+    chrome: { runtime: { onMessage: { addListener: () => {} } }, tabs: {}, scripting: {} },
+    console, setTimeout, clearTimeout
+  };
+  vm.runInNewContext(source, context, { filename: "security-audit-service.js" });
+  return sql => context.devLensSecurityAuditBridge("sqlQuery", { sql });
+}
+
+test.before(async () => {
+  requireConfiguration();
+  token = await acquireToken();
+  bridge = createLiveBridge();
+});
+
+for (let index = 0; index < queries.length; index++) {
+  test("live Dataverse security query " + (index + 1) + " returns the expected projection", async () => {
+    const result = await bridge(queries[index]);
+    assert.equal(result.ok, true, "Query adapter failed: " + (result.error || "unknown error"));
+    assert.equal(result.readOnly, true);
+    assert.ok(Array.isArray(result.rows));
+    assert.deepEqual(JSON.parse(JSON.stringify(result.columns)), expectedColumns[index]);
+    assert.equal(result.rowCount, result.rows.length);
+    // Never emit row values, record IDs, audit payloads, or privilege assignments in CI logs.
+  });
+}
