@@ -43,6 +43,8 @@ The adapter currently implements the six documented shapes in SECURITY-QUERY-COM
 
 The live environment currently has organization-level or account-level auditing disabled. The integration suite checks both settings before creating a disposable account. It does not change organization auditing configuration automatically because that is a persistent environment-wide governance/storage setting. Audit expansion, operation mapping, changed-attribute flattening, and bounded concurrency are covered by offline fixtures; live audit validation will run automatically when auditing is already enabled.
 
+The implementation follows Microsoft's documented bound Web API function, [RetrieveAuditDetails](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/retrieveauditdetails?view=dataverse-latest). Audit details are retrieved through the Web API because [audit history is not available through the Dataverse TDS/SQL endpoint](https://learn.microsoft.com/en-us/powerapps/developer/data-platform/retrieve-and-delete-the-history-of-audited-data-changes).
+
 ## Verification layers
 
 - **Unit/regression:** SQL parsing/compiler, routing, security query shape contracts, projection aliases, wildcard preservation, semicolon/comment edge cases, depth fallbacks, aggregate defaults, audit flattening, and concurrency.
