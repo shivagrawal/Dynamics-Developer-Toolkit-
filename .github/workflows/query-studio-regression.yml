@@ -26,5 +26,13 @@ jobs:
         with:
           node-version: 20
 
+      - name: Check JavaScript syntax
+        run: |
+          node --check background.js
+          node --check ui/sql-studio-view.js
+          node --check sqlstudio/js/sql-front-end.js
+          node --check sqlstudio/js/sql-engine.js
+          node -e "JSON.parse(require('node:fs').readFileSync('manifest.json', 'utf8'))"
+
       - name: Run Query Studio regression suite
         run: node --test tests/query-studio/*.test.mjs
