@@ -133,7 +133,7 @@
     }
     if (peek(";")) take();
     if (p !== tokens.length) fail("Unsupported SQL syntax near '" + tokens[p].value + "'.");
-    if (columns.some(c=>c.star) && columns.length>1) fail("SELECT * cannot be combined with individual columns in this engine version.");
+    if (columns.some(c=>c.star && !c.aggregate) && columns.length>1) fail("SELECT * cannot be combined with individual columns in this engine version.");
     const aggregateQuery = columns.some(c => c.aggregate) || groupBy.length > 0;
     if (aggregateQuery && columns.some(c => c.star)) fail("SELECT * cannot be combined with GROUP BY or aggregate expressions.");
     if (aggregateQuery && distinct) fail("DISTINCT with aggregate expressions is not supported in this engine version.");
@@ -196,9 +196,9 @@
       validateField(node.field);
     };
     validatePredicate(plan.where);
-    const selected=plan.columns.some(c=>c.star)?(base.columns||[]).filter(c=>c.queryable!==false).map(c=>({column:c.logicalName})):plan.columns;
+    const selected=plan.columns.some(c=>c.star && !c.aggregate)?(base.columns||[]).filter(c=>c.queryable!==false).map(c=>({column:c.logicalName})):plan.columns;
     const resultColumns = [];
-    if(plan.columns.some(c=>c.star)) {
+    if(plan.columns.some(c=>c.star && !c.aggregate)) {
       if (!selected.length) fail("No queryable columns were found for SELECT * on '" + plan.table + "'.");
       for(const col of selected) {
         attrs.push('<attribute name="'+escapeXml(col.column)+'"/>');
