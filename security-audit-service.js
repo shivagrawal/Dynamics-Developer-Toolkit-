@@ -346,7 +346,7 @@ function devLensSecurityAuditBridge(action, p) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw Error("Audit query requires a valid record GUID in the objectid filter.");
     const auditResult = await allBounded("audits?$select=auditid,createdon,operation,_userid_value,objecttypecode&$filter=_objectid_value eq " + id + "&$orderby=createdon desc&$top=1001", 1001);
     const auditRows = auditResult.rows;
-    const truncated = auditResult.truncated || auditRows.length > 1000;
+    let truncated = auditResult.truncated || auditRows.length > 1000;
     const output = [];
     async function expandAuditRow(auditRow) {
       const auditId = G(auditRow.auditid);
