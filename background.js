@@ -791,7 +791,7 @@ function pageBridge(action, payload) {
     return columns.length ? [...new Set(columns)] : null;
   }
 
-  async function queryFetchXmlReadOnly(fetchXml, tableName) {
+  async function queryFetchXmlReadOnly(fetchXml, tableName, offsetValue = 0, limitValue = null) {
     if (typeof fetchXml !== "string" || !fetchXml.trim()) return { ok: false, error: "A compiled FetchXML query is required." };
     if (fetchXml.length > 1000000) return { ok: false, error: "Compiled query exceeds the 1,000,000 character limit." };
     const table = String(tableName || "").trim().toLowerCase();
@@ -803,7 +803,7 @@ function pageBridge(action, payload) {
     if (!entityMatch || entityMatch[1].toLowerCase() !== table) return { ok: false, error: "FetchXML base entity does not match the requested table." };
     if (/<(?:update|delete|create|upsert|insert)\b/i.test(fetchXml)) return { ok: false, error: "Only read-only FetchXML is accepted." };
 
-    const hasTop = /<fetch\b[^>]*\btop\s*=\s*["']/i.test(fetchXml);
+    const hasTop = /<fetch\b[^>]*\btop\s*=\s*["']/i.test(fetchXml);,    const offset = Number(offsetValue || 0);,    const limit = limitValue == null ? null : Number(limitValue);,    if (!Number.isInteger(offset) || offset < 0 || offset >= 10000) return { ok: false, error: "OFFSET must be an integer from 0 to 9999." };,    if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 5000 || offset + limit > 10000)) return { ok: false, error: "FETCH NEXT must be an integer from 1 to 5000 and fit within the 10,000-row safety cap." };,    if (hasTop && (offset > 0 || limit !== null)) return { ok: false, error: "TOP cannot be combined with OFFSET/FETCH." };
     const pageSize = 500;
     const maxPages = 20;
     const escapeXmlAttribute = value => String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
@@ -837,8 +837,12 @@ function pageBridge(action, payload) {
       entities.push(...pageEntities);
       pagesFetched++;
       if (hasTop) { moreRecords = !!result?.nextLink; break; }
-      if (entities.length >= pageSize * maxPages) { moreRecords = true; break; }
       const nextCookie = decodePagingCookie(result?.fetchXmlPagingCookie);
+      if (limit !== null && entities.length >= offset + limit) {
+        moreRecords = entities.length > offset + limit || !!nextCookie || pageEntities.length === pageSize;
+        break;
+      }
+      if (entities.length >= pageSize * maxPages) { moreRecords = true; break; }
       if (nextCookie) {
         pagingCookie = nextCookie;
         page++;
@@ -850,8 +854,9 @@ function pageBridge(action, payload) {
       pagingCookie = null;
       page++;
     }
-    const columns = [...new Set(entities.flatMap(row => Object.keys(row).filter(key => !key.startsWith("@") && !key.includes("@"))))];
-    const rows = entities.map(row => {
+    const visibleEntities = entities.slice(offset, limit === null ? undefined : offset + limit);
+    const columns = [...new Set(visibleEntities.flatMap(row => Object.keys(row).filter(key => !key.startsWith("@") && !key.includes("@"))))];
+    const rows = visibleEntities.map(row => {
       const cleanRow = {};
       for (const [key, value] of Object.entries(row)) {
         if (key.startsWith("@") || key.includes("@")) continue;
@@ -859,7 +864,7 @@ function pageBridge(action, payload) {
       }
       return cleanRow;
     });
-    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, pagesFetched, moreRecords };
+    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, rowsFetched: entities.length, pagesFetched, moreRecords };
   }
 
   async function querySqlReadOnly(sql) {
@@ -1504,7 +1509,7 @@ function pageBridge(action, payload) {
                 : action === "processExplorer"
                 ? surfaceContext({ requireEntity: true, requireForm: false }).then((ctx) => processExplorer(ctx, !!payload?.force))
               : action === "queryFetchXml"
-          ? queryFetchXmlReadOnly(payload?.fetchXml, payload?.tableName)
+          ? queryFetchXmlReadOnly(payload?.fetchXml, payload?.tableName, payload?.offset, payload?.limit)
           : action === "querySql"
           ? querySqlReadOnly(payload?.sql)
           : action === "tool"
