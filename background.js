@@ -735,17 +735,37 @@ function pageBridge(action, payload) {
       }
     };
   }
+  function simpleSqlProjection(query) {
+    // Only validate straightforward, unaliased single-table projections. More complex
+    // queries are left to Dataverse's SQL parser rather than guessed at locally.
+    const match = query.replace(/;\s*$/, "").match(/^\s*SELECT\s+(?:DISTINCT\s+)?(?:TOP\s+\d+\s+)?([\s\S]+?)\s+FROM\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?=WHERE\b|ORDER\s+BY\b|GROUP\s+BY\b|$)/i);
+    if (!match) return null;
+    const list = match[1].trim();
+    if (!list || list.includes("*") || /\bAS\b/i.test(list) || /[()]/.test(list)) return null;
+    const columns = list.split(",").map(part => part.trim()).filter(Boolean);
+    if (!columns.length || columns.some(part => !/^(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*$/.test(part))) return null;
+    return columns.map(part => part.split(".").pop().toLowerCase());
+  }
+
+  function columnsFromODataContext(odataContext) {
+    if (typeof odataContext !== "string") return null;
+    const match = odataContext.match(/#(?:[A-Za-z_][A-Za-z0-9_]*)\(([^()]*)\)/);
+    if (!match) return null;
+    const columns = match[1].split(",").map(part => part.trim()).filter(part => /^[A-Za-z_][A-Za-z0-9_]*$/.test(part));
+    return columns.length ? [...new Set(columns)] : null;
+  }
+
   async function querySqlReadOnly(sql) {
     if (typeof sql !== "string" || !sql.trim()) return { ok: false, error: "Enter a SELECT query." };
     if (sql.length > 100000) return { ok: false, error: "Query exceeds the 100,000 character limit." };
     const query = sql.trim();
     if (!/^SELECT\b/i.test(query)) return { ok: false, error: "Read-only mode accepts SELECT statements only." };
     if (/;\s*\S/.test(query.replace(/;\s*$/, ""))) return { ok: false, error: "Run one SELECT statement at a time." };
-    // The Dataverse SQL endpoint enforces its own supported syntax and read-only semantics.
-    // Resolve the first FROM table to its EntitySetName; logical names are not always plural names.
+    // The Dataverse SQL endpoint requires the entity set matching the query's base table.
     const match = query.match(/\bFROM\s+((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)/i);
     if (!match) return { ok: false, error: "Could not identify the base table after FROM." };
     const tableName = match[1].split(".").pop().replace(/^[\[\"]|[\]\"]$/g, "");
+    const expectedProjection = simpleSqlProjection(query);
     const ctx = await context({ requireEntity: false, requireForm: false });
     const metadata = await Xrm.Utility.getEntityMetadata(tableName);
     if (!metadata?.EntitySetName) return { ok: false, error: "Dataverse did not return an entity set for " + tableName + "." };
@@ -756,13 +776,34 @@ function pageBridge(action, payload) {
       headers: { Prefer: 'odata.include-annotations="*"' },
       cache: "no-store"
     });
+    const contextColumns = columnsFromODataContext(result["@odata.context"]);
+    if (expectedProjection && contextColumns) {
+      const actual = new Set(contextColumns.map(column => column.toLowerCase()));
+      const missing = expectedProjection.filter(column => !actual.has(column));
+      if (missing.length) {
+        return {
+          ok: false,
+          error: "Dataverse returned result metadata that does not match the SELECT projection. Requested: " +
+            expectedProjection.join(", ") + ". Returned metadata: " + contextColumns.join(", ") +
+            ". Query Studio has stopped this result rather than displaying unrelated columns. Check the SQL endpoint response and the table/column names."
+        };
+      }
+    }
+    const rows = result.value || [];
+    const rowColumns = [...new Set(rows.flatMap(row => Object.keys(row).filter(key =>
+      !key.startsWith("@") && !key.endsWith("@OData.Community.Display.V1.AttributeName") && key !== "@odata.etag"
+    )))];
+    // Prefer the server's declared projection so selected columns that are null for every
+    // returned record still appear in the grid. The primary key may also be included by Dataverse.
+    const columns = contextColumns || rowColumns;
     return {
       ok: true,
       clientUrl: ctx.clientUrl,
       environmentId: ctx.environmentId,
       currentUser: { id: ctx.userId, name: ctx.userName },
-      columns: [...new Set((result.value || []).flatMap(row => Object.keys(row).filter(key => !key.startsWith("@") && !key.endsWith("@OData.Community.Display.V1.AttributeName") && key !== "@odata.etag")))],
-      rows: result.value || [],
+      columns,
+      rows,
+      responseContext: result["@odata.context"] || null,
       totalRecordCount: result["@Microsoft.Dynamics.CRM.totalrecordcount"] ?? null,
       totalRecordCountLimitExceeded: result["@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded"] ?? false
     };
