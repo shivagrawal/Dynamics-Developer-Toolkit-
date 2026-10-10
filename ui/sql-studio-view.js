@@ -157,7 +157,6 @@
       filterToRestore.focus();
       try { filterToRestore.setSelectionRange(focusedFilterStart, focusedFilterStart); } catch {}
     }
-    const editor = host.querySelector(".ss-editor");
     const rememberEditorSelection = () => {
       state.editorSelectionStart = editor.selectionStart;
       state.editorSelectionEnd = editor.selectionEnd;
