@@ -548,6 +548,7 @@ function devLensSecurityAuditBridge(action, p) {
     const query = stripSqlComments(original).trim();
     if (!query || !/^SELECT\b/i.test(query)) throw Error("Read-only SQL mode accepts SELECT statements only.");
     if (hasMultipleSqlStatements(query)) throw Error("Run one SELECT statement at a time.");
+    const projection = sqlProjectionAliases(query);
     const columns = [], rows = [];
     let kind = "";
     let truncated = false;
@@ -697,7 +698,7 @@ function devLensSecurityAuditBridge(action, p) {
     } else {
       throw Error("This security SQL shape is not implemented by the JavaScript compatibility adapter. Query was not sent to the Dataverse SQL endpoint.");
     }
-    if (/\bDISTINCT\b/i.test(query)) rows.splice(0, rows.length, ...sqlDistinct(rows, columns));
+    if (projection.distinct) rows.splice(0, rows.length, ...sqlDistinct(rows, columns));
     if (/\bORDER\s+BY\b/i.test(query)) {
       if (kind === "entity-privileges") sqlSort(rows, [["privilege_name", "asc"]]);
       else if (kind === "user-entity-privileges") sqlSort(rows, [["fullname", "asc"], ["role_name", "asc"], ["privilege_name", "asc"]]);
