@@ -251,9 +251,11 @@
     let orders=plan.orderBy.map(o=>{
       if (plan.aggregateQuery) {
         if (o.tableAlias) fail("ORDER BY with aggregates must use a grouped column name.");
-        const group = plan.groupBy.find(g => g.column.toLowerCase() === o.column.toLowerCase());
-        if (!group) fail("ORDER BY in aggregate queries is limited to GROUP BY columns.");
-        return '<order alias="'+escapeXml(group.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';
+        const group = plan.groupBy.find(g => g.column.toLowerCase() === o.column.toLowerCase() ||
+          plan.columns.some(c => !c.aggregate && c.alias && c.alias.toLowerCase() === o.column.toLowerCase() && c.column.toLowerCase() === g.column.toLowerCase()));
+        if (!group) fail("ORDER BY in aggregate queries is limited to GROUP BY columns or their output aliases.");
+        const groupedProjection = plan.columns.find(c => !c.aggregate && c.column.toLowerCase() === group.column.toLowerCase());
+        return '<order alias="'+escapeXml(groupedProjection?.alias || group.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';
       }
       const owner=(o.tableAlias||plan.alias).toLowerCase();
       if(owner!==plan.alias.toLowerCase())fail("ORDER BY on joined columns is not supported yet.");
