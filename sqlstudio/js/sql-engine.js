@@ -189,15 +189,38 @@
     // Deterministic ordering makes FetchXML paging stable when SQL leaves row order unspecified.
     if (!plan.top && !plan.distinct && !orders && base.primaryIdAttribute) orders = '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
     const filters=plan.where?conditionXml(plan.where,plan):"";
-    const links=plan.joins.map(j=>{
-      const left=j.left.tableAlias||plan.alias, right=j.right.tableAlias||plan.alias;
-      let from,to;
-      if(left.toLowerCase()===plan.alias.toLowerCase()&&right.toLowerCase()===j.alias.toLowerCase()){from=j.right.column;to=j.left.column;}
-      else if(right.toLowerCase()===plan.alias.toLowerCase()&&left.toLowerCase()===j.alias.toLowerCase()){from=j.left.column;to=j.right.column;}
-      else fail("JOIN must compare the base table with the joined table using an equality condition.");
-      if(!base.columns?.some(c=>c.logicalName.toLowerCase()===to.toLowerCase())||!entities[j.table].columns?.some(c=>c.logicalName.toLowerCase()===from.toLowerCase()))fail("JOIN columns were not found in metadata.");
-      return '<link-entity name="'+escapeXml(j.table)+'" alias="'+escapeXml(j.alias)+'" from="'+escapeXml(from)+'" to="'+escapeXml(to)+'" link-type="'+j.kind+'"/>';
-    }).join("");
+    const joinNodes = [];
+    const nodesByAlias = new Map();
+    const entityByAlias = new Map([[plan.alias.toLowerCase(), base]]);
+    for (const j of plan.joins) {
+      const leftAlias = (j.left.tableAlias || plan.alias).toLowerCase();
+      const rightAlias = (j.right.tableAlias || plan.alias).toLowerCase();
+      const joinAlias = j.alias.toLowerCase();
+      let parentAlias, from, to;
+      if (rightAlias === joinAlias && leftAlias !== joinAlias) {
+        parentAlias = leftAlias; from = j.right.column; to = j.left.column;
+      } else if (leftAlias === joinAlias && rightAlias !== joinAlias) {
+        parentAlias = rightAlias; from = j.left.column; to = j.right.column;
+      } else fail("JOIN must compare the newly joined table with one existing table using an equality condition.");
+      const parentEntity = entityByAlias.get(parentAlias);
+      if (!parentEntity) fail("JOIN references an alias that has not been introduced yet: '" + parentAlias + "'.");
+      const joinedEntity = entities[j.table];
+      if (!parentEntity.columns?.some(c => c.logicalName.toLowerCase() === to.toLowerCase()) ||
+          !joinedEntity.columns?.some(c => c.logicalName.toLowerCase() === from.toLowerCase())) {
+        fail("JOIN columns were not found in metadata.");
+      }
+      const node = { join: j, parentAlias, from, to, children: [] };
+      joinNodes.push(node);
+      nodesByAlias.set(joinAlias, node);
+      entityByAlias.set(joinAlias, joinedEntity);
+      if (parentAlias !== plan.alias.toLowerCase()) nodesByAlias.get(parentAlias)?.children.push(node);
+    }
+    const renderJoin = node => {
+      const j = node.join;
+      return '<link-entity name="'+escapeXml(j.table)+'" alias="'+escapeXml(j.alias)+'" from="'+escapeXml(node.from)+'" to="'+escapeXml(node.to)+'" link-type="'+j.kind+'">'+
+        node.children.map(renderJoin).join("")+'</link-entity>';
+    };
+    const links = joinNodes.filter(node => node.parentAlias === plan.alias.toLowerCase()).map(renderJoin).join("");
     const xml='<fetch'+(plan.top?' top="'+plan.top+'"':'')+(plan.distinct?' distinct="true"':'')+'><entity name="'+escapeXml(base.logicalName)+'">'+attrs.join("")+orders+filters+links+'</entity></fetch>';
     return {fetchXml:xml,plan,entitySetName:base.entitySetName,primaryIdAttribute:base.primaryIdAttribute,readOnly:true};
   }
