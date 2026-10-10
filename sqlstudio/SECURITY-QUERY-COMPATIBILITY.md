@@ -21,11 +21,12 @@ The generic compiler in `sqlstudio/js/sql-engine.js` remains a bounded SQL subse
 
 ## Test evidence
 
-- Offline regression workflow: [Query Studio Regression Tests](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/query-studio-regression.yml); latest full run: [run 325 — 68 passed, 0 failed, 0 TODO](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085138031)
+- Offline regression workflow: [Query Studio Regression Tests](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/query-studio-regression.yml); latest run: [run 331 — 71 passed, 0 failed, 0 TODO](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085305895)
 - Live Dataverse integration workflow: [Security SQL Live Dataverse Integration](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/security-query-integration.yml)
-- Live run with all six query projections and the audit-detail smoke test passing: [run 8 — 7 passed, 0 failed](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085006500)
+- Latest live security run: [run 12 — 7 passed, 0 failed, 1 skipped](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085305911). The standard-account privilege control returned 8 privileges and the Basic User access summary returned 185 rows. The supplied user-name, salesorder, custom-privilege and audit-record filters returned zero rows in this test environment; matching production data is environment-dependent.
+- The live audit-detail smoke test was skipped because the test environment had no audit records with object IDs available at that time. Audit-detail flattening and operation/depth semantics are covered by offline adapter fixtures.
 - Ordinary SQL/bridge smoke test: [run 6 — five account rows returned; row values omitted](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085137537)
-- Live run 8 completed 7 tests with 7 passed and 0 failed, including an actual `RetrieveAuditDetails` call against available audit data. Test logs report status/projection/count metadata only; they do not print record values, audit payloads, tokens, or privilege assignments.
+- Test logs report status/projection/count metadata only; they do not print record values, audit payloads, tokens, or privilege assignments.
 
 ## Safety and compatibility boundaries
 
