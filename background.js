@@ -791,6 +791,31 @@ function pageBridge(action, payload) {
     return columns.length ? [...new Set(columns)] : null;
   }
 
+  async function queryFetchXmlReadOnly(fetchXml, tableName) {
+    if (typeof fetchXml !== "string" || !fetchXml.trim()) return { ok: false, error: "A compiled FetchXML query is required." };
+    if (fetchXml.length > 1000000) return { ok: false, error: "Compiled query exceeds the 1,000,000 character limit." };
+    const table = String(tableName || "").trim().toLowerCase();
+    if (!/^[a-z_][a-z0-9_]*$/.test(table)) return { ok: false, error: "Invalid Dataverse table logical name." };
+    if (!/^\s*<fetch(?:\s|>)/i.test(fetchXml) || /\baggregate\s*=\s*["']true["']/i.test(fetchXml)) {
+      return { ok: false, error: "Only non-aggregate read-only FetchXML is accepted." };
+    }
+    const entityMatch = fetchXml.match(/<entity\s+[^>]*name\s*=\s*["']([a-z_][a-z0-9_]*)["']/i);
+    if (!entityMatch || entityMatch[1].toLowerCase() !== table) return { ok: false, error: "FetchXML base entity does not match the requested table." };
+    if (/<(?:update|delete|create|upsert|insert)\b/i.test(fetchXml)) return { ok: false, error: "Only read-only FetchXML is accepted." };
+    const result = await Xrm.WebApi.retrieveMultipleRecords(table, "?fetchXml=" + encodeURIComponent(fetchXml), 5000);
+    const entities = Array.isArray(result?.entities) ? result.entities : [];
+    const columns = [...new Set(entities.flatMap(row => Object.keys(row).filter(key => !key.startsWith("@") && !key.includes("@"))))];
+    const rows = entities.map(row => {
+      const cleanRow = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (key.startsWith("@") || key.includes("@")) continue;
+        cleanRow[key] = value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "value") ? value.value : value;
+      }
+      return cleanRow;
+    });
+    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, moreRecords: !!result?.nextLink };
+  }
+
   async function querySqlReadOnly(sql) {
     if (typeof sql !== "string" || !sql.trim()) return { ok: false, error: "Enter a SELECT query." };
     if (sql.length > 100000) return { ok: false, error: "Query exceeds the 100,000 character limit." };
@@ -1432,7 +1457,9 @@ function pageBridge(action, payload) {
                 ? schemaTable(payload?.logicalName)
                 : action === "processExplorer"
                 ? surfaceContext({ requireEntity: true, requireForm: false }).then((ctx) => processExplorer(ctx, !!payload?.force))
-              : action === "querySql"
+              : action === "queryFetchXml"
+          ? queryFetchXmlReadOnly(payload?.fetchXml, payload?.tableName)
+          : action === "querySql"
           ? querySqlReadOnly(payload?.sql)
           : action === "tool"
                 ? tool(payload || {})
