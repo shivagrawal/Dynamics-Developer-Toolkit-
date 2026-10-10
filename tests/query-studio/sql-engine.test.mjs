@@ -42,6 +42,11 @@ test("compiles a simple left join with explicit joined projection",()=>{
  assert.match(q.fetchXml,/<attribute name="name" alias="a_name"\/>/);
 });
 
+test("supports SQL output aliases without confusing them with table aliases",()=>{
+ const q=engine.compileSql("SELECT c.fullname AS ContactName FROM contact AS c",metadata);
+ assert.match(q.fetchXml,/<attribute name="fullname" alias="ContactName"\\/>/);
+});
+
 test("SELECT star expands only metadata-approved queryable columns",()=>{
  const q=engine.compileSql("SELECT * FROM contact",metadata);
  assert.match(q.fetchXml,/<attribute name="fullname"\/>/);
