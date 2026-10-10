@@ -1,0 +1,49 @@
+name: Dataverse Environment Integration Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/sql4cds-query-studio
+    paths:
+      - "sqlstudio/js/sql-engine.js"
+      - "tests/query-studio/dataverse-integration.test.mjs"
+      - ".github/workflows/dataverse-integration.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  dataverse-integration:
+    name: Read-only Dataverse integration tests
+    runs-on: ubuntu-latest
+    environment: dataverse-test
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check required configuration exists
+        env:
+          DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
+          DATAVERSE_TENANT_ID: ${{ secrets.DATAVERSE_TENANT_ID }}
+          DATAVERSE_CLIENT_ID: ${{ secrets.DATAVERSE_CLIENT_ID }}
+          DATAVERSE_CLIENT_SECRET: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
+        run: |
+          test -n "$DATAVERSE_URL"
+          test -n "$DATAVERSE_TENANT_ID"
+          test -n "$DATAVERSE_CLIENT_ID"
+          test -n "$DATAVERSE_CLIENT_SECRET"
+
+      - name: Run read-only environment integration tests
+        env:
+          DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
+          DATAVERSE_TENANT_ID: ${{ secrets.DATAVERSE_TENANT_ID }}
+          DATAVERSE_CLIENT_ID: ${{ secrets.DATAVERSE_CLIENT_ID }}
+          DATAVERSE_CLIENT_SECRET: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
+        run: node --test tests/query-studio/dataverse-integration.test.mjs
