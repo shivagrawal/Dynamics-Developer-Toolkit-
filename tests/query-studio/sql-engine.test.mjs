@@ -15,6 +15,13 @@ const metadata = {
   }
 };
 
+test("accepts bracketed identifiers and ignores SQL comments safely",()=>{
+ const q=engine.compileSql("/* start */ SELECT [fullname] FROM [contact] -- table\nWHERE [statecode] = 1",metadata);
+ assert.match(q.fetchXml,/<entity name="contact">/);
+ assert.match(q.fetchXml,/<attribute name="fullname"\/>/);
+ assert.match(q.fetchXml,/operator="eq"><value>1<\/value>/);
+});
+
 test("compiles basic SELECT with TOP, projection, filter and sort",()=>{
  const q=engine.compileSql("SELECT TOP 25 fullname, createdon FROM contact WHERE statecode = 0 ORDER BY createdon DESC",metadata);
  assert.equal(q.entitySetName,"contacts");
