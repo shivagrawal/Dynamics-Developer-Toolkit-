@@ -244,7 +244,7 @@ function devLensSecurityAuditBridge(action, p) {
   }
   function sqlLikeTerm(sql, pattern) {
     const value = sqlLiteral(sql, pattern);
-    return value == null ? null : value.replace(/^%|%$/g, "").replace(/\\%/g, "%").replace(/\\_/g, "_");
+    return value;
   }
   function sqlDepth(mask) {
     return ({ 1: "User", 2: "Business Unit", 4: "Parent:Child BU", 8: "Organization" })[Number(mask)] || null;
@@ -270,14 +270,14 @@ function devLensSecurityAuditBridge(action, p) {
     });
   }
   async function sqlUsersByName(term) {
-    const xml = "<fetch top='5000'><entity name='systemuser'><attribute name='systemuserid'/><attribute name='fullname'/><filter><condition attribute='fullname' operator='like' value='%" + X(term) + "%' /></filter><order attribute='fullname'/></entity></fetch>";
+    const xml = "<fetch top='5000'><entity name='systemuser'><attribute name='systemuserid'/><attribute name='fullname'/><filter><condition attribute='fullname' operator='like' value='" + X(term) + "' /></filter><order attribute='fullname'/></entity></fetch>";
     return (await all("systemusers?fetchXml=" + encodeURIComponent(xml))).map(row => ({
       id: G(row.systemuserid), name: row.fullname || "", raw: row
     }));
   }
 
   async function sqlUserRolesByName(term) {
-    const xml = "<fetch top='5000'><entity name='role'><attribute name='roleid'/><attribute name='name'/><link-entity name='systemuserroles' from='roleid' to='roleid' link-type='inner'><link-entity name='systemuser' from='systemuserid' to='systemuserid' alias='SU' link-type='inner'><attribute name='systemuserid'/><attribute name='fullname'/><filter><condition attribute='fullname' operator='like' value='%" + X(term) + "%'/></filter></link-entity></link-entity><link-entity name='businessunit' from='businessunitid' to='businessunitid' alias='BU' link-type='inner'><attribute name='name'/></link-entity></entity></fetch>";
+    const xml = "<fetch top='5000'><entity name='role'><attribute name='roleid'/><attribute name='name'/><link-entity name='systemuserroles' from='roleid' to='roleid' link-type='inner'><link-entity name='systemuser' from='systemuserid' to='systemuserid' alias='SU' link-type='inner'><attribute name='systemuserid'/><attribute name='fullname'/><filter><condition attribute='fullname' operator='like' value='" + X(term) + "'/></filter></link-entity></link-entity><link-entity name='businessunit' from='businessunitid' to='businessunitid' alias='BU' link-type='inner'><attribute name='name'/></link-entity></entity></fetch>";
     const result = await allBounded("roles?fetchXml=" + encodeURIComponent(xml), 5000);
     return { rows: result.rows.map(row => ({
       fullname: row["SU.fullname"] || row["su.fullname"] || "",
@@ -289,7 +289,7 @@ function devLensSecurityAuditBridge(action, p) {
   async function sqlUserTableByName(term, logicalName) {
     const table = S(logicalName).toLowerCase();
     if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw Error("Invalid table logical name in user privilege query.");
-    const xml = "<fetch top='5000' distinct='true'><entity name='systemuserroles'><attribute name='systemuserroleid'/><link-entity name='systemuser' to='systemuserid' from='systemuserid' alias='su' link-type='inner'><attribute name='fullname'/><attribute name='systemuserid'/><filter><condition attribute='fullname' operator='like' value='%" + X(term) + "%'/></filter></link-entity><link-entity name='role' to='roleid' from='roleid' alias='ur' link-type='inner'><attribute name='name'/><attribute name='roleid'/><link-entity name='businessunit' to='businessunitid' from='businessunitid' alias='bu' link-type='inner'><attribute name='name'/></link-entity><link-entity name='role' to='parentrootroleid' from='parentrootroleid' alias='pr' link-type='inner'><attribute name='roleid'/><link-entity name='roleprivileges' to='roleid' from='roleid' alias='rp' link-type='inner'><attribute name='privilegedepthmask'/><attribute name='roleprivilegeid'/><link-entity name='privilege' to='privilegeid' from='privilegeid' alias='p' link-type='inner'><attribute name='name'/><attribute name='privilegeid'/><link-entity name='privilegeobjecttypecodes' to='privilegeid' from='privilegeid' alias='potc' link-type='inner'><link-entity name='entity' to='objecttypecode' from='objecttypecode' alias='e' link-type='inner'><attribute name='logicalname'/><filter><condition attribute='logicalname' operator='eq' value='" + X(table) + "'/></filter></link-entity></link-entity></link-entity></link-entity></link-entity></link-entity></entity></fetch>";
+    const xml = "<fetch top='5000' distinct='true'><entity name='systemuserroles'><attribute name='systemuserroleid'/><link-entity name='systemuser' to='systemuserid' from='systemuserid' alias='su' link-type='inner'><attribute name='fullname'/><attribute name='systemuserid'/><filter><condition attribute='fullname' operator='like' value='" + X(term) + "'/></filter></link-entity><link-entity name='role' to='roleid' from='roleid' alias='ur' link-type='inner'><attribute name='name'/><attribute name='roleid'/><link-entity name='businessunit' to='businessunitid' from='businessunitid' alias='bu' link-type='inner'><attribute name='name'/></link-entity><link-entity name='role' to='parentrootroleid' from='parentrootroleid' alias='pr' link-type='inner'><attribute name='roleid'/><link-entity name='roleprivileges' to='roleid' from='roleid' alias='rp' link-type='inner'><attribute name='privilegedepthmask'/><attribute name='roleprivilegeid'/><link-entity name='privilege' to='privilegeid' from='privilegeid' alias='p' link-type='inner'><attribute name='name'/><attribute name='privilegeid'/><link-entity name='privilegeobjecttypecodes' to='privilegeid' from='privilegeid' alias='potc' link-type='inner'><link-entity name='entity' to='objecttypecode' from='objecttypecode' alias='e' link-type='inner'><attribute name='logicalname'/><filter><condition attribute='logicalname' operator='eq' value='" + X(table) + "'/></filter></link-entity></link-entity></link-entity></link-entity></link-entity></link-entity></entity></fetch>";
     const result = await allBounded("systemuserrolescollection?fetchXml=" + encodeURIComponent(xml), 5000);
     return { rows: result.rows.map(row => ({
       fullname: row["su.fullname"] || "",
