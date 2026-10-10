@@ -32,6 +32,19 @@ function devLensSecurityAuditBridge(action, p) {
     }
     return rows;
   }
+  async function allBounded(path, maxRows = 10000) {
+    const rows = [];
+    let next = path;
+    while (next && rows.length < maxRows) {
+      const data = await get(next.replace(base + "/api/data/v9.2/", ""));
+      const pageRows = Array.isArray(data.value) ? data.value : [];
+      const room = maxRows - rows.length;
+      rows.push(...pageRows.slice(0, room));
+      next = data["@odata.nextLink"] || "";
+      if (rows.length >= maxRows) return { rows, truncated: true };
+    }
+    return { rows, truncated: false };
+  }
   const fxAll = xml => all(`roles?fetchXml=${encodeURIComponent(xml)}`);
   async function context() {
     const g = Xrm.Utility.getGlobalContext();
@@ -265,55 +278,55 @@ function devLensSecurityAuditBridge(action, p) {
 
   async function sqlUserRolesByName(term) {
     const xml = "<fetch top='5000'><entity name='role'><attribute name='roleid'/><attribute name='name'/><link-entity name='systemuserroles' from='roleid' to='roleid' link-type='inner'><link-entity name='systemuser' from='systemuserid' to='systemuserid' alias='SU' link-type='inner'><attribute name='systemuserid'/><attribute name='fullname'/><filter><condition attribute='fullname' operator='like' value='%" + X(term) + "%'/></filter></link-entity></link-entity><link-entity name='businessunit' from='businessunitid' to='businessunitid' alias='BU' link-type='inner'><attribute name='name'/></link-entity></entity></fetch>";
-    const rows = await all("roles?fetchXml=" + encodeURIComponent(xml));
-    return rows.map(row => ({
+    const result = await allBounded("roles?fetchXml=" + encodeURIComponent(xml), 5000);
+    return { rows: result.rows.map(row => ({
       fullname: row["SU.fullname"] || row["su.fullname"] || "",
       systemuserid: G(row["SU.systemuserid"] || row["su.systemuserid"]),
       role_name: row.name || row["R.name"] || row["r.name"] || "",
       role_businessunit: row["BU.name"] || row["bu.name"] || ""
-    }));
+    })), truncated: result.truncated };
   }
   async function sqlUserTableByName(term, logicalName) {
     const table = S(logicalName).toLowerCase();
     if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw Error("Invalid table logical name in user privilege query.");
     const xml = "<fetch top='5000' distinct='true'><entity name='systemuserroles'><attribute name='systemuserroleid'/><link-entity name='systemuser' to='systemuserid' from='systemuserid' alias='su' link-type='inner'><attribute name='fullname'/><attribute name='systemuserid'/><filter><condition attribute='fullname' operator='like' value='%" + X(term) + "%'/></filter></link-entity><link-entity name='role' to='roleid' from='roleid' alias='ur' link-type='inner'><attribute name='name'/><attribute name='roleid'/><link-entity name='businessunit' to='businessunitid' from='businessunitid' alias='bu' link-type='inner'><attribute name='name'/></link-entity><link-entity name='role' to='parentrootroleid' from='parentrootroleid' alias='pr' link-type='inner'><attribute name='roleid'/><link-entity name='roleprivileges' to='roleid' from='roleid' alias='rp' link-type='inner'><attribute name='privilegedepthmask'/><attribute name='roleprivilegeid'/><link-entity name='privilege' to='privilegeid' from='privilegeid' alias='p' link-type='inner'><attribute name='name'/><attribute name='privilegeid'/><link-entity name='privilegeobjecttypecodes' to='privilegeid' from='privilegeid' alias='potc' link-type='inner'><link-entity name='entity' to='objecttypecode' from='objecttypecode' alias='e' link-type='inner'><attribute name='logicalname'/><filter><condition attribute='logicalname' operator='eq' value='" + X(table) + "'/></filter></link-entity></link-entity></link-entity></link-entity></link-entity></link-entity></entity></fetch>";
-    const rows = await all("systemuserrolescollection?fetchXml=" + encodeURIComponent(xml));
-    return rows.map(row => ({
+    const result = await allBounded("systemuserrolescollection?fetchXml=" + encodeURIComponent(xml), 5000);
+    return { rows: result.rows.map(row => ({
       fullname: row["su.fullname"] || "",
       role_name: row["ur.name"] || "",
       role_businessunit: row["bu.name"] || "",
       privilege_name: row["p.name"] || "",
       depth: sqlDepth(row["rp.privilegedepthmask"]) || (row["rp.privilegedepthmask"] == null ? "" : S(row["rp.privilegedepthmask"]))
-    }));
+    })), truncated: result.truncated };
   }
 
   async function sqlPrivilegesForTable(logicalName) {
     const table = S(logicalName).toLowerCase();
     if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw Error("Invalid table logical name in security query.");
     const xml = "<fetch distinct='true'><entity name='privilege'><attribute name='name'/><link-entity name='privilegeobjecttypecodes' from='privilegeid' to='privilegeid' link-type='inner'><link-entity name='entity' from='objecttypecode' to='objecttypecode' alias='e' link-type='inner'><attribute name='logicalname'/><filter><condition attribute='logicalname' operator='eq' value='" + X(table) + "'/></filter></link-entity></link-entity><order attribute='name'/></entity></fetch>";
-    const rows = await all("privileges?fetchXml=" + encodeURIComponent(xml));
-    return sqlDistinct(rows.map(row => ({ privilege_name: row.name || "" })), ["privilege_name"]);
+    const result = await allBounded("privileges?fetchXml=" + encodeURIComponent(xml), 10000);
+    return { rows: sqlDistinct(result.rows.map(row => ({ privilege_name: row.name || "" })), ["privilege_name"]), truncated: result.truncated };
   }
   async function sqlRolesByPrivilegeName(privilegeName) {
     const xml = "<fetch distinct='true'><entity name='roleprivileges'><attribute name='privilegedepthmask'/><link-entity name='role' to='roleid' from='roleid' alias='r' link-type='inner'><attribute name='roleid'/><attribute name='name'/><link-entity name='businessunit' to='businessunitid' from='businessunitid' alias='bu' link-type='inner'><attribute name='name'/></link-entity></link-entity><link-entity name='privilege' to='privilegeid' from='privilegeid' alias='p' link-type='inner'><attribute name='name'/><filter><condition attribute='name' operator='eq' value='" + X(privilegeName) + "'/></filter></link-entity></entity></fetch>";
-    const rows = await all("roleprivilegescollection?fetchXml=" + encodeURIComponent(xml));
-    return rows.map(row => ({
+    const result = await allBounded("roleprivilegescollection?fetchXml=" + encodeURIComponent(xml), 10000);
+    return { rows: result.rows.map(row => ({
       role_name: row["r.name"] || "",
       business_unit: row["bu.name"] || "",
       privilege_name: row["p.name"] || privilegeName,
       depth: sqlDepth(row.privilegedepthmask) || (row.privilegedepthmask == null ? "" : S(row.privilegedepthmask))
-    }));
+    })), truncated: result.truncated };
   }
   async function sqlRoleAccessRows(roleName) {
     const xml = "<fetch distinct='true'><entity name='roleprivileges'><attribute name='privilegedepthmask'/><link-entity name='role' to='roleid' from='roleid' alias='r' link-type='inner'><attribute name='roleid'/><attribute name='name'/><filter><condition attribute='name' operator='eq' value='" + X(roleName) + "'/></filter><link-entity name='businessunit' to='businessunitid' from='businessunitid' alias='bu' link-type='inner'><attribute name='name'/></link-entity></link-entity><link-entity name='privilege' to='privilegeid' from='privilegeid' alias='p' link-type='inner'><attribute name='name'/><link-entity name='privilegeobjecttypecodes' to='privilegeid' from='privilegeid' alias='potc' link-type='inner'><link-entity name='entity' to='objecttypecode' from='objecttypecode' alias='e' link-type='inner'><attribute name='logicalname'/></link-entity></link-entity></link-entity></entity></fetch>";
-    const rows = await all("roleprivilegescollection?fetchXml=" + encodeURIComponent(xml));
-    return rows.map(row => ({
+    const result = await allBounded("roleprivilegescollection?fetchXml=" + encodeURIComponent(xml), 10000);
+    return { rows: result.rows.map(row => ({
       table_name: row["e.logicalname"] || "",
       privilege_name: row["p.name"] || "",
       depth: sqlDepth(row.privilegedepthmask),
       role_name: row["r.name"] || roleName,
       business_unit: row["bu.name"] || ""
-    }));
+    })), truncated: result.truncated };
   }
   function sqlAuditValue(values, key) {
     const formatted = values?.[key + "@OData.Community.Display.V1.FormattedValue"];
@@ -322,7 +335,9 @@ function devLensSecurityAuditBridge(action, p) {
   async function sqlAuditRows(recordId) {
     const id = G(recordId).toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw Error("Audit query requires a valid record GUID in the objectid filter.");
-    const auditRows = await all("audits?$select=auditid,createdon,operation,_userid_value,objecttypecode&$filter=_objectid_value eq " + id + "&$orderby=createdon desc&$top=1000");
+    const auditResult = await allBounded("audits?$select=auditid,createdon,operation,_userid_value,objecttypecode&$filter=_objectid_value eq " + id + "&$orderby=createdon desc&$top=1001", 1001);
+    const auditRows = auditResult.rows;
+    const truncated = auditResult.truncated || auditRows.length > 1000;
     const output = [];
     for (const auditRow of auditRows.slice(0, 1000)) {
       const auditId = G(auditRow.auditid);
@@ -347,7 +362,7 @@ function devLensSecurityAuditBridge(action, p) {
         });
       }
     }
-    return sqlSort(output, [["createdon", "desc"], ["logicalname", "asc"]]);
+    return { rows: sqlSort(output, [["createdon", "desc"], ["logicalname", "asc"]]), truncated };
   }
   async function sqlQuery(sql) {
     const query = S(sql).trim();
@@ -356,36 +371,47 @@ function devLensSecurityAuditBridge(action, p) {
     if (query.length > 100000) throw Error("Query exceeds the 100,000 character limit.");
     const columns = [], rows = [];
     let kind = "";
+    let truncated = false;
     if (/\bFROM\s+systemuserroles\b/i.test(query) && /\bJOIN\s+systemuser\b/i.test(query)) {
       kind = "user-roles";
       const term = sqlLikeTerm(query, /\bSU\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       if (term == null) throw Error("User-role query requires a SU.fullname LIKE string filter.");
-      rows.push(...await sqlUserRolesByName(term));
+      const result = await sqlUserRolesByName(term);
+      rows.push(...result.rows);
+      truncated = result.truncated;
       columns.push("fullname", "systemuserid", "role_name", "role_businessunit");
     } else if (/\bFROM\s+privilege\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query) && /\bentity\b/i.test(query)) {
       kind = "entity-privileges";
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
       if (!table) throw Error("Privilege query requires an e.logicalname equality filter.");
-      rows.push(...await sqlPrivilegesForTable(table));
+      const result = await sqlPrivilegesForTable(table);
+      rows.push(...result.rows);
+      truncated = result.truncated;
       columns.push("privilege_name");
     } else if (/\bFROM\s+systemuser\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query)) {
       kind = "user-entity-privileges";
       const term = sqlLikeTerm(query, /\bsu\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
       if (term == null || !table) throw Error("User privilege query requires fullname LIKE and entity logicalname filters.");
-      rows.push(...await sqlUserTableByName(term, table));
+      const result = await sqlUserTableByName(term, table);
+      rows.push(...result.rows);
+      truncated = result.truncated;
       columns.push("fullname", "role_name", "role_businessunit", "privilege_name", "depth");
     } else if (/\bFROM\s+role\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\bp\.name\s*=\s*'/i.test(query)) {
       kind = "roles-by-privilege";
       const privilegeName = sqlLiteral(query, /\bp\.name\s*=\s*'((?:''|[^'])*)'/i);
       if (privilegeName == null) throw Error("Role privilege query requires a p.name equality filter.");
-      rows.push(...await sqlRolesByPrivilegeName(privilegeName));
+      const result = await sqlRolesByPrivilegeName(privilegeName);
+      rows.push(...result.rows);
+      truncated = result.truncated;
       columns.push("role_name", "business_unit", "privilege_name", "depth");
     } else if (/\bFROM\s+role\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\br\.name\s*=\s*'/i.test(query)) {
       kind = "role-table-access";
       const roleName = sqlLiteral(query, /\br\.name\s*=\s*'((?:''|[^'])*)'/i);
       if (roleName == null) throw Error("Role access query requires an r.name equality filter.");
-      const accessRows = await sqlRoleAccessRows(roleName);
+      const accessResult = await sqlRoleAccessRows(roleName);
+      const accessRows = accessResult.rows;
+      truncated = accessResult.truncated;
       const grouped = new Map();
       const operationFor = name => {
         const match = /^prv(AppendTo|Create|Read|Write|Delete|Append|Assign|Share)/i.exec(String(name || ""));
@@ -411,7 +437,9 @@ function devLensSecurityAuditBridge(action, p) {
       kind = "record-audit";
       const id = sqlLiteral(query, /\ba\.objectid\s*=\s*'((?:''|[^'])*)'/i);
       if (!id) throw Error("Audit query requires an objectid GUID filter.");
-      rows.push(...await sqlAuditRows(id));
+      const auditResult = await sqlAuditRows(id);
+      rows.push(...auditResult.rows);
+      truncated = auditResult.truncated;
       columns.push("createdon", "ChangedBy", "Event", "logicalname", "oldvalue", "newvalue");
     } else {
       throw Error("This security SQL shape is not implemented by the JavaScript compatibility adapter. Query was not sent to the Dataverse SQL endpoint.");
@@ -424,7 +452,7 @@ function devLensSecurityAuditBridge(action, p) {
       else if (kind === "role-table-access") sqlSort(rows, [["table_name", "asc"]]);
       else if (kind === "record-audit") sqlSort(rows, [["createdon", "desc"]]);
     }
-    return { ok: true, provider: "dataverse-security-query-adapter", compatibilityMode: kind, columns, rows, rowCount: rows.length, readOnly: true };
+    return { ok: true, provider: "dataverse-security-query-adapter", compatibilityMode: kind, columns, rows, rowCount: rows.length, readOnly: true, truncated, warning: truncated ? "Results reached a configured safety limit and may be incomplete. Refine the query to avoid truncation." : "" };
   }
 
   return (async () => {
