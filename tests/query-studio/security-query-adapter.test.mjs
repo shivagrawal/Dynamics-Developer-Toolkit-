@@ -97,8 +97,8 @@ LEFT JOIN systemuser u ON a.userid = u.systemuserid
 WHERE a.objectid = '33333333-3333-4333-8333-333333333333' ORDER BY a.createdon DESC`
 };
 
-test("security query 1 returns role membership and business unit", async () => {
-  const result = await createBridge().run(queries.userRoles);
+test("security query 1 returns role membership and business unit even with a leading SQL comment", async () => {
+  const result = await createBridge().run("-- Gets all roles for the user's BU\\n" + queries.userRoles);
   assert.equal(result.ok, true);
   assert.deepEqual(JSON.parse(JSON.stringify(result.columns)), ["fullname", "systemuserid", "role_name", "role_businessunit"]);
   assert.equal(result.rows[0].fullname, "USD8 Test User");
@@ -151,6 +151,23 @@ test("security query 6 expands audit details to one row per changed attribute", 
   assert.equal(result.rows[0].Event, "Update");
   assert.equal(result.rows.find(row => row.logicalname === "customfield").oldvalue, "old");
   assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")));
+});
+
+test("security adapter rejects a projection it cannot faithfully return before any API request", async () => {
+  const bridge = createBridge();
+  const sql = queries.userRoles.replace("SU.fullname, SU.systemuserid, R.name AS role_name, BU.name AS role_businessunit", "SU.fullname AS unexpected");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Unsupported SELECT projection/);
+  assert.equal(bridge.calls.length, 0);
+});
+
+test("security adapter treats semicolons inside string literals as data", async () => {
+  const bridge = createBridge();
+  const sql = queries.userRoles.replace("'%USD8%'", "'%USD8; Test%'");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, true);
+  assert.ok(bridge.calls.length > 0);
 });
 
 test("security adapter rejects writes and multiple statements", async () => {
