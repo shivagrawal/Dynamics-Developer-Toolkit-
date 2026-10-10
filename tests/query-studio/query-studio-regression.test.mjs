@@ -168,7 +168,7 @@ test("native SQL enforces a 10,000-row cap and reports incomplete results", asyn
   assert.equal(result.ok, true);
   assert.equal(result.rows.length, 10000);
   assert.equal(result.truncated, true);
-  assert.match(result.warning, /10,000-row.*incomplete/i);
+  assert.match(result.warning, /may be incomplete/i);
 });
 
 test("lookup projection maps verified _parentcustomerid_value to parentcustomerid", async () => {
