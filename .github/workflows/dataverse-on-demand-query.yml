@@ -1,0 +1,39 @@
+name: Dataverse On-demand SQL Test Harness
+
+on:
+  workflow_dispatch:
+    inputs:
+      sql_query:
+        description: "Read-only SQL query. Must use SELECT TOP N (N 1–25); only account/contact tables. Do not enter sensitive values."
+        required: true
+        type: string
+        default: "SELECT TOP 5 accountid, name FROM account ORDER BY name"
+
+permissions:
+  contents: read
+
+jobs:
+  run-query:
+    name: Run bounded read-only SQL query
+    runs-on: ubuntu-latest
+    environment: dataverse-test
+    timeout-minutes: 5
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/sql4cds-query-studio
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate configuration and run query
+        env:
+          DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
+          DATAVERSE_TENANT_ID: ${{ secrets.DATAVERSE_TENANT_ID }}
+          DATAVERSE_CLIENT_ID: ${{ secrets.DATAVERSE_CLIENT_ID }}
+          DATAVERSE_CLIENT_SECRET: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
+          SQL_QUERY: ${{ inputs.sql_query }}
+        run: node tests/query-studio/on-demand-query.mjs
