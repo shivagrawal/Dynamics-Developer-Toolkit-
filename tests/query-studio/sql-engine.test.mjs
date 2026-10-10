@@ -72,7 +72,7 @@ test("compiles a simple left join with explicit joined projection",()=>{
 
 test("adds a primary-key tie-breaker for non-unique ORDER BY values",()=>{
  const q=engine.compileSql("SELECT fullname FROM contact ORDER BY fullname",metadata);
- assert.match(q.fetchXml,/<order attribute="fullname"\/>[\\s\\S]*<order attribute="contactid"\/>/);
+ assert.ok(q.fetchXml.indexOf('<order attribute="fullname"/>') < q.fetchXml.indexOf('<order attribute="contactid"/>'));
 });
 
 test("orders grouped aggregate rows when SQL omits ORDER BY",()=>{
