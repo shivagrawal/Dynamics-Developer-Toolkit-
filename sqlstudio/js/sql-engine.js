@@ -112,13 +112,12 @@
         let not=false; if (peek("NOT")) { take(); not=true; }
         if (peek("BETWEEN")) {
           take();
-          if (not) fail("NOT BETWEEN is not supported in this engine version.");
           const lower = literal(); expect("AND"); const upper = literal();
           if (lower.type === "null" || upper.type === "null") fail("BETWEEN bounds cannot be NULL.");
-          return {type:"between",field,lower,upper};
+          return {type:"between",field,lower,upper,not};
         }
-        if (peek("IN")) { take(); expect("("); const values=[]; do { values.push(literal()); if(!peek(","))break; take(); } while(true); expect(")"); if(not) fail("NOT IN is not supported in this engine version."); if(values.some(value=>value.type==="null")) fail("NULL values in IN lists are not supported; handle NULL explicitly."); return {type:"in",field,values}; }
-        if (peek("LIKE")) { take(); if(not) fail("NOT LIKE is not supported in this engine version."); const value=literal(); if(value.type!=="string") fail("LIKE requires a string literal."); return {type:"like",field,value:value.value}; }
+        if (peek("IN")) { take(); expect("("); const values=[]; do { values.push(literal()); if(!peek(","))break; take(); } while(true); expect(")"); if(values.some(value=>value.type==="null")) fail("NULL values in IN lists are not supported; handle NULL explicitly."); return {type:"in",field,values,not}; }
+        if (peek("LIKE")) { take(); const value=literal(); if(value.type!=="string") fail("LIKE requires a string literal."); return {type:"like",field,value:value.value,not}; }
         const op=take(); if (!OPS[op.value]) fail("Unsupported WHERE operator '" + op.value + "'.");
         const value=literal(); if(value.type==="null") fail("Use IS NULL or IS NOT NULL instead of comparing with NULL."); return {type:"compare",field,operator:OPS[op.value],value};
       };
@@ -192,12 +191,12 @@
     const field=attributeName(node.field,plan);
     const entity=field.entityAlias?' entityname="'+escapeXml(field.entityAlias)+'"':'';
     if(node.type==="null") return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-null":"null")+'"'+entity+'/>';
-    if(node.type==="in") return '<condition attribute="'+escapeXml(field.name)+'" operator="in"'+entity+'>'+node.values.map(v=>'<value>'+escapeXml(valueXml(v))+'</value>').join("")+'</condition>';
-    if(node.type==="between") return '<condition attribute="'+escapeXml(field.name)+'" operator="between"'+entity+'><value>'+escapeXml(valueXml(node.lower))+'</value><value>'+escapeXml(valueXml(node.upper))+'</value></condition>';
+    if(node.type==="in") return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-in":"in")+'"'+entity+'>'+node.values.map(v=>'<value>'+escapeXml(valueXml(v))+'</value>').join("")+'</condition>';
+    if(node.type==="between") return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-between":"between")+'"'+entity+'><value>'+escapeXml(valueXml(node.lower))+'</value><value>'+escapeXml(valueXml(node.upper))+'</value></condition>';
     if(node.type==="like") {
       const pattern=node.value;
       const value=pattern.replace(/\\%/g,"%").replace(/\\_/g,"_");
-      return '<condition attribute="'+escapeXml(field.name)+'" operator="like"'+entity+'><value>'+escapeXml(value)+'</value></condition>';
+      return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-like":"like")+'"'+entity+'><value>'+escapeXml(value)+'</value></condition>';
     }
     if(node.value.type==="null") fail("Use IS NULL or IS NOT NULL instead of comparing with NULL.");
     return '<condition attribute="'+escapeXml(field.name)+'" operator="'+node.operator+'"'+entity+'><value>'+escapeXml(valueXml(node.value))+'</value></condition>';
