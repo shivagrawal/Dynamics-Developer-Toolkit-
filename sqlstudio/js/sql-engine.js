@@ -102,7 +102,7 @@
     }
     function literal() {
       const t=take(); if(!t) fail("Expected a literal value.");
-      if(t.type==="string") return {type:"string",value:unquote(t).replace(/''/g,"'")};
+      if(t.type==="string") return {type:"string",value:t.value.slice(1,-1).replace(/''/g,"'")};
       if(t.type==="number") { const n=Number(t.value); if(!Number.isFinite(n))fail("Invalid numeric literal."); return {type:"number",value:n}; }
       if(t.value.toUpperCase()==="NULL") return {type:"null",value:null};
       if(t.value.toUpperCase()==="TRUE"||t.value.toUpperCase()==="FALSE") return {type:"boolean",value:t.value.toUpperCase()==="TRUE"};
