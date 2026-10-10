@@ -216,14 +216,21 @@
     };
     const validateField = field => {
       const entity = resolveEntity(field.tableAlias);
-      if (!entity.columns?.some(column => column.logicalName.toLowerCase() === field.column.toLowerCase() && column.queryable !== false)) {
-        fail("Column '" + field.column + "' is not queryable on table '" + entity.logicalName + "'.");
-      }
+      const column = entity.columns?.find(item => item.logicalName.toLowerCase() === field.column.toLowerCase() && item.queryable !== false);
+      if (!column) fail("Column '" + field.column + "' is not queryable on table '" + entity.logicalName + "'.");
+      return { entity, column };
     };
     const validatePredicate = node => {
       if (!node) return;
       if (node.type === "and" || node.type === "or") { validatePredicate(node.left); validatePredicate(node.right); return; }
-      validateField(node.field);
+      const { column } = validateField(node.field);
+      const type = String(column.attributeType || "").toLowerCase();
+      if (node.type === "between" && type && !["integer","bigint","decimal","money","double","datetime"].includes(type)) {
+        fail("BETWEEN is supported only for numeric and date/time columns; '" + node.field.column + "' is " + column.attributeType + ".");
+      }
+      if (node.type === "like" && type && !["string","memo"].includes(type)) {
+        fail("LIKE is supported only for string columns; '" + node.field.column + "' is " + column.attributeType + ".");
+      }
     };
     validatePredicate(plan.where);
     const selected=plan.columns.some(c=>c.star && !c.aggregate)?(base.columns||[]).filter(c=>c.queryable!==false).map(c=>({column:c.logicalName})):plan.columns;
