@@ -858,8 +858,9 @@ function pageBridge(action, payload) {
     const rows = (result.value || []).map(row => {
       const normalized = {};
       for (const [key, value] of Object.entries(row)) {
-        // Keep data fields, but omit OData annotations and metadata-only properties.
-        if (key.startsWith("@") || key.includes("@OData.") || key === "@odata.etag") continue;
+        // OData annotations can use namespaces beyond @OData (e.g. @Microsoft.Dynamics.CRM).
+        // Exclude any annotated property while preserving ordinary data fields.
+        if (key.startsWith("@") || key.includes("@")) continue;
         // Dataverse encodes dotted SQL table aliases in row keys, e.g. a_x002e_name.
         const displayKey = key.replace(/_x002e_/gi, ".");
         normalized[displayKey] = value;
