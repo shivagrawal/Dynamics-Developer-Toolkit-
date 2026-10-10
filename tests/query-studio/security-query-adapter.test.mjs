@@ -268,6 +268,14 @@ test("security adapter rejects incomplete joins instead of inventing missing rel
   assert.equal(bridge.calls.length, 0);
 });
 
+test("SQL clause keywords inside string literals do not change WHERE or ORDER BY parsing", async () => {
+  const bridge = createBridge();
+  const sql = queries.userRoles.replace("'%USD8%'", "'%ORDER BY GROUP BY DISTINCT%'");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 1);
+});
+
 test("DISTINCT inside a string literal does not alter query result deduplication", async () => {
   const bridge = createBridge({ duplicateRoles: true });
   const sql = queries.userRoles.replace("'%USD8%'", "'%DISTINCT%'");
