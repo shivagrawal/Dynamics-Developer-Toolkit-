@@ -21,9 +21,10 @@ The generic compiler in `sqlstudio/js/sql-engine.js` remains a bounded SQL subse
 
 ## Test evidence
 
-- Offline regression workflow: [Query Studio Regression Tests](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/query-studio-regression.yml); latest run: [run 331 — 71 passed, 0 failed, 0 TODO](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085305895)
+- Offline regression workflow: [Query Studio Regression Tests](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/query-studio-regression.yml); latest run: [run 335 — 71 passed, 0 failed, 0 TODO](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085401544)
 - Live Dataverse integration workflow: [Security SQL Live Dataverse Integration](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/workflows/security-query-integration.yml)
-- Latest live security run: [run 12 — 7 passed, 0 failed, 1 skipped](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085305911). The standard-account privilege control returned 8 privileges and the Basic User access summary returned 185 rows. The supplied user-name, salesorder, custom-privilege and audit-record filters returned zero rows in this test environment; matching production data is environment-dependent.
+- Latest live run: [run 15 — 10 passed, 0 failed, 1 skipped](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085401539). Data-backed smoke tests returned 2 user-role rows, 16 user/account-privilege rows, 7 roles for a standard account privilege, 8 account privileges, and 185 rows for the Basic User table-access summary.
+- The exact supplied filters for `USD8`, `salesorder`, the custom `prvReadwesco_legalentity` privilege, and the supplied audit GUID returned zero rows in this test environment. The dynamic smoke tests verify the user/role and privilege paths with records that actually exist here.
 - The live audit-detail smoke test was skipped because the test environment had no audit records with object IDs available at that time. Audit-detail flattening and operation/depth semantics are covered by offline adapter fixtures.
 - Ordinary SQL/bridge smoke test: [run 6 — five account rows returned; row values omitted](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38085137537)
 - Test logs report status/projection/count metadata only; they do not print record values, audit payloads, tokens, or privilege assignments.
