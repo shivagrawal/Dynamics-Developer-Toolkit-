@@ -12,7 +12,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  const KEYWORDS = new Set(("SELECT DISTINCT TOP FROM WHERE ORDER BY ASC DESC AS INNER LEFT JOIN ON AND OR IS NULL NOT LIKE IN").split(/\s+/));
+  const KEYWORDS = new Set(("SELECT DISTINCT TOP FROM WHERE ORDER BY GROUP HAVING ASC DESC AS INNER LEFT JOIN ON AND OR IS NULL NOT LIKE IN").split(/\s+/));
   const OPS = { "=": "eq", "!=": "ne", "<>": "ne", ">": "gt", ">=": "ge", "<": "lt", "<=": "le" };
 
   function tokenize(sql) {
@@ -60,7 +60,17 @@
     const columns = [];
     do {
       if (peek("*")) { take(); columns.push({star:true,alias:null}); }
-      else { const field=qualified(); let as=null; if (peek("AS")) { take(); as=identifier(); } columns.push({tableAlias:field.tableAlias,column:field.column,alias:as}); }
+      else if (tokens[p]?.type === "identifier" && ["COUNT","SUM","AVG","MIN","MAX"].includes(tokens[p].value.toUpperCase()) && tokens[p+1]?.value === "(") {
+        const aggregate = take().value.toUpperCase(); expect("(");
+        let star = false, field = null;
+        if (peek("*")) { take(); star = true; } else field = qualified();
+        expect(")");
+        let as = null; if (peek("AS")) { take(); as = identifier(); }
+        columns.push({aggregate,star,tableAlias:field?.tableAlias||null,column:field?.column||null,alias:as});
+      } else {
+        const field=qualified(); let as=null; if (peek("AS")) { take(); as=identifier(); }
+        columns.push({tableAlias:field.tableAlias,column:field.column,alias:as});
+      }
       if (!peek(",")) break; take();
     } while (p < tokens.length);
     expect("FROM");
@@ -85,6 +95,12 @@
     }
     let where=null;
     if (peek("WHERE")) { take(); where=parsePredicate(); }
+    const groupBy = [];
+    if (peek("GROUP")) {
+      take(); expect("BY");
+      do { groupBy.push(qualified()); if (!peek(",")) break; take(); } while (true);
+    }
+    if (peek("HAVING")) fail("HAVING is not supported in this engine version.");
     function parsePredicate() {
       const parseAtom=()=>{
         if (peek("(")) { take(); const node=parseOr(); expect(")"); return node; }
@@ -109,17 +125,26 @@
       fail("Only string, numeric, boolean and NULL literals are supported in WHERE.");
     }
     // WHERE is parsed with closures above; declaration is hoisted and parser consumes until ORDER/semicolon.
-    if (peek("ORDER")) { take(); expect("BY"); }
+    const hasOrder = !!peek("ORDER");
+    if (hasOrder) { take(); expect("BY"); }
     const orderBy=[];
-    if (tokens.slice(0,p).some(t=>t.value.toUpperCase()==="BY")) {
+    if (hasOrder) {
       do { const field=qualified(); let direction="asc"; if(peek("ASC"))take();else if(peek("DESC")){take();direction="desc";} orderBy.push({ ...field,direction }); if(!peek(","))break;take(); } while(true);
     }
     if (peek(";")) take();
     if (p !== tokens.length) fail("Unsupported SQL syntax near '" + tokens[p].value + "'.");
     if (columns.some(c=>c.star) && columns.length>1) fail("SELECT * cannot be combined with individual columns in this engine version.");
+    const aggregateQuery = columns.some(c => c.aggregate) || groupBy.length > 0;
+    if (aggregateQuery && columns.some(c => c.star)) fail("SELECT * cannot be combined with GROUP BY or aggregate expressions.");
+    if (aggregateQuery && distinct) fail("DISTINCT with aggregate expressions is not supported in this engine version.");
+    if (aggregateQuery && top) fail("TOP with aggregate expressions is not supported in this engine version.");
+    if (aggregateQuery && joins.length) fail("Aggregate queries with joins are not supported in this engine version.");
+    if (groupBy.some(g => g.tableAlias && g.tableAlias.toLowerCase() !== baseAlias.toLowerCase())) fail("GROUP BY on joined columns is not supported yet.");
+    if (groupBy.some(g => !columns.some(c => !c.aggregate && c.column?.toLowerCase() === g.column.toLowerCase() && (!c.tableAlias || c.tableAlias.toLowerCase() === baseAlias.toLowerCase())))) fail("Every GROUP BY column must appear in the SELECT projection.");
+    if (aggregateQuery && columns.some(c => !c.aggregate && !groupBy.some(g => g.column.toLowerCase() === c.column.toLowerCase()))) fail("Non-aggregate SELECT columns must appear in GROUP BY.");
     const aliases = [baseAlias.toLowerCase(), ...joins.map(join => join.alias.toLowerCase())];
     if (new Set(aliases).size !== aliases.length) fail("Table aliases must be unique within a query.");
-    return {type:"select",table,alias:baseAlias,columns,distinct,top,where,orderBy,joins};
+    return {type:"select",table,alias:baseAlias,columns,distinct,top,where,orderBy,joins,groupBy,aggregateQuery};
   }
 
   function escapeXml(value) { return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;"); }
