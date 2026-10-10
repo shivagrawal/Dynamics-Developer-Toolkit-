@@ -27,8 +27,8 @@
     columnsError: "",
     columnFilter: "",
     selectedColumns: [],
-    editorSelectionStart: 0,
-    editorSelectionEnd: 0
+    editorSelectionStart: -1,
+    editorSelectionEnd: -1
   };
   let host = null;
 
@@ -68,7 +68,7 @@
     }).join("");
     const tableMeta = state.tableMeta;
     return '<section class="ss-schema"><div class="ss-schema-head"><div><strong>Schema Explorer</strong><div class="ss-meta">Browse Dataverse tables and insert explicit column names.</div></div>' +
-      '<button class="ss-btn" data-act="loadTables" ' + (state.schemaLoading ? 'disabled' : '') + '>' + (state.tablesLoaded ? 'Reload tables' : 'Load tables') + '</button>' +
+      '<button class="ss-btn" data-act="loadTables" ' + (state.schemaLoading || state.tablesLoaded ? 'disabled' : '') + '>' + (state.tablesLoaded ? 'Tables loaded' : 'Load tables') + '</button>' +
       '<button class="ss-btn" data-act="closeSchema">Hide</button></div>' +
       (state.schemaError ? '<div class="ss-status ss-error">' + esc(state.schemaError) + '</div>' : '') +
       '<div class="ss-schema-grid"><div class="ss-schema-pane"><div class="ss-schema-pane-title">Tables ' + (state.tables.length ? '(' + state.tables.length + ')' : '') + '</div>' +
@@ -87,8 +87,9 @@
 
   function render() {
     if (!host) return;
-    const focusedFilter = host.contains(document.activeElement) ? document.activeElement.getAttribute("data-schema-filter") : null;
-    const focusedFilterStart = focusedFilter ? document.activeElement.selectionStart : null;
+    const activeElement = host.getRootNode()?.activeElement || document.activeElement;
+    const focusedFilter = host.contains(activeElement) ? activeElement.getAttribute("data-schema-filter") : null;
+    const focusedFilterStart = focusedFilter ? activeElement.selectionStart : null;
     const rows = state.results?.rows || [];
     const columns = state.results?.columns || [];
     host.innerHTML = `
@@ -195,9 +196,8 @@
     render();
   }
 
-  async function loadTables(force = false) {
-    if (state.schemaLoading) return;
-    if (state.tablesLoaded && !force) return;
+  async function loadTables() {
+    if (state.schemaLoading || state.tablesLoaded) return;
     state.schemaLoading = true;
     state.schemaError = "";
     state.status = "Loading Dataverse tables…";
@@ -211,8 +211,8 @@
       state.tablesLoaded = true;
       state.status = "Loaded " + state.tables.length + " tables";
       if (!state.selectedTable) {
-        const match = state.sql.match(/\\bFROM\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)?[A-Za-z_][A-Za-z0-9_]*)/i);
-        const candidate = match?.[1]?.split(".").pop()?.replace(/^[\\[\\"]|[\\]\\"]$/g, "").toLowerCase();
+        const match = state.sql.match(/FROM[ ]+((?:[A-Za-z_][A-Za-z0-9_]*[.])?[A-Za-z_][A-Za-z0-9_]*)/i);
+        const candidate = match?.[1]?.split(".").pop()?.replaceAll("[", "").replaceAll("]", "").replaceAll('"', "").toLowerCase();
         if (candidate && state.tables.some(table => table.logicalName === candidate)) {
           state.selectedTable = candidate;
           await loadSchemaTable(candidate);
@@ -239,6 +239,7 @@
       return;
     }
     state.selectedTable = table;
+    state.schemaError = "";
     state.tableMeta = null;
     state.columnsLoading = true;
     state.columnsError = "";
@@ -271,7 +272,7 @@
       render();
       return;
     }
-    state.sql = "SELECT TOP 100 " + names.join(", ") + "\\nFROM " + state.tableMeta.logicalName + ";";
+    state.sql = "SELECT TOP 100 " + names.join(", ") + "\nFROM " + state.tableMeta.logicalName + ";";
     state.editorSelectionStart = state.editorSelectionEnd = 0;
     state.error = "";
     state.results = null;
@@ -290,7 +291,7 @@
       render();
       return;
     }
-    const start = Math.min(state.editorSelectionStart, state.sql.length);
+    const start = state.editorSelectionStart < 0 ? state.sql.length : Math.min(state.editorSelectionStart, state.sql.length);
     const end = Math.min(Math.max(state.editorSelectionEnd, start), state.sql.length);
     const insertion = columns.join(", ");
     state.sql = state.sql.slice(0, start) + insertion + state.sql.slice(end);
@@ -349,7 +350,7 @@
       return;
     }
     if (action === "closeSchema") { state.schemaOpen = false; render(); return; }
-    if (action === "loadTables") return loadTables(true);
+    if (action === "loadTables") return loadTables();
     if (action === "selectVisibleColumns") {
       const visible = (state.tableMeta?.columns || []).filter(column =>
         [column.displayName, column.logicalName, column.schemaName, column.attributeType].join(" ").toLowerCase().includes(state.columnFilter.toLowerCase())
