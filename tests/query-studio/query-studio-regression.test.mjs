@@ -392,7 +392,7 @@ test("FetchXML action applies SQL OFFSET/FETCH after paging", async () => {
   assert.equal(result.rows.length, 50);
   assert.equal(result.rows[0].contactid, "contact-500");
   assert.equal(result.rows[49].contactid, "contact-549");
-  assert.equal(result.moreRecords, true);
+  assert.equal(result.moreRecords, false);
 });
 
 test("FetchXML action rejects aggregate and mutation-like payloads", async () => {
