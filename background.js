@@ -802,8 +802,54 @@ function pageBridge(action, payload) {
     const entityMatch = fetchXml.match(/<entity\s+[^>]*name\s*=\s*["']([a-z_][a-z0-9_]*)["']/i);
     if (!entityMatch || entityMatch[1].toLowerCase() !== table) return { ok: false, error: "FetchXML base entity does not match the requested table." };
     if (/<(?:update|delete|create|upsert|insert)\b/i.test(fetchXml)) return { ok: false, error: "Only read-only FetchXML is accepted." };
-    const result = await Xrm.WebApi.retrieveMultipleRecords(table, "?fetchXml=" + encodeURIComponent(fetchXml), 5000);
-    const entities = Array.isArray(result?.entities) ? result.entities : [];
+
+    const hasTop = /<fetch\b[^>]*\btop\s*=\s*["']/i.test(fetchXml);
+    const pageSize = 500;
+    const maxPages = 200;
+    const escapeXmlAttribute = value => String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
+    const setFetchAttribute = (xml, name, value) => {
+      const match = xml.match(/<fetch\b([^>]*)>/i);
+      if (!match) throw Error("Compiled FetchXML has no fetch root.");
+      const attribute = new RegExp("\\s" + name + "\\s*=\\s*(['\"])[\\s\\S]*?\\1", "i");
+      const attributes = match[1].replace(attribute, "").trim();
+      return xml.slice(0, match.index) + "<fetch" + (attributes ? " " + attributes : "") + " " + name + "=\"" + escapeXmlAttribute(value) + "\">" + xml.slice(match.index + match[0].length);
+    };
+    const decodePagingCookie = cookieXml => {
+      if (typeof cookieXml !== "string") return null;
+      const match = cookieXml.match(/\bpagingcookie\s*=\s*["']([^"']+)["']/i);
+      if (!match) return null;
+      let decoded = match[1];
+      try { decoded = decodeURIComponent(decodeURIComponent(decoded)); } catch { return null; }
+      return decoded.startsWith("<") ? decoded : null;
+    };
+
+    const entities = [];
+    let page = 1, pagingCookie = null, moreRecords = false, pagesFetched = 0;
+    while (true) {
+      let pageXml = fetchXml;
+      if (!hasTop) {
+        pageXml = setFetchAttribute(pageXml, "count", pageSize);
+        pageXml = setFetchAttribute(pageXml, "page", page);
+        if (pagingCookie) pageXml = setFetchAttribute(pageXml, "paging-cookie", pagingCookie);
+      }
+      const result = await Xrm.WebApi.retrieveMultipleRecords(table, "?fetchXml=" + pageXml, 5000);
+      const pageEntities = Array.isArray(result?.entities) ? result.entities : [];
+      entities.push(...pageEntities);
+      pagesFetched++;
+      if (hasTop) { moreRecords = !!result?.nextLink; break; }
+      if (entities.length >= pageSize * maxPages) { moreRecords = true; break; }
+      const nextCookie = decodePagingCookie(result?.fetchXmlPagingCookie);
+      if (nextCookie) {
+        pagingCookie = nextCookie;
+        page++;
+        continue;
+      }
+      if (pageEntities.length < pageSize) { moreRecords = false; break; }
+      // Without a cookie, FetchXML simple paging is limited to 50,000 rows.
+      if (page >= 100) { moreRecords = true; break; }
+      pagingCookie = null;
+      page++;
+    }
     const columns = [...new Set(entities.flatMap(row => Object.keys(row).filter(key => !key.startsWith("@") && !key.includes("@"))))];
     const rows = entities.map(row => {
       const cleanRow = {};
@@ -813,7 +859,7 @@ function pageBridge(action, payload) {
       }
       return cleanRow;
     });
-    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, moreRecords: !!result?.nextLink };
+    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, pagesFetched, moreRecords };
   }
 
   async function querySqlReadOnly(sql) {
