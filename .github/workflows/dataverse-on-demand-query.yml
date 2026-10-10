@@ -8,6 +8,9 @@ on:
       - ".github/workflows/dataverse-on-demand-query.yml"
       - "tests/query-studio/on-demand-query.mjs"
       - "sqlstudio/js/sql-engine.js"
+      - "background.js"
+      - "security-audit-service.js"
+      - "ui/sql-studio-view.js"
   workflow_dispatch:
     inputs:
       sql_query:
