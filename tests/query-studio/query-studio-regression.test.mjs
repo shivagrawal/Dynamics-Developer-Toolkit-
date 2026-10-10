@@ -9,9 +9,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const backgroundPath = path.resolve(here, "../../background.js");
 const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
-function createHarness({ response, entityMetadata = {}, fetchResponse, metadataError, fetchXmlResponse } = {}) {
+function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPages, metadataError, fetchXmlResponse } = {}) {
   let messageListener;
   let requestedUrl;
+  const requestedUrls = [];
+  let fetchPageIndex = 0;
   let fetchXmlCallCount = 0;
   const requestedFetchXml = [];
   const clientUrl = "https://example.crm.dynamics.com";
@@ -53,7 +55,17 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, metadataE
     Xrm: xrm,
     fetch: async (url) => {
       requestedUrl = String(url);
+      requestedUrls.push(String(url));
       if (fetchResponse) return fetchResponse;
+      if (fetchPages) {
+        const page = fetchPages[fetchPageIndex++];
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => page,
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -86,7 +98,7 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, metadataE
     return { result, requestedUrl };
   }
   async function runQuery(sql) { return runAction("querySql", { sql }); }
-  return { runQuery, runAction, requestedFetchXml };
+  return { runQuery, runAction, requestedFetchXml, requestedUrls };
 }
 
 test("simple SELECT returns requested columns and preserves null-capable metadata columns", async () => {
@@ -101,6 +113,48 @@ test("simple SELECT returns requested columns and preserves null-capable metadat
   assert.deepEqual(Array.from(result.columns), ["accountid", "name", "accountnumber"]);
   assert.equal(result.rows[0].accountnumber, null);
   assert.match(requestedUrl, /\/api\/data\/v9\.2\/accounts\?sql=/);
+});
+
+test("native SQL follows same-origin Dataverse paging links", async () => {
+  const context = "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)";
+  const nextLink = "https://example.crm.dynamics.com/api/data/v9.2/accounts?sql=SELECT%20accountid%2C%20name%20FROM%20account&$skiptoken=page2";
+  const harness = createHarness({
+    fetchPages: [
+      { "@odata.context": context, "@odata.nextLink": nextLink, value: [{ accountid: "a1", name: "First" }] },
+      { "@odata.context": context, value: [{ accountid: "a2", name: "Second" }] }
+    ]
+  });
+  const { result } = await harness.runQuery("SELECT accountid, name FROM account");
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 2);
+  assert.equal(result.rows[1].name, "Second");
+  assert.equal(result.truncated, false);
+  assert.equal(harness.requestedUrls.length, 2);
+});
+
+test("native SQL rejects cross-origin paging links without following them", async () => {
+  const harness = createHarness({
+    fetchPages: [{
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)",
+      "@odata.nextLink": "https://attacker.example/api/data/v9.2/accounts?skiptoken=bad",
+      value: [{ accountid: "a1", name: "First" }]
+    }]
+  });
+  const { result } = await harness.runQuery("SELECT accountid, name FROM account");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /invalid paging URL/i);
+  assert.equal(harness.requestedUrls.length, 1);
+});
+
+test("native SQL enforces a 10,000-row cap and reports incomplete results", async () => {
+  const context = "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)";
+  const rows = Array.from({ length: 10001 }, (_, index) => ({ accountid: "a" + index, name: "Row " + index }));
+  const harness = createHarness({ fetchPages: [{ "@odata.context": context, value: rows }] });
+  const { result } = await harness.runQuery("SELECT accountid, name FROM account");
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 10000);
+  assert.equal(result.truncated, true);
+  assert.match(result.warning, /10,000-row.*incomplete/i);
 });
 
 test("lookup projection maps verified _parentcustomerid_value to parentcustomerid", async () => {
