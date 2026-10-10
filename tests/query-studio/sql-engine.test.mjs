@@ -46,6 +46,12 @@ test("escapes string literals and translates null, IN, LIKE and boolean filters"
  assert.match(like.fetchXml,/%DevLens%/);
 });
 
+test("resolves simple projection aliases in ORDER BY",()=>{
+ const q=engine.compileSql("SELECT fullname AS ContactName FROM contact ORDER BY ContactName DESC",metadata);
+ assert.match(q.fetchXml,/<attribute name="fullname" alias="ContactName"\/>/);
+ assert.match(q.fetchXml,/<order attribute="fullname" descending="true"\/>/);
+});
+
 test("compiles a simple left join with explicit joined projection",()=>{
  const q=engine.compileSql("SELECT c.fullname, a.name FROM contact AS c LEFT JOIN account AS a ON c.parentcustomerid = a.accountid",metadata);
  assert.ok(q.fetchXml.includes('<link-entity name="account" alias="a" from="accountid" to="parentcustomerid" link-type="outer"></link-entity>'));
