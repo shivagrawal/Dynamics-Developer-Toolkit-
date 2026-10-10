@@ -65,6 +65,12 @@ test("compiles COUNT and SUM with GROUP BY and aggregate output aliases",()=>{
  assert.deepEqual(q.resultColumns.map(c=>c.label),["statecode","contact_count","total_income","avg_income","first_created","last_created"]);
 });
 
+test("resolves grouped output aliases in ORDER BY",()=>{
+ const q=engine.compileSql("SELECT statecode AS state, COUNT(*) AS contact_count FROM contact GROUP BY statecode ORDER BY state DESC",metadata);
+ assert.match(q.fetchXml,/<attribute name="statecode" groupby="true" alias="state"\/>/);
+ assert.match(q.fetchXml,/<order alias="state" descending="true"\/>/);
+});
+
 test("rejects HAVING and invalid aggregate grouping rather than guessing",()=>{
  assert.throws(()=>engine.plan("SELECT statecode, COUNT(*) FROM contact GROUP BY statecode HAVING COUNT(*) > 1"),/HAVING is not supported/);
  assert.throws(()=>engine.plan("SELECT fullname, COUNT(*) FROM contact"),/Non-aggregate SELECT columns must appear in GROUP BY/);
