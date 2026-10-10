@@ -18,7 +18,7 @@ CTEs, subqueries, UNION, aggregation / GROUP BY / HAVING, scalar functions and c
 
 ## Safety and result limits
 
-The JavaScript engine preview is a separate button; the existing native Dataverse SQL endpoint remains the default path. The execution bridge accepts non-aggregate FetchXML only and checks that its base entity matches the requested table. Dataverse authorization still applies. A response that indicates more records is reported as limited; pagination continuation is not implemented yet. Use an explicit TOP until paging is implemented.
+The JavaScript engine preview is a separate button; the existing native Dataverse SQL endpoint remains the default path. The execution bridge accepts non-aggregate FetchXML only and checks that its base entity matches the requested table. Dataverse authorization still applies. FetchXML paging cookies are followed for queries without TOP, with a safety cap of 10,000 rows per execution. Results are marked limited if additional pages may remain. Queries using TOP do not use paging-cookie continuation.
 
 ## Validation
 
