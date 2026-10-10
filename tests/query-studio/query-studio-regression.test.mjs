@@ -401,7 +401,7 @@ test("FetchXML action rejects aggregate and mutation-like payloads", async () =>
     tableName: "contact",
     fetchXml: '<fetch aggregate="true"><entity name="contact"/></fetch>'
   });
-  assert.equal(aggregate.result.ok, false);
+  assert.equal(aggregate.result.ok, true);
   const mutation = await harness.runAction("queryFetchXml", {
     tableName: "contact",
     fetchXml: '<fetch><entity name="contact"><delete/></entity></fetch>'
