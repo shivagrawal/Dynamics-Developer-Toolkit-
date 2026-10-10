@@ -226,8 +226,9 @@
             }
           }
           const sourceColumn = c.aggregate === "COUNT" && c.star ? base.primaryIdAttribute : c.column;
+          const aggregateName = c.aggregate === "COUNT" ? (c.star ? "count" : "countcolumn") : c.aggregate.toLowerCase();
           const outputAlias = c.alias || (c.aggregate === "COUNT" && c.star ? "count" : c.aggregate.toLowerCase() + "_" + sourceColumn);
-          attrs.push('<attribute name="'+escapeXml(sourceColumn)+'" aggregate="'+c.aggregate.toLowerCase()+'" alias="'+escapeXml(outputAlias)+'"/>');
+          attrs.push('<attribute name="'+escapeXml(sourceColumn)+'" aggregate="'+aggregateName+'" alias="'+escapeXml(outputAlias)+'"/>');
           resultColumns.push({label:outputAlias,key:outputAlias});
         } else {
           if (!groupNames.has(c.column.toLowerCase())) fail("Non-aggregate SELECT columns must appear in GROUP BY.");
