@@ -333,6 +333,15 @@ test("conditional access aggregation treats unsupported depth masks as None", as
   assert.equal(account.WriteAccess, "None");
 });
 
+test("audit result cap is explicit when more than 1,000 audit records are available", async () => {
+  const bridge = createBridge({ bulkAudits: 1001 });
+  const result = await bridge.run(queries.audit);
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 2000);
+  assert.equal(result.truncated, true);
+  assert.match(result.warning, /may be incomplete/);
+});
+
 test("audit detail expansion uses bounded concurrency and preserves all changed attributes", async () => {
   const bridge = createBridge({ bulkAudits: 9, auditDelayMs: 10 });
   const result = await bridge.run(queries.audit);
