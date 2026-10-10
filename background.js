@@ -741,7 +741,7 @@ function pageBridge(action, payload) {
     const match = query.replace(/;\s*$/, "").match(/^\s*SELECT\s+(?:DISTINCT\s+)?(?:TOP\s+\d+\s+)?([\s\S]+?)\s+FROM\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?=WHERE\b|ORDER\s+BY\b|GROUP\s+BY\b|$)/i);
     if (!match) return null;
     const list = match[1].trim();
-    if (!list || list.includes("*") || /\bAS\b/i.test(list) || /[()]/.test(list)) return null;
+    if (!list || /\bAS\b/i.test(list) || /[()]/.test(list)) return null;\n    if (list === "*") return ["*"];
     const columns = list.split(",").map(part => part.trim()).filter(Boolean);
     if (!columns.length || columns.some(part => !/^(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*$/.test(part))) return null;
     return columns.map(part => part.split(".").pop().toLowerCase());
