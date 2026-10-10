@@ -62,11 +62,14 @@
       if (peek("*")) { take(); columns.push({star:true,alias:null}); }
       else if (tokens[p]?.type === "identifier" && ["COUNT","SUM","AVG","MIN","MAX"].includes(tokens[p].value.toUpperCase()) && tokens[p+1]?.value === "(") {
         const aggregate = take().value.toUpperCase(); expect("(");
+        let distinctAggregate = false;
+        if (peek("DISTINCT")) { take(); distinctAggregate = true; }
         let star = false, field = null;
         if (peek("*")) { take(); star = true; } else field = qualified();
         expect(")");
+        if (distinctAggregate && (aggregate !== "COUNT" || star)) fail("DISTINCT is supported only for COUNT(column).");
         let as = null; if (peek("AS")) { take(); as = identifier(); }
-        columns.push({aggregate,star,tableAlias:field?.tableAlias||null,column:field?.column||null,alias:as});
+        columns.push({aggregate,star,distinctAggregate,tableAlias:field?.tableAlias||null,column:field?.column||null,alias:as});
       } else {
         const field=qualified(); let as=null; if (peek("AS")) { take(); as=identifier(); }
         columns.push({tableAlias:field.tableAlias,column:field.column,alias:as});
@@ -256,7 +259,7 @@
           const sourceColumn = c.aggregate === "COUNT" && c.star ? base.primaryIdAttribute : c.column;
           const aggregateName = c.aggregate === "COUNT" ? (c.star ? "count" : "countcolumn") : c.aggregate.toLowerCase();
           const outputAlias = c.alias || (c.aggregate === "COUNT" && c.star ? "count" : c.aggregate.toLowerCase() + "_" + sourceColumn);
-          attrs.push('<attribute name="'+escapeXml(sourceColumn)+'" aggregate="'+aggregateName+'" alias="'+escapeXml(outputAlias)+'"/>');
+          attrs.push('<attribute name="'+escapeXml(sourceColumn)+'" aggregate="'+aggregateName+'"'+(c.distinctAggregate?' distinct="true"':'')+' alias="'+escapeXml(outputAlias)+'"/>');
           resultColumns.push({label:outputAlias,key:outputAlias});
         } else {
           if (!groupNames.has(c.column.toLowerCase())) fail("Non-aggregate SELECT columns must appear in GROUP BY.");
