@@ -11,7 +11,9 @@ const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
 function createHarness({ response, entityMetadata = {}, fetchResponse, metadataError, fetchXmlResponse } = {}) {
   let messageListener;
-  let requestedUrl;\n  let fetchXmlCallCount = 0;\n  const requestedFetchXml = [];
+  let requestedUrl;
+  let fetchXmlCallCount = 0;
+  const requestedFetchXml = [];
   const clientUrl = "https://example.crm.dynamics.com";
   const xrm = {
     WebApi: { retrieveMultipleRecords: async (table, query, pageSize) => { requestedFetchXml.push({ table, query, pageSize }); if (Array.isArray(fetchXmlResponse)) return fetchXmlResponse[fetchXmlCallCount++] || { entities: [] }; return fetchXmlResponse || { entities: [], nextLink: null }; } },
