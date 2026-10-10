@@ -636,6 +636,10 @@ function devLensSecurityAuditBridge(action, p) {
       kind = "role-table-access";
       assertSqlProjection(query, ["table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess"], kind, roleAccessProjectionExpressions(), false);
       assertSqlShape(query, kind, [
+        [/\bJOIN\s+roleprivileges\s+rp\s+ON\s+rp\.roleid\s*=\s*r\.roleid\b/i, "the role-privilege relationship"],
+        [/\bJOIN\s+privilege\s+p\s+ON\s+p\.privilegeid\s*=\s*rp\.privilegeid\b/i, "the privilege relationship"],
+        [/\bJOIN\s+privilegeobjecttypecodes\s+potc\s+ON\s+potc\.privilegeid\s*=\s*p\.privilegeid\b/i, "the privilege-object-type-code relationship"],
+        [/\bJOIN\s+entity\s+e\s+ON\s+e\.objecttypecode\s*=\s*potc\.objecttypecode\b/i, "the entity mapping relationship"],
         [/\bGROUP\s+BY\s+e\.logicalname\b/i, "GROUP BY e.logicalname"],
         [/\br\.name\s*=/i, "the role-name equality filter"]
       ]);
