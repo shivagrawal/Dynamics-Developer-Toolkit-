@@ -115,6 +115,6 @@ test("Query Studio paginates large result sets without losing exportable results
   assert.equal(rowCount(host.innerHTML), 100);
 
   await click(host, "csv");
-  assert.equal(downloadedContent.split("\\r\\n").length, 251, "CSV export must include all 250 rows, not only the current page.");
+  assert.equal(downloadedContent.split("\r\n").length, 251, "CSV export must include all 250 rows, not only the current page.");
   assert.match(downloadedContent, /Row 250/);
 });
