@@ -14,7 +14,7 @@ test("tokenizer preserves strings, escaped quotes, comments and bracket identifi
 test("SELECT parser splits projections only at top level", () => {
   const p = sql.parseSelect("SELECT c.fullname, COALESCE(c.emailaddress1, 'x,y') AS email FROM contact AS c WHERE c.statecode = 0 ORDER BY c.fullname");
   assert.equal(p.ok, true);
-  assert.deepEqual(p.projection, ["c.fullname", "COALESCE ( c.emailaddress1 , 'x,y' ) AS email"]);
+  assert.deepEqual(p.projection, ["c.fullname", "COALESCE (c.emailaddress1, 'x,y') AS email"]);
   assert.equal(p.table, "contact");
   assert.equal(p.alias, "c");
   assert.equal(p.clauses.WHERE, "c.statecode = 0");
