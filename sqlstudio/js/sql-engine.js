@@ -321,14 +321,18 @@
       const entityName = owner === plan.alias.toLowerCase() ? "" : ' entityname="'+escapeXml(owner)+'"';
       return '<order attribute="'+escapeXml(orderColumn)+'"'+entityName+' descending="'+(o.direction==="desc"?'true':'false')+'"/>';
     }).join("");
-    // FetchXML DISTINCT queries need ordering for stable paging; use a projected column.
+    // Ordering by every projected column makes DISTINCT paging deterministic for unique row combinations.
     if (plan.distinct && !plan.top && !orders) {
-      const distinctOrder = selected.find(column => !column.aggregate);
-      if (!distinctOrder) fail("DISTINCT paging requires a projected column.");
-      const owner = (distinctOrder.tableAlias || plan.alias).toLowerCase();
-      if (owner !== plan.alias.toLowerCase() && !plan.joins.some(j => j.alias.toLowerCase() === owner)) fail("Unknown DISTINCT ordering alias '" + owner + "'.");
-      const entityName = owner === plan.alias.toLowerCase() ? "" : ' entityname="'+escapeXml(owner)+'"';
-      orders = '<order attribute="'+escapeXml(distinctOrder.column)+'"'+entityName+'/>';
+      const distinctColumns = selected.filter(column => !column.aggregate);
+      if (!distinctColumns.length) fail("DISTINCT paging requires a projected column.");
+      orders = distinctColumns.map(column => {
+        const owner = (column.tableAlias || plan.alias).toLowerCase();
+        const entity = owner === plan.alias.toLowerCase() ? base : entities[plan.joins.find(j => j.alias.toLowerCase() === owner)?.table];
+        if (!entity) fail("Unknown DISTINCT ordering alias '" + owner + "'.");
+        if (!entity.columns?.some(c => c.logicalName.toLowerCase() === column.column.toLowerCase() && c.queryable !== false)) fail("DISTINCT ordering column '" + column.column + "' is not queryable.");
+        const entityName = owner === plan.alias.toLowerCase() ? "" : ' entityname="'+escapeXml(owner)+'"';
+        return '<order attribute="'+escapeXml(column.column)+'"'+entityName+'/>';
+      }).join("");
     }
     // Deterministic ordering makes FetchXML paging stable when SQL leaves row order unspecified.
     if (!plan.aggregateQuery && !plan.top && !plan.distinct && !orders && base.primaryIdAttribute) orders = '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
