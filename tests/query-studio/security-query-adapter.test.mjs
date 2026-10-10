@@ -385,7 +385,7 @@ test("audit result cap is explicit when more than 1,000 audit records are availa
 
 test("audit attribute row cap bounds expanded details and reports truncation", async () => {
   const result = await createBridge({ bulkAudits: 20, bulkAuditAttributes: true }).run(queries.audit);
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, result.error || "Audit attribute cap query failed.");
   assert.equal(result.rows.length, 10000);
   assert.equal(result.truncated, true);
   assert.match(result.warning, /may be incomplete/);
