@@ -749,9 +749,44 @@ function pageBridge(action, payload) {
 
   function columnsFromODataContext(odataContext) {
     if (typeof odataContext !== "string") return null;
-    const match = odataContext.match(/#(?:[A-Za-z_][A-Za-z0-9_]*)\(([^()]*)\)/);
-    if (!match) return null;
-    const columns = match[1].split(",").map(part => part.trim()).filter(part => /^[A-Za-z_][A-Za-z0-9_]*$/.test(part));
+    const marker = odataContext.match(/#([A-Za-z_][A-Za-z0-9_]*)\(/);
+    if (!marker || marker.index == null) return null;
+    const openIndex = marker.index + marker[0].length - 1;
+    let depth = 0;
+    let closeIndex = -1;
+    for (let i = openIndex; i < odataContext.length; i++) {
+      if (odataContext[i] === "(") depth++;
+      else if (odataContext[i] === ")") {
+        depth--;
+        if (depth === 0) {
+          closeIndex = i;
+          break;
+        }
+        if (depth < 0) return null;
+      }
+    }
+    if (closeIndex < 0) return null;
+
+    const parts = [];
+    let start = openIndex + 1;
+    depth = 0;
+    for (let i = start; i < closeIndex; i++) {
+      if (odataContext[i] === "(") depth++;
+      else if (odataContext[i] === ")") depth--;
+      else if (odataContext[i] === "," && depth === 0) {
+        parts.push(odataContext.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    parts.push(odataContext.slice(start, closeIndex).trim());
+
+    // Navigation expansions can appear both as a bare name and as name().
+    // Exclude the bare duplicate when the same name has a nested expansion.
+    const expansions = new Set(parts.filter(part => /^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(part))
+      .map(part => part.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*\(/)[1].toLowerCase()));
+    const columns = parts
+      .filter(part => /^[A-Za-z_][A-Za-z0-9_]*$/.test(part))
+      .filter(part => !expansions.has(part.toLowerCase()));
     return columns.length ? [...new Set(columns)] : null;
   }
 
@@ -787,8 +822,26 @@ function pageBridge(action, payload) {
       const actual = new Set(contextColumns.map(column => column.toLowerCase()));
       const expected = new Set(expectedProjection);
       const primaryId = String(metadata.PrimaryIdAttribute || "").toLowerCase();
-      const missing = expectedProjection.filter(column => !actual.has(column));
-      const unexpected = contextColumns.filter(column => !expected.has(column.toLowerCase()) && column.toLowerCase() !== primaryId);
+      const rowKeys = new Set((result.value || []).flatMap(row => Object.keys(row).map(key => key.toLowerCase())));
+      // Dataverse represents a logical lookup column (e.g. parentcustomerid) as
+      // _<logicalname>_value. Require the context's navigation expansion and the
+      // actual row backing field before treating it as a verified lookup mapping.
+      const lookupMappings = expectedProjection
+        .filter(column => !actual.has(column))
+        .map(column => ({ column, backing: "_" + column + "_value" }))
+        .filter(mapping =>
+          actual.has(mapping.backing) &&
+          rowKeys.has(mapping.backing) &&
+          new RegExp("(?:^|[,(])\\s*" + mapping.column + "_[A-Za-z0-9_]*\\s*\\(", "i").test(result["@odata.context"] || "")
+        );
+      const lookupBackingFields = new Set(lookupMappings.map(mapping => mapping.backing));
+      const lookupColumns = new Set(lookupMappings.map(mapping => mapping.column));
+      const missing = expectedProjection.filter(column => !actual.has(column) && !lookupColumns.has(column));
+      const unexpected = contextColumns.filter(column =>
+        !expected.has(column.toLowerCase()) &&
+        column.toLowerCase() !== primaryId &&
+        !lookupBackingFields.has(column.toLowerCase())
+      );
       if (missing.length || unexpected.length) {
         const details = [
           missing.length ? "Missing from response metadata: " + missing.join(", ") : "",
@@ -813,10 +866,29 @@ function pageBridge(action, payload) {
       }
       return normalized;
     });
+    // Present lookup values under the logical SQL column requested by the user.
+    // Keep the backing Web API field when it was explicitly selected as well.
+    const projectedLookupBackings = new Set();
+    if (expectedProjection) {
+      for (const column of expectedProjection) {
+        const backing = "_" + column + "_value";
+        const hasContextBacking = contextColumns?.some(name => name.toLowerCase() === backing);
+        const hasRowBacking = rows.some(row => Object.prototype.hasOwnProperty.call(row, backing));
+        const hasNavigationExpansion = new RegExp("(?:^|[,(])\\s*" + column + "_[A-Za-z0-9_]*\\s*\\(", "i")
+          .test(result["@odata.context"] || "");
+        if (hasContextBacking && hasRowBacking && hasNavigationExpansion && !expectedProjection.includes(backing)) {
+          projectedLookupBackings.add(backing);
+          for (const row of rows) {
+            row[column] = row[backing] ?? null;
+            delete row[backing];
+          }
+        }
+      }
+    }
     const rowColumns = [...new Set(rows.flatMap(row => Object.keys(row)))];
     // OData context may omit aliased JOIN projections. Merge it with actual row fields
     // so joined columns are visible while context-only fields (including null projections) remain.
-    const columns = [...new Set([...(contextColumns || []), ...rowColumns])];
+    const columns = [...new Set([...(contextColumns || []).filter(column => !projectedLookupBackings.has(column.toLowerCase())), ...rowColumns])];
     return {
       ok: true,
       clientUrl: ctx.clientUrl,
