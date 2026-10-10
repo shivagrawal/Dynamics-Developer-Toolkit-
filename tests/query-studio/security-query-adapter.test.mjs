@@ -104,7 +104,7 @@ WHERE a.objectid = '33333333-3333-4333-8333-333333333333' ORDER BY a.createdon D
 };
 
 test("security query 1 returns role membership and business unit even with a leading SQL comment", async () => {
-  const result = await createBridge().run("-- Gets all roles for the user's BU\n" + queries.userRoles);
+  const result = await createBridge().run("/* outer /* nested */ still outer */ -- Gets all roles for the user's BU\n" + queries.userRoles);
   assert.equal(result.ok, true);
   assert.deepEqual(JSON.parse(JSON.stringify(result.columns)), ["fullname", "systemuserid", "role_name", "role_businessunit"]);
   assert.equal(result.rows[0].fullname, "USD8 Test User");
