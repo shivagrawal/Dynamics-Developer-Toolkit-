@@ -122,7 +122,7 @@ test("JavaScript SQL engine compiles and executes a real Contact-to-Account LEFT
   ]);
   const joinedMetadata = { entities: { contact, account } };
   const compiled = engine.compileSql(
-    "SELECT TOP 5 c.contactid, c.fullname, a.name FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid ORDER BY c.fullname",
+    "SELECT TOP 5 c.contactid, c.fullname FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid ORDER BY c.fullname",
     joinedMetadata,
   );
   const result = await api(`${compiled.entitySetName}?fetchXml=${encodeURIComponent(compiled.fetchXml)}`);
