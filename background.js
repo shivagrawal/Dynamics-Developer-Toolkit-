@@ -805,7 +805,7 @@ function pageBridge(action, payload) {
 
     const hasTop = /<fetch\b[^>]*\btop\s*=\s*["']/i.test(fetchXml);
     const pageSize = 500;
-    const maxPages = 200;
+    const maxPages = 20;
     const escapeXmlAttribute = value => String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
     const setFetchAttribute = (xml, name, value) => {
       const match = xml.match(/<fetch\b([^>]*)>/i);
