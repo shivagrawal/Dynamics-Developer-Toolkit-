@@ -385,7 +385,7 @@
       const compiled = window.DevLensSqlEngine.compile(plan, metadata);
       state.status = "Executing compiled FetchXML…";
       render();
-      const response = await api.send("queryFetchXml", { tableName: plan.table, fetchXml: compiled.fetchXml });
+      const response = await api.send("queryFetchXml", { tableName: plan.table, fetchXml: compiled.fetchXml, offset: plan.offset, limit: plan.fetch });
       if (!response?.ok) throw new Error(response?.error || "Compiled FetchXML execution failed.");
       const sourceRows = response.rows || [];
       const projections = compiled.resultColumns || (plan.columns.some(column => column.star)
