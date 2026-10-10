@@ -96,6 +96,11 @@ test("rejects HAVING and invalid aggregate grouping rather than guessing",()=>{
  assert.throws(()=>engine.compileSql("SELECT SUM(name) FROM account",metadata),/SUM requires a numeric column/);
 });
 
+test("supports ORDER BY on joined entity aliases",()=>{
+ const q=engine.compileSql("SELECT c.fullname, a.name FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid ORDER BY a.name DESC",metadata);
+ assert.match(q.fetchXml,/<order attribute="name" entityname="a" descending="true"\/>/);
+});
+
 test("compiles chained joins as nested FetchXML link entities",()=>{
  const q=engine.compileSql("SELECT c.fullname, a.name, o.name AS OpportunityName FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid INNER JOIN opportunity o ON a.accountid = o.parentaccountid",metadata);
  assert.ok(q.fetchXml.indexOf('<link-entity name="account"') < q.fetchXml.indexOf('<link-entity name="opportunity"'));
