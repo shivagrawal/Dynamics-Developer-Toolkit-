@@ -32,7 +32,7 @@ The adapter currently implements the six documented shapes in SECURITY-QUERY-COM
 - SQL comments are removed with a quote-aware scanner; semicolons inside string literals are not mistaken for statement separators.
 - SQL string values are XML-escaped before being inserted into FetchXML.
 - Exact result projection expressions, aliases, DISTINCT state, required joins, WHERE predicates, and ORDER BY clauses are validated before any Dataverse request, preventing unsupported query variants from producing misleading output. String literals cannot satisfy structural checks.
-- User-role/user-privilege retrieval is bounded at 5,000 rows; entity/role privilege retrieval is bounded at 10,000 rows; audit retrieval is bounded at 1,000 audit records.
+- User-role/user-privilege retrieval is bounded at 5,000 rows; entity/role privilege retrieval is bounded at 10,000 rows; audit retrieval is bounded at 1,000 audit records and 10,000 expanded changed-attribute rows.
 - Audit detail requests use a concurrency limit of four to avoid an unbounded request burst.
 - SQL LIKE patterns are preserved as written; the adapter does not widen prefix/suffix matching into contains matching.
 - In-memory DISTINCT normalizes string keys for case/accent-insensitive comparison to approximate the Dataverse SQL collation; collation edge cases outside this approximation remain a compatibility boundary.
