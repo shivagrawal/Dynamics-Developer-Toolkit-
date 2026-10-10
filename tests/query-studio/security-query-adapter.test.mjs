@@ -46,7 +46,9 @@ function createBridge(options = {}) {
       activeAuditDetails++;
       maxConcurrentAuditDetails = Math.max(maxConcurrentAuditDetails, activeAuditDetails);
       if (options.auditDelayMs) await new Promise(resolve => setTimeout(resolve, options.auditDelayMs));
-      body = { AuditDetail: { OldValue: { name: "Before", customfield: "old" }, NewValue: { name: "After", customfield: "new" } } };
+      body = { AuditDetail: (options.auditOperation ?? 2) === 1
+        ? { OldValue: {}, NewValue: { name: "After", customfield: "new" } }
+        : { OldValue: { name: "Before", customfield: "old" }, NewValue: { name: "After", customfield: "new" } } };
       activeAuditDetails--;
     }
     return { ok: true, status: 200, statusText: "OK", json: async () => body };
@@ -349,6 +351,14 @@ test("audit detail expansion uses bounded concurrency and preserves all changed 
   assert.equal(result.rows.length, 18);
   assert.ok(bridge.maxConcurrentAuditDetails > 1, "Audit detail requests should not all run serially.");
   assert.ok(bridge.maxConcurrentAuditDetails <= 4, "Audit detail concurrency exceeded the safety bound.");
+});
+
+test("audit CREATE projects absent old values as SQL NULL", async () => {
+  const result = await createBridge({ auditOperation: 1 }).run(queries.audit);
+  assert.equal(result.ok, true);
+  assert.ok(result.rows.length > 0);
+  assert.ok(result.rows.every(row => row.Event === "Create" && row.oldvalue === null));
+  assert.ok(result.rows.every(row => typeof row.newvalue === "string"));
 });
 
 test("audit event CASE casts operations other than Create and Update to their numeric string", async () => {
