@@ -2,7 +2,7 @@
   "use strict";
   if (window.__DEVLENS5101) return;
   window.__DEVLENS5101 = true;
-  const APP_VERSION = "5.20.13.1";
+  const APP_VERSION = "5.21.0.0";
   const APP_AUTHOR = "Shiv Agrawal";
 
   let host,
