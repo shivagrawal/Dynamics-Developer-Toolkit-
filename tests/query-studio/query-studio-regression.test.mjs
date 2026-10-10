@@ -9,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const backgroundPath = path.resolve(here, "../../background.js");
 const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
-function createHarness({ response, entityMetadata = {}, fetchResponse, metadataError } = {}) {
+function createHarness({ response, entityMetadata = {}, fetchResponse, metadataError, fetchXmlResponse } = {}) {
   let messageListener;
   let requestedUrl;
   const clientUrl = "https://example.crm.dynamics.com";
@@ -69,12 +69,12 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, metadataE
   };
   vm.runInNewContext(backgroundSource, sandbox, { filename: "background.js" });
 
-  async function runQuery(sql) {
+  async function runAction(action, payload) {
     assert.equal(typeof messageListener, "function", "background message listener was registered");
     let result;
     await new Promise((resolve, reject) => {
       const returned = messageListener(
-        { type: "DEVLENS_ACTION", action: "querySql", payload: { sql } },
+        { type: "DEVLENS_ACTION", action, payload },
         { tab: { id: 1 } },
         (value) => { result = value; resolve(); },
       );
@@ -82,7 +82,8 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, metadataE
     });
     return { result, requestedUrl };
   }
-  return { runQuery };
+  async function runQuery(sql) { return runAction("querySql", { sql }); }
+  return { runQuery, runAction };
 }
 
 test("simple SELECT returns requested columns and preserves null-capable metadata columns", async () => {
@@ -351,3 +352,31 @@ test("SELECT * still fails closed if Dataverse provides no verifiable projection
   assert.match(result.error, /verifiable SQL result projection/i);
 });
 
+
+test("FetchXML action runs read-only queries and filters annotation fields", async () => {
+  const harness = createHarness({
+    fetchXmlResponse: { entities: [{
+      fullname: "Ada Lovelace",
+      "a_name": "Contoso",
+      "fullname@OData.Community.Display.V1.FormattedValue": "Ada Lovelace"
+    }] }
+  });
+  const { result } = await harness.runAction("queryFetchXml", {
+    tableName: "contact",
+    fetchXml: '<fetch><entity name="contact"><attribute name="fullname"/></entity></fetch>'
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(Array.from(result.columns), ["fullname", "a_name"]);
+  assert.equal(result.rows[0].fullname, "Ada Lovelace");
+  assert.equal(Object.keys(result.rows[0]).some(key => key.includes("@")), false);
+});
+
+test("FetchXML action rejects a mismatched base entity before Dataverse execution", async () => {
+  const harness = createHarness({ fetchXmlResponse: { entities: [] } });
+  const { result } = await harness.runAction("queryFetchXml", {
+    tableName: "contact",
+    fetchXml: '<fetch><entity name="account"><attribute name="name"/></entity></fetch>'
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /does not match/i);
+});
