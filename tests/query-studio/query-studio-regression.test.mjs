@@ -146,6 +146,20 @@ test("native SQL rejects cross-origin paging links without following them", asyn
   assert.equal(harness.requestedUrls.length, 1);
 });
 
+test("native SQL count-limit annotations produce a visible truncation warning", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)",
+      "@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded": true,
+      value: [{ accountid: "a1", name: "First" }]
+    }
+  });
+  const { result } = await harness.runQuery("SELECT accountid, name FROM account");
+  assert.equal(result.ok, true);
+  assert.equal(result.truncated, true);
+  assert.match(result.warning, /may be incomplete/);
+});
+
 test("native SQL enforces a 10,000-row cap and reports incomplete results", async () => {
   const context = "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)";
   const rows = Array.from({ length: 10001 }, (_, index) => ({ accountid: "a" + index, name: "Row " + index }));
