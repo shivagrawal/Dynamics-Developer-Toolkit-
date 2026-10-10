@@ -14,7 +14,7 @@
 2. **Background router** (background.js) checks read-only and single-statement rules and routes recognizable SQL4CDS security/metadata table references to the specialized adapter. Ordinary table SQL continues through the existing Dataverse SQL endpoint bridge.
 3. **Security SQL adapter** (security-audit-service.js) removes SQL comments without corrupting quoted literals, detects statement boundaries outside literals, identifies one of six explicitly supported query shapes, validates exact projection expressions and alias casing, DISTINCT state, required joins, WHERE predicates, ORDER BY semantics, CASE/aggregate structure, and the audit JSON mapping, and only then issues read-only Dataverse requests.
 4. **Dataverse Web API/FetchXML** retrieves role membership, privilege metadata, role privileges, business units, and audit records. JavaScript performs the result projection, DISTINCT handling, conditional aggregation, depth-label mapping, and audit-detail flattening that FetchXML alone cannot express.
-5. **Result contract** returns stable columns, rows, rowCount, provider, compatibilityMode, and truncated/warning metadata. The UI maps each row to the declared columns and retains null values.
+5. **Result contract** returns stable columns, rows, rowCount, provider, compatibilityMode, and truncated/warning metadata. The UI maps each row to the declared columns, retains null values, and paginates results in 100-row views while keeping the full result available for export.
 
 ## Provider boundary
 
@@ -35,6 +35,7 @@ The adapter currently implements the six documented shapes in SECURITY-QUERY-COM
 - User-role/user-privilege retrieval is bounded at 5,000 rows; entity/role privilege retrieval is bounded at 10,000 rows; audit retrieval is bounded at 1,000 audit records.
 - Audit detail requests use a concurrency limit of four to avoid an unbounded request burst.
 - SQL LIKE patterns are preserved as written; the adapter does not widen prefix/suffix matching into contains matching.
+- Query Studio renders at most 100 result rows per page to keep large result sets responsive, while CSV/JSON export retains the full returned result.
 - A result cap produces a truncation warning in Query Studio. A capped result must not be interpreted as complete.
 - CI logs emit only pass/fail state, row counts, and projection metadata. Never log bearer tokens, record values, user names, audit values, or privilege assignments.
 
