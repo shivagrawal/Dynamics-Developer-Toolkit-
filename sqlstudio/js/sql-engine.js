@@ -185,7 +185,9 @@
         attrs.push('<attribute name="'+escapeXml(c.column)+'"'+(outputAlias?' alias="'+escapeXml(outputAlias)+'"':'')+'/>' );
       }
     }
-    const orders=plan.orderBy.map(o=>{const owner=(o.tableAlias||plan.alias).toLowerCase();if(owner!==plan.alias.toLowerCase())fail("ORDER BY on joined columns is not supported yet.");if(!base.columns?.some(c=>c.logicalName.toLowerCase()===o.column.toLowerCase()&&c.queryable!==false))fail("ORDER BY column '"+o.column+"' is not queryable.");return '<order attribute="'+escapeXml(o.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';}).join("");
+    let orders=plan.orderBy.map(o=>{const owner=(o.tableAlias||plan.alias).toLowerCase();if(owner!==plan.alias.toLowerCase())fail("ORDER BY on joined columns is not supported yet.");if(!base.columns?.some(c=>c.logicalName.toLowerCase()===o.column.toLowerCase()&&c.queryable!==false))fail("ORDER BY column '"+o.column+"' is not queryable.");return '<order attribute="'+escapeXml(o.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';}).join("");
+    // Deterministic ordering makes FetchXML paging stable when SQL leaves row order unspecified.
+    if (!plan.top && !plan.distinct && !orders && base.primaryIdAttribute) orders = '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
     const filters=plan.where?conditionXml(plan.where,plan):"";
     const links=plan.joins.map(j=>{
       const left=j.left.tableAlias||plan.alias, right=j.right.tableAlias||plan.alias;
