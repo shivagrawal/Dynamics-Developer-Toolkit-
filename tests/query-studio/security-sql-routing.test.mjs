@@ -42,6 +42,8 @@ test("all six security query shapes are detected for the specialized adapter", (
 test("ordinary queries are not routed because a string or comment mentions a security table", () => {
   const { context } = loadBackground();
   assert.equal(context.isSecuritySqlCandidate("SELECT name FROM account WHERE name = 'roleprivileges'"), false);
+  assert.equal(context.isSecuritySqlCandidate("SELECT name FROM account WHERE name = 'x -- roleprivileges'"), false);
+  assert.equal(context.isSecuritySqlCandidate("SELECT name FROM account WHERE name = 'x /* roleprivileges */'"), false);
   assert.equal(context.isSecuritySqlCandidate("SELECT name FROM account -- FROM systemuserroles"), false);
   assert.equal(context.isSecuritySqlCandidate("/* FROM audit CROSS APPLY OPENJSON */ SELECT name FROM account"), false);
   assert.equal(context.isSecuritySqlCandidate("SELECT TOP 5 accountid, name FROM account"), false);
