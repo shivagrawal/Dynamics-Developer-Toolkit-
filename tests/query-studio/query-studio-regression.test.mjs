@@ -175,6 +175,23 @@ test("native SQL count-limit annotations produce a visible truncation warning", 
   assert.match(result.warning, /may be incomplete/);
 });
 
+test("native SQL stops after 100 pages and marks the result incomplete", async () => {
+  const context = "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)";
+  const base = "https://example.crm.dynamics.com/api/data/v9.2/accounts?sql=SELECT%20accountid%2C%20name%20FROM%20account&page=";
+  const fetchPages = Array.from({ length: 101 }, (_, index) => ({
+    "@odata.context": context,
+    ...(index < 100 ? { "@odata.nextLink": base + (index + 2) } : {}),
+    value: [{ accountid: "a" + (index + 1), name: "Row " + (index + 1) }]
+  }));
+  const harness = createHarness({ fetchPages });
+  const { result } = await harness.runQuery("SELECT accountid, name FROM account");
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 100);
+  assert.equal(result.truncated, true);
+  assert.match(result.warning, /100-page safety limit/);
+  assert.equal(harness.requestedUrls.length, 100);
+});
+
 test("native SQL enforces a 10,000-row cap and reports incomplete results", async () => {
   const context = "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)";
   const rows = Array.from({ length: 10001 }, (_, index) => ({ accountid: "a" + index, name: "Row " + index }));
