@@ -159,6 +159,15 @@ test("security query 6 expands audit details to one row per changed attribute", 
   assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")));
 });
 
+test("string literals cannot impersonate required SQL projection expressions", async () => {
+  const bridge = createBridge();
+  const sql = queries.audit.replace("a.createdon,", "'a.createdon' AS createdon,");
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Unsupported SELECT expressions/);
+  assert.equal(bridge.calls.length, 0);
+});
+
 test("security adapter rejects a projection it cannot faithfully return before any API request", async () => {
   const bridge = createBridge();
   const sql = queries.userRoles.replace("SU.fullname, SU.systemuserid, R.name AS role_name, BU.name AS role_businessunit", "SU.fullname AS unexpected");
