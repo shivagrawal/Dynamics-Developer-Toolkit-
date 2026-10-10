@@ -460,6 +460,14 @@ function devLensSecurityAuditBridge(action, p) {
       if (!pattern.test(sql)) throw Error("Unsupported SQL structure for " + shape + ": expected " + description + ".");
     }
   }
+  function sqlDepthRequirements() {
+    return [
+      [/\bWHEN\s+1\s+THEN\s+'User'/i, "the User depth mapping"],
+      [/\bWHEN\s+2\s+THEN\s+'Business Unit'/i, "the Business Unit depth mapping"],
+      [/\bWHEN\s+4\s+THEN\s+'Parent:Child BU'/i, "the Parent:Child BU depth mapping"],
+      [/\bWHEN\s+8\s+THEN\s+'Organization'/i, "the Organization depth mapping"]
+    ];
+  }
 
   async function sqlQuery(sql) {
     const original = S(sql);
@@ -514,7 +522,8 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bJOIN\s+privilege\s+p\s+ON\s+p\.privilegeid\s*=\s*rp\.privilegeid\b/i, "the privilege relationship"],
         [/\bJOIN\s+privilegeobjecttypecodes\s+potc\s+ON\s+potc\.privilegeid\s*=\s*p\.privilegeid\b/i, "the privilege entity mapping"],
         [/\bJOIN\s+entity\s+e\s+ON\s+e\.objecttypecode\s*=\s*potc\.objecttypecode\b/i, "the entity logical-name mapping"],
-        [/\bCASE\s+rp\.privilegedepthmask\b/i, "the privilege-depth CASE mapping"]
+        [/\bCASE\s+rp\.privilegedepthmask\b/i, "the privilege-depth CASE mapping"],
+        ...sqlDepthRequirements()
       ]);
       const term = sqlLikeTerm(query, /\bsu\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
@@ -550,6 +559,8 @@ function devLensSecurityAuditBridge(action, p) {
         [/'prvDelete%'/i, "the Delete privilege prefix"],
         [/'prvAppend%'/i, "the Append privilege prefix"],
         [/'prvAppendTo%'/i, "the AppendTo privilege prefix"],
+        [/\bAND\s+p\.name\s+NOT\s+LIKE\s+'prvAppendTo%'/i, "the Append exclusion for AppendTo privileges"],
+        ...sqlDepthRequirements(),
         [/'prvAssign%'/i, "the Assign privilege prefix"],
         [/'prvShare%'/i, "the Share privilege prefix"]
       ]);
