@@ -73,7 +73,21 @@ test("Query Studio paginates large result sets without losing exportable results
     }
   };
   const host = createHost();
-  const context = { window, document: { activeElement: null }, performance: { now: () => 1 }, console };
+  let downloadedContent = "";
+  class FakeBlob {
+    constructor(parts) { this.parts = parts; }
+  }
+  const context = {
+    window,
+    document: { activeElement: null, createElement: () => ({ click() {} }) },
+    performance: { now: () => 1 },
+    Blob: FakeBlob,
+    URL: {
+      createObjectURL: blob => { downloadedContent = blob.parts.join(""); return "blob:query-results"; },
+      revokeObjectURL() {}
+    },
+    console
+  };
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
 
@@ -99,4 +113,8 @@ test("Query Studio paginates large result sets without losing exportable results
   await click(host, "prevPage");
   assert.match(host.innerHTML, /Rows 101–200 of 250/);
   assert.equal(rowCount(host.innerHTML), 100);
+
+  await click(host, "csv");
+  assert.equal(downloadedContent.split("\\r\\n").length, 251, "CSV export must include all 250 rows, not only the current page.");
+  assert.match(downloadedContent, /Row 250/);
 });
