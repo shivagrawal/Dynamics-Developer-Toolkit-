@@ -408,6 +408,7 @@ function devLensSecurityAuditBridge(action, p) {
     if (!select) throw Error("Security SQL must start with SELECT after comments.");
     let start = select.index + select[0].length;
     const distinct = /^\s*DISTINCT\b/i.exec(sql.slice(start));
+    const isDistinct = !!distinct;
     if (distinct) start += distinct[0].length;
     let depth = 0, quote = "", from = -1;
     for (let i = start; i < sql.length; i++) {
@@ -448,12 +449,15 @@ function devLensSecurityAuditBridge(action, p) {
       if (v.startsWith('"') && v.endsWith('"')) return v.slice(1, -1).replace(/""/g, '"');
       return v;
     };
-    return parts.map(part => {
+    const aliases = parts.map(part => {
       const as = /\s+AS\s+(\[[^\]]+\]|"(?:""|[^"])*"|[A-Za-z_][A-Za-z0-9_$]*)\s*$/i.exec(part);
       if (as) return unquote(as[1]);
       if (/^(?:\[[^\]]+\]|"(?:""|[^"])*"|[A-Za-z_][A-Za-z0-9_$]*)(?:\.(?:\[[^\]]+\]|"(?:""|[^"])*"|[A-Za-z_][A-Za-z0-9_$]*))?$/.test(part)) return unquote(part.split(".").pop());
       return "";
     });
+    aliases.parts = parts;
+    aliases.distinct = isDistinct;
+    return aliases;
   }
   function assertSqlProjection(sql, expected, shape) {
     const actual = sqlProjectionAliases(sql);
