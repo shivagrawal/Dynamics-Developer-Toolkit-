@@ -53,16 +53,16 @@ test("compiles a simple left join with explicit joined projection",()=>{
 });
 
 test("compiles COUNT and SUM with GROUP BY and aggregate output aliases",()=>{
- const q=engine.compileSql("SELECT statecode, COUNT(*) AS contact_count, SUM(annualincome) AS total_income, AVG(annualincome) AS avg_income, MIN(createdon) AS first_created, MAX(createdon) AS last_created FROM contact GROUP BY statecode ORDER BY statecode",metadata);
+ const q=engine.compileSql("SELECT statecode, COUNT(*) AS contact_count, COUNT(annualincome) AS income_count, SUM(annualincome) AS total_income, AVG(annualincome) AS avg_income, MIN(createdon) AS first_created, MAX(createdon) AS last_created FROM contact GROUP BY statecode ORDER BY statecode",metadata);
  assert.match(q.fetchXml,/<fetch aggregate="true">/);
  assert.match(q.fetchXml,/<attribute name="statecode" groupby="true" alias="statecode"\/>/);
- assert.match(q.fetchXml,/<attribute name="contactid" aggregate="count" alias="contact_count"\/>/);
+ assert.match(q.fetchXml,/<attribute name="contactid" aggregate="count" alias="contact_count"\/>/);\n assert.match(q.fetchXml,/<attribute name="annualincome" aggregate="countcolumn" alias="income_count"\/>/);
  assert.match(q.fetchXml,/<attribute name="annualincome" aggregate="sum" alias="total_income"\/>/);
  assert.match(q.fetchXml,/<attribute name="annualincome" aggregate="avg" alias="avg_income"\/>/);
  assert.match(q.fetchXml,/<attribute name="createdon" aggregate="min" alias="first_created"\/>/);
  assert.match(q.fetchXml,/<attribute name="createdon" aggregate="max" alias="last_created"\/>/);
  assert.match(q.fetchXml,/<order alias="statecode"/);
- assert.deepEqual(q.resultColumns.map(c=>c.label),["statecode","contact_count","total_income","avg_income","first_created","last_created"]);
+ assert.deepEqual(q.resultColumns.map(c=>c.label),["statecode","contact_count","income_count","total_income","avg_income","first_created","last_created"]);
 });
 
 test("resolves grouped output aliases in ORDER BY",()=>{
