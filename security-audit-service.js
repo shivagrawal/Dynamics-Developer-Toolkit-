@@ -686,6 +686,8 @@ function devLensSecurityAuditBridge(action, p) {
       ]);
       const jsonPath = sqlLiteral(query, /\bOPENJSON\s*\(\s*a\.changedata\s*,\s*'((?:''|[^'])*)'/i);
       if (jsonPath !== "$.changedAttributes") throw Error("Audit query must expand the $.changedAttributes JSON path.");
+      const validJsonColumns = /\bWITH\s*\(\s*logicalname\s+NVARCHAR\s*\(\s*100\s*\)\s*'\$\.logicalName'\s*,\s*oldvalue\s+NVARCHAR\s*\(\s*MAX\s*\)\s*'\$\.oldValue'\s*,\s*newvalue\s+NVARCHAR\s*\(\s*MAX\s*\)\s*'\$\.newValue'\s*\)\s*ca\b/i.test(query);
+      if (!validJsonColumns) throw Error("Audit query must map logicalName, oldValue, and newValue from changedAttributes.");
       const id = sqlLiteral(query, /\ba\.objectid\s*=\s*'((?:''|[^'])*)'/i);
       if (!id) throw Error("Audit query requires an objectid GUID filter.");
       const auditResult = await sqlAuditRows(id);
