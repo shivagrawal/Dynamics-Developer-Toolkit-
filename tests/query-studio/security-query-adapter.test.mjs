@@ -78,12 +78,18 @@ CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4
 FROM role r INNER JOIN roleprivileges rp ON rp.roleid = r.roleid
 INNER JOIN privilege p ON p.privilegeid = rp.privilegeid INNER JOIN businessunit bu ON bu.businessunitid = r.businessunitid
 WHERE p.name = 'prvReadwesco_legalentity' ORDER BY r.name, bu.name`,
-  roleAccess: `SELECT e.logicalname AS table_name, ISNULL(MAX(CASE WHEN p.name LIKE 'prvCreate%' THEN
-CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS CreateAccess
+  roleAccess: \`SELECT e.logicalname AS table_name,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvCreate%' THEN CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS CreateAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvRead%' THEN CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS ReadAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvWrite%' THEN CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS WriteAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvDelete%' THEN CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS DeleteAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvAppend%' AND p.name NOT LIKE 'prvAppendTo%' THEN CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS AppendAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvAppendTo%' THEN CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS AppendToAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvAssign%' THEN CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS AssignAccess,
+ISNULL(MAX(CASE WHEN p.name LIKE 'prvShare%' THEN CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END END), 'None') AS ShareAccess
 FROM role r INNER JOIN roleprivileges rp ON rp.roleid = r.roleid INNER JOIN privilege p ON p.privilegeid = rp.privilegeid
-INNER JOIN privilegeobjecttypecodes potc ON potc.privilegeid = p.privilegeid
-INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
-WHERE r.name = 'Basic User' GROUP BY e.logicalname ORDER BY e.logicalname`,
+INNER JOIN privilegeobjecttypecodes potc ON potc.privilegeid = p.privilegeid INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
+WHERE r.name = 'Basic User' GROUP BY e.logicalname ORDER BY e.logicalname\`,
   audit: `SELECT a.createdon, u.fullname AS ChangedBy, CASE a.operation WHEN 1 THEN 'Create' WHEN 2 THEN 'Update' ELSE CAST(a.operation AS VARCHAR(10)) END AS Event,
 ca.logicalname, ca.oldvalue, ca.newvalue FROM audit a
 CROSS APPLY OPENJSON(a.changedata, '$.changedAttributes') WITH (logicalname NVARCHAR(100) '$.logicalName', oldvalue NVARCHAR(MAX) '$.oldValue', newvalue NVARCHAR(MAX) '$.newValue') ca
