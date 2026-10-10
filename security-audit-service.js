@@ -448,7 +448,8 @@ function devLensSecurityAuditBridge(action, p) {
   }
   function assertSqlProjection(sql, expected, shape) {
     const actual = sqlProjectionAliases(sql);
-    const got = actual.map(name => name.toLowerCase()), want = expected.map(name => name.toLowerCase());
+    const got = actual;
+    const want = expected;
     if (got.length !== want.length || got.some((name, index) => name !== want[index])) {
       throw Error("Unsupported SELECT projection for " + shape + ". Expected columns in order: " +
         expected.join(", ") + "; found: " + (actual.map(name => name || "(expression needs an alias)").join(", ") || "(none)") + ".");
