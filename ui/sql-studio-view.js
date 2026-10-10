@@ -133,7 +133,7 @@
         <textarea class="ss-editor" spellcheck="false" aria-label="SQL query editor">${esc(state.sql)}</textarea>
         <div class="ss-meta">Native Dataverse SQL endpoint remains the default. JS engine preview compiles its supported SELECT subset to FetchXML; unsupported SQL is rejected. Both paths are read-only and run as your current Dynamics user.</div>
         ${state.error ? `<div class="ss-status ss-error">${esc(state.error)}</div>` : ""}
-        ${state.results ? `<div class="ss-meta">Query: ${esc(state.lastQuery)} · ${state.results.truncated ? "Results limited" : "Server response received"}</div>` : ""}
+        ${state.results ? `<div class="ss-meta">Query: ${esc(state.lastQuery)} · ${state.results.truncated ? "Results limited" : "Server response received"}${state.results.warning ? " · " + esc(state.results.warning) : ""}</div>` : ""}
         ${state.results ? `<div class="ss-results"><table><thead><tr>${columns.map(c=>`<th title="${esc(c)}">${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td title="${esc(row[c])}">${esc(formatValue(row[c]))}</td>`).join("")}</tr>`).join("")}</tbody></table>${rows.length ? "" : '<div class="ss-empty">The query returned no rows.</div>'}</div><div class="ss-top"><button class="ss-btn" data-act="csv">Export CSV</button><button class="ss-btn" data-act="copy">Copy JSON</button></div>` : ""}
       </div>`;
     const editor = host.querySelector("textarea");
@@ -336,7 +336,8 @@
       state.results = {
         columns,
         rows: rows.map(row => Object.fromEntries(columns.map(key => [key, row[key] ?? null]))),
-        truncated: response.totalRecordCountLimitExceeded === true,
+        truncated: response.truncated === true || response.totalRecordCountLimitExceeded === true,
+        warning: response.warning || "",
         totalRecordCount: response.totalRecordCount ?? null
       };
       state.status = "Query completed as " + (response.currentUser?.name || "current Dynamics user");
