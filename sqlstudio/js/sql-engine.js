@@ -218,7 +218,12 @@
           } else {
             if (!c.column) fail("Aggregate function requires a column.");
             if (c.tableAlias && c.tableAlias.toLowerCase() !== plan.alias.toLowerCase()) fail("Aggregate expressions on joined columns are not supported.");
-            if (!base.columns?.some(x => x.logicalName.toLowerCase() === c.column.toLowerCase() && x.queryable !== false)) fail("Aggregate column '" + c.column + "' is not queryable.");
+            const aggregateColumn = base.columns?.find(x => x.logicalName.toLowerCase() === c.column.toLowerCase() && x.queryable !== false);
+            if (!aggregateColumn) fail("Aggregate column '" + c.column + "' is not queryable.");
+            if (["SUM","AVG"].includes(c.aggregate) && aggregateColumn.attributeType &&
+                !["integer","bigint","decimal","money","double"].includes(String(aggregateColumn.attributeType).toLowerCase())) {
+              fail(c.aggregate + " requires a numeric column; '" + c.column + "' is " + aggregateColumn.attributeType + ".");
+            }
           }
           const sourceColumn = c.aggregate === "COUNT" && c.star ? base.primaryIdAttribute : c.column;
           const outputAlias = c.alias || (c.aggregate === "COUNT" && c.star ? "count" : c.aggregate.toLowerCase() + "_" + sourceColumn);
