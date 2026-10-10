@@ -892,6 +892,38 @@ function pageBridge(action, payload) {
       headers: { Prefer: 'odata.include-annotations="*"' },
       cache: "no-store"
     });
+    const maxRows = 10000;
+    const maxPages = 100;
+    const rawRows = [];
+    let truncated = false;
+    let nextLink = result["@odata.nextLink"] || null;
+    const appendPageRows = pageRows => {
+      const rows = Array.isArray(pageRows) ? pageRows : [];
+      const remaining = maxRows - rawRows.length;
+      rawRows.push(...rows.slice(0, Math.max(0, remaining)));
+      if (rows.length > remaining) truncated = true;
+    };
+    appendPageRows(result.value);
+    const seenPageLinks = new Set();
+    let pagesFetched = 1;
+    while (nextLink && rawRows.length < maxRows && pagesFetched < maxPages) {
+      if (seenPageLinks.has(nextLink)) throw Error("Dataverse returned a repeated paging link; query execution stopped safely.");
+      seenPageLinks.add(nextLink);
+      const pageUrl = new URL(nextLink, ctx.clientUrl);
+      const clientOrigin = new URL(ctx.clientUrl).origin;
+      if (pageUrl.origin !== clientOrigin || !pageUrl.pathname.startsWith("/api/data/v9.2/")) {
+        throw Error("Dataverse returned an invalid paging URL; query execution stopped safely.");
+      }
+      const page = await fetchJson(pageUrl.toString(), {
+        method: "GET",
+        headers: { Prefer: 'odata.include-annotations="*"' },
+        cache: "no-store"
+      });
+      appendPageRows(page.value);
+      nextLink = page["@odata.nextLink"] || null;
+      pagesFetched++;
+    }
+    if (nextLink) truncated = true;
     const contextColumns = columnsFromODataContext(result["@odata.context"]);
     if (expectedProjection) {
       if (!contextColumns) {
@@ -905,7 +937,7 @@ function pageBridge(action, payload) {
       const actual = new Set(contextColumns.map(column => column.toLowerCase()));
       const expected = new Set(expectedProjection);
       const primaryId = String(metadata.PrimaryIdAttribute || "").toLowerCase();
-      const rowKeys = new Set((result.value || []).flatMap(row => Object.keys(row).map(key => key.toLowerCase())));
+      const rowKeys = new Set(rawRows.flatMap(row => Object.keys(row).map(key => key.toLowerCase())));
       // Dataverse represents a logical lookup column (e.g. parentcustomerid) as
       // _<logicalname>_value. Require the context's navigation expansion and the
       // actual row backing field before treating it as a verified lookup mapping.
@@ -939,7 +971,7 @@ function pageBridge(action, payload) {
       }
       }
     }
-    const rows = (result.value || []).map(row => {
+    const rows = rawRows.map(row => {
       const normalized = {};
       for (const [key, value] of Object.entries(row)) {
         // OData annotations can use namespaces beyond @OData (e.g. @Microsoft.Dynamics.CRM).
@@ -982,7 +1014,9 @@ function pageBridge(action, payload) {
       rows,
       responseContext: result["@odata.context"] || null,
       totalRecordCount: result["@Microsoft.Dynamics.CRM.totalrecordcount"] ?? null,
-      totalRecordCountLimitExceeded: result["@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded"] ?? false
+      totalRecordCountLimitExceeded: result["@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded"] ?? false,
+      truncated,
+      warning: truncated ? "Results reached the 10,000-row or 100-page safety limit and may be incomplete. Refine the query to retrieve a smaller result set." : ""
     };
   }
   function formLocation(attribute) {
