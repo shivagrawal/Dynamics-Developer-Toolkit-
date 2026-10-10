@@ -281,7 +281,7 @@ test("case-insensitive SQL projection validation accepts differently cased OData
   assert.ok(Array.from(result.columns).some((column) => column.toLowerCase() === "fullname"));
 });
 
-test("qualified single-table projections validate by logical column name", async () => {
+test("qualified projections are left to Dataverse rather than guessed by the simple projection parser", async () => {
   const harness = createHarness({
     response: {
       "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#contacts(fullname,contactid)",
