@@ -24,9 +24,10 @@ The extension currently executes supported read-only SQL through the native Data
 - SQL editor, execution status, result grid, CSV / JSON export
 - Schema Explorer backed by Dataverse metadata APIs
 - Search tables by display or logical name
-- Inspect table columns, logical names, display names, types, read availability, required level, primary key / primary name, format and max length
+- Inspect table columns, logical names, display names, types, read availability, required level, and primary key / primary name
 - Select columns, insert their logical names into the editor, or generate an explicit `SELECT TOP 100 ... FROM table` query
 - Lightweight table-column metadata request to avoid loading the full metadata/relationship/choice graph for each table
+- SQL result projection validation for simple single-table SELECT queries. Query Studio stops results when response metadata does not match requested columns and uses the server projection so columns that are null across all returned rows can still appear
 - The native SQL endpoint remains read-only and supports only Microsoft's documented SQL subset. It does not support `SELECT *` or every SQL Server / SQL4CDS construct.
 
 ## Remaining SQL4CDS integration work
