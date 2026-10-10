@@ -203,7 +203,7 @@ test("live privilege mapping returns privilege names for a standard table", asyn
 
 
 test("live user-role query returns membership for an active user", async t => {
-  const users = await bridge.get("systemusers?$select=fullname&$filter=statecode%20eq%200&$top=10");
+  const users = await bridge.get("systemusers?$select=fullname&$filter=isdisabled%20eq%20false&$top=10");
   for (const user of users.value || []) {
     const fullname = String(user.fullname || "");
     if (!fullname) continue;
@@ -223,7 +223,7 @@ test("live user-role query returns membership for an active user", async t => {
 });
 
 test("live user entity privilege query returns mapped account privileges", async t => {
-  const users = await bridge.get("systemusers?$select=fullname&$filter=statecode%20eq%200&$top=10");
+  const users = await bridge.get("systemusers?$select=fullname&$filter=isdisabled%20eq%20false&$top=10");
   for (const user of users.value || []) {
     const fullname = String(user.fullname || "");
     if (!fullname) continue;
