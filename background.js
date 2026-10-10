@@ -1525,11 +1525,63 @@ function pageBridge(action, payload) {
   }));
 }
 
+function stripSqlLiteralsAndComments(sql) {
+  const input = String(sql || "");
+  let output = "";
+  let inString = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0; i < input.length; i++) {
+    const current = input[i];
+    const next = input[i + 1];
+    if (inLineComment) {
+      if (current === "\n" || current === "\r") {
+        inLineComment = false;
+        output += current;
+      } else output += " ";
+      continue;
+    }
+    if (inBlockComment) {
+      if (current === "*" && next === "/") {
+        output += "  ";
+        i++;
+        inBlockComment = false;
+      } else output += " ";
+      continue;
+    }
+    if (inString) {
+      if (current === "'" && next === "'") {
+        output += "  ";
+        i++;
+      } else if (current === "'") {
+        output += " ";
+        inString = false;
+      } else output += current === "\n" || current === "\r" ? current : " ";
+      continue;
+    }
+    if (current === "'") {
+      inString = true;
+      output += " ";
+      continue;
+    }
+    if (current === "-" && next === "-") {
+      inLineComment = true;
+      output += "  ";
+      i++;
+      continue;
+    }
+    if (current === "/" && next === "*") {
+      inBlockComment = true;
+      output += "  ";
+      i++;
+      continue;
+    }
+    output += current;
+  }
+  return output;
+}
 function isSecuritySqlCandidate(sql) {
-  const query = String(sql || "")
-    .replace(/'(?:''|[^'])*'/g, "''")
-    .replace(/--[^\r\n]*/g, " ")
-    .replace(/\/\*[\s\S]*?\*\//g, " ");
+  const query = stripSqlLiteralsAndComments(sql);
   return /\bFROM\s+systemuserroles\b/i.test(query) ||
     (/\bFROM\s+privilege\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query)) ||
     /\broleprivileges\b/i.test(query) ||
