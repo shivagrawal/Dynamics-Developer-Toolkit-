@@ -461,7 +461,7 @@ function devLensSecurityAuditBridge(action, p) {
     if (original.length > 100000) throw Error("Query exceeds the 100,000 character limit.");
     const query = stripSqlComments(original).trim();
     if (!query || !/^SELECT\b/i.test(query)) throw Error("Read-only SQL mode accepts SELECT statements only.");
-    if (hasMultipleSqlStatements(query)) throw Error("Run one SQL statement at a time.");
+    if (hasMultipleSqlStatements(query)) throw Error("Run one SELECT statement at a time.");
     const columns = [], rows = [];
     let kind = "";
     let truncated = false;
