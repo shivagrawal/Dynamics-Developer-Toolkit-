@@ -796,8 +796,8 @@ function pageBridge(action, payload) {
     if (fetchXml.length > 1000000) return { ok: false, error: "Compiled query exceeds the 1,000,000 character limit." };
     const table = String(tableName || "").trim().toLowerCase();
     if (!/^[a-z_][a-z0-9_]*$/.test(table)) return { ok: false, error: "Invalid Dataverse table logical name." };
-    if (!/^\s*<fetch(?:\s|>)/i.test(fetchXml) || /\baggregate\s*=\s*["']true["']/i.test(fetchXml)) {
-      return { ok: false, error: "Only non-aggregate read-only FetchXML is accepted." };
+    if (!/^\s*<fetch(?:\s|>)/i.test(fetchXml)) {
+      return { ok: false, error: "Only FetchXML queries are accepted." };
     }
     const entityMatch = fetchXml.match(/<entity\s+[^>]*name\s*=\s*["']([a-z_][a-z0-9_]*)["']/i);
     if (!entityMatch || entityMatch[1].toLowerCase() !== table) return { ok: false, error: "FetchXML base entity does not match the requested table." };
