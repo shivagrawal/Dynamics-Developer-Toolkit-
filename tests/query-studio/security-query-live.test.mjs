@@ -189,6 +189,16 @@ for (let index = 0; index < queries.length; index++) {
   });
 }
 
+test("live privilege mapping returns privilege names for a standard table", async () => {
+  const query = queries[1].replace("salesorder", "account");
+  const result = await bridge.run(query);
+  assert.equal(result.ok, true, "Account privilege mapping failed: " + (result.error || "unknown error"));
+  assert.ok(result.rows.length > 0, "Expected Dataverse security metadata to expose privileges for the standard account table.");
+  assert.equal(new Set(result.rows.map(row => row.privilege_name)).size, result.rows.length);
+  for (const row of result.rows) assert.ok(String(row.privilege_name).startsWith("prv"));
+  console.log("Live account privilege mapping: PASS; privileges=" + result.rowCount);
+});
+
 test("live audit detail expansion is exercised when the environment has audit rows", async t => {
   const data = await bridge.get("audits?$select=_objectid_value&$top=50&$orderby=createdon%20desc");
   const candidate = (data.value || []).map(row => String(row._objectid_value || "").replace(/[{}]/g, ""))
