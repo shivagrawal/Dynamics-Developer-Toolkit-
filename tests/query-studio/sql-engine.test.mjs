@@ -74,6 +74,8 @@ test("rejects DML, unknown columns, unknown aliases, unsafe TOP and unsupported 
  assert.throws(()=>engine.plan("SELECT c.fullname FROM contact c JOIN account c ON c.parentcustomerid = c.accountid"),/aliases must be unique/);
  assert.throws(()=>engine.plan("SELECT fullname FROM contact; SELECT name FROM account"),/one SQL statement/);
  assert.throws(()=>engine.plan("SELECT fullname FROM contact WHERE fullname <> NULL"),/IS NULL/);
+ assert.throws(()=>engine.plan("SELECT fullname FROM contact WHERE statecode IN (0, NULL)"),/NULL values in IN lists/);
+ assert.throws(()=>engine.compileSql("SELECT * FROM contact",{entities:{contact:{logicalName:"contact",columns:[]}}}),/No queryable columns/);
 });
 
 test("requires metadata and refuses ambiguous joined predicates",()=>{
