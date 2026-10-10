@@ -283,7 +283,7 @@ function devLensSecurityAuditBridge(action, p) {
       role_name: row["ur.name"] || "",
       role_businessunit: row["bu.name"] || "",
       privilege_name: row["p.name"] || "",
-      depth: sqlDepth(row["rp.privilegedepthmask"]) || S(row["rp.privilegedepthmask"] || "")
+      depth: sqlDepth(row["rp.privilegedepthmask"]) || (row["rp.privilegedepthmask"] == null ? "" : S(row["rp.privilegedepthmask"]))
     }));
   }
 
@@ -301,7 +301,7 @@ function devLensSecurityAuditBridge(action, p) {
       role_name: row["r.name"] || "",
       business_unit: row["bu.name"] || "",
       privilege_name: row["p.name"] || privilegeName,
-      depth: sqlDepth(row.privilegedepthmask) || S(row.privilegedepthmask || "")
+      depth: sqlDepth(row.privilegedepthmask) || (row.privilegedepthmask == null ? "" : S(row.privilegedepthmask))
     }));
   }
   async function sqlRoleAccessRows(roleName) {
@@ -334,7 +334,7 @@ function devLensSecurityAuditBridge(action, p) {
       const keys = [...new Set([...Object.keys(oldValues), ...Object.keys(newValues)])]
         .filter(key => !key.startsWith("@") && !key.includes("@"));
       const changedBy = auditRow["_userid_value@OData.Community.Display.V1.FormattedValue"] || "";
-      const event = ({ 1: "Create", 2: "Update", 3: "Delete", 4: "Access" })[Number(auditRow.operation)] || S(auditRow.operation);
+      const event = ({ 1: "Create", 2: "Update" })[Number(auditRow.operation)] || S(auditRow.operation);
       for (const key of keys) {
         const logicalName = key.startsWith("_") && key.endsWith("_value") ? key.slice(1, -6) : key;
         output.push({
