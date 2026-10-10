@@ -200,6 +200,26 @@ for (let index = 0; index < queries.length; index++) {
   });
 }
 
+test("live salesorder privilege mapping is nonempty when salesorder metadata exists", async t => {
+  let metadata;
+  try {
+    metadata = await bridge.get("EntityDefinitions(LogicalName='salesorder')?$select=LogicalName");
+  } catch (error) {
+    if (/404|not found|does not exist/i.test(String(error.message))) {
+      t.skip("salesorder metadata is not available in this Dataverse environment.");
+      return;
+    }
+    throw error;
+  }
+  if (!metadata.LogicalName) {
+    t.skip("salesorder metadata is not available in this Dataverse environment.");
+    return;
+  }
+  const result = await bridge.run(queries[1]);
+  assert.equal(result.ok, true, "salesorder privilege query failed: " + (result.error || "unknown error"));
+  assert.ok(result.rows.length > 0, "salesorder metadata exists but no privilege/object-type-code rows were returned.");
+});
+
 test("live privilege mapping returns privilege names for a standard table", async () => {
   const query = queries[1].replace("salesorder", "account");
   const result = await bridge.run(query);
