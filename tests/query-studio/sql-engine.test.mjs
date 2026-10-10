@@ -71,6 +71,7 @@ test("SELECT star expands only metadata-approved queryable columns",()=>{
  const q=engine.compileSql("SELECT * FROM contact",metadata);
  assert.match(q.fetchXml,/<attribute name="fullname"\/>/);
  assert.match(q.fetchXml,/<attribute name="contactid"\/>/);
+ assert.match(q.fetchXml,/<order attribute="contactid"\/>/);
 });
 
 test("rejects DML, unknown columns, unknown aliases, unsafe TOP and unsupported syntax",()=>{
