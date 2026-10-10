@@ -60,7 +60,7 @@
     const columns = [];
     do {
       if (peek("*")) { take(); columns.push({star:true,alias:null}); }
-      else { const field=qualified(); let as=null; if (peek("AS")) { take(); as=identifier(); } columns.push({...field,alias:as}); }
+      else { const field=qualified(); let as=null; if (peek("AS")) { take(); as=identifier(); } columns.push({tableAlias:field.tableAlias,column:field.column,alias:as}); }
       if (!peek(",")) break; take();
     } while (p < tokens.length);
     expect("FROM");
