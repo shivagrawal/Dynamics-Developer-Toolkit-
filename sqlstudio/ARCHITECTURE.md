@@ -35,6 +35,7 @@ The adapter currently implements the six documented shapes in SECURITY-QUERY-COM
 - User-role/user-privilege retrieval is bounded at 5,000 rows; entity/role privilege retrieval is bounded at 10,000 rows; audit retrieval is bounded at 1,000 audit records.
 - Audit detail requests use a concurrency limit of four to avoid an unbounded request burst.
 - SQL LIKE patterns are preserved as written; the adapter does not widen prefix/suffix matching into contains matching.
+- In-memory DISTINCT normalizes string keys for case/accent-insensitive comparison to approximate the Dataverse SQL collation; collation edge cases outside this approximation remain a compatibility boundary.
 - Query Studio renders at most 100 result rows per page to keep large result sets responsive, while CSV/JSON export retains the full returned result.
 - A result cap produces a truncation warning in Query Studio. A capped result must not be interpreted as complete.
 - CI logs emit only pass/fail state, row counts, and projection metadata. Never log bearer tokens, record values, user names, audit values, or privilege assignments.
