@@ -377,6 +377,7 @@
           primaryIdAttribute: data.primaryIdAttribute,
           columns: (data.columns || []).map(column => ({
             logicalName: column.logicalName,
+            attributeType: column.attributeType,
             queryable: column.validForRead !== false && String(column.attributeType || "").toLowerCase() !== "virtual"
           }))
         };
