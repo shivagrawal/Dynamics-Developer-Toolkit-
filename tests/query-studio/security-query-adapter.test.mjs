@@ -24,21 +24,22 @@ function createBridge(options = {}) {
     } else if (path.startsWith("privileges?fetchXml=")) {
       body = { value: [{ name: "prvReadSalesOrder" }, { name: "prvWriteSalesOrder" }, { name: "prvReadSalesOrder" }] };
     } else if (path.startsWith("systemuserrolescollection?fetchXml=")) {
-      body = { value: [{ "su.fullname": "USD8 Test User", "ur.roleid": ROLE_ID, "ur.name": "Sales Representative", "bu.name": "Sales BU", "p.privilegeid": "44444444-4444-4444-8444-444444444444", "p.name": "prvReadQuote", "rp.privilegedepthmask": 8, "e.logicalname": "quote" }] };
+      body = { value: [{ "su.fullname": "USD8 Test User", "ur.roleid": ROLE_ID, "ur.name": "Sales Representative", "bu.name": "Sales BU", "p.privilegeid": "44444444-4444-4444-8444-444444444444", "p.name": "prvReadQuote", "rp.privilegedepthmask": options.userDepthMask ?? 8, "e.logicalname": "quote" }] };
     } else if (path.startsWith("roleprivilegescollection?fetchXml=")) {
       const decoded = decodeURIComponent(path.split("fetchXml=")[1] || "");
       if (decoded.includes("prvReadwesco_legalentity")) {
-        body = { value: [{ "r.roleid": ROLE_ID, "r.name": "Sales Representative", "bu.name": "Sales BU", "p.name": "prvReadwesco_legalentity", privilegedepthmask: 8 }] };
+        body = { value: [{ "r.roleid": ROLE_ID, "r.name": "Sales Representative", "bu.name": "Sales BU", "p.name": "prvReadwesco_legalentity", privilegedepthmask: options.roleDepthMask ?? 8 }] };
       } else {
         body = { value: [
           { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvCreateAccount", privilegedepthmask: 1, "e.logicalname": "account" },
           { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvReadAccount", privilegedepthmask: 2, "e.logicalname": "account" },
+          { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvWriteAccount", privilegedepthmask: 0, "e.logicalname": "account" },
           { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvAppendToAccount", privilegedepthmask: 4, "e.logicalname": "account" },
           { "r.roleid": ROLE_ID, "r.name": "Basic User", "bu.name": "Sales BU", "p.name": "prvReadContact", privilegedepthmask: 8, "e.logicalname": "contact" }
         ] };
       }
     } else if (path.startsWith("audits?")) {
-      body = { value: [{ auditid: AUDIT_ID, createdon: "2026-01-01T00:00:00Z", operation: 2, "_userid_value@OData.Community.Display.V1.FormattedValue": "Test Admin", objecttypecode: "account" }] };
+      body = { value: [{ auditid: AUDIT_ID, createdon: "2026-01-01T00:00:00Z", operation: options.auditOperation ?? 2, "_userid_value@OData.Community.Display.V1.FormattedValue": "Test Admin", objecttypecode: "account" }] };
     } else if (path.startsWith("audits(" + AUDIT_ID + ")/Microsoft.Dynamics.CRM.RetrieveAuditDetails")) {
       body = { AuditDetail: { OldValue: { name: "Before", customfield: "old" }, NewValue: { name: "After", customfield: "new" } } };
     }
@@ -162,4 +163,23 @@ test("security adapter flags results at the 5,000-row safety cap", async () => {
   assert.equal(result.rows.length, 5000);
   assert.equal(result.truncated, true);
   assert.match(result.warning, /may be incomplete/);
+});
+
+test("CASE depth fallbacks preserve unrecognized numeric masks", async () => {
+  const userResult = await createBridge({ userDepthMask: 0 }).run(queries.userTable);
+  const roleResult = await createBridge({ roleDepthMask: 0 }).run(queries.rolesByPrivilege);
+  assert.equal(userResult.rows[0].depth, "0");
+  assert.equal(roleResult.rows[0].depth, "0");
+});
+
+test("conditional access aggregation treats unsupported depth masks as None", async () => {
+  const result = await createBridge().run(queries.roleAccess);
+  const account = result.rows.find(row => row.table_name === "account");
+  assert.equal(account.WriteAccess, "None");
+});
+
+test("audit event CASE casts operations other than Create and Update to their numeric string", async () => {
+  const result = await createBridge({ auditOperation: 3 }).run(queries.audit);
+  assert.equal(result.ok, true);
+  assert.equal(result.rows[0].Event, "3");
 });
