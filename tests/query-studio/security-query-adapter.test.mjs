@@ -197,6 +197,24 @@ test("security adapter rejects a projection it cannot faithfully return before a
   assert.equal(bridge.calls.length, 0);
 });
 
+test("all six security adapters reject ORDER BY clauses they cannot reproduce", async () => {
+  const malformed = [
+    queries.userRoles + " ORDER BY SU.fullname DESC",
+    queries.privileges.replace("ORDER BY p.name", "ORDER BY p.name DESC"),
+    queries.userTable.replace("ORDER BY su.fullname, ur.name, p.name", "ORDER BY su.fullname DESC, ur.name, p.name"),
+    queries.rolesByPrivilege.replace("ORDER BY r.name, bu.name", "ORDER BY r.name DESC, bu.name"),
+    queries.roleAccess.replace("ORDER BY e.logicalname", "ORDER BY e.logicalname DESC"),
+    queries.audit.replace("ORDER BY a.createdon DESC", "ORDER BY a.createdon ASC")
+  ];
+  for (const sql of malformed) {
+    const bridge = createBridge();
+    const result = await bridge.run(sql);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /Unsupported ORDER BY clause/);
+    assert.equal(bridge.calls.length, 0);
+  }
+});
+
 test("all six security adapters reject extra WHERE predicates they cannot execute", async () => {
   const malformed = [
     queries.userRoles.replace("WHERE SU.fullname LIKE '%USD8%'", "WHERE SU.fullname LIKE '%USD8%' AND SU.isdisabled = 0"),
