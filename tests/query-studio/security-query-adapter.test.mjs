@@ -9,7 +9,7 @@ const USER_ID = "11111111-1111-4111-8111-111111111111";
 const ROLE_ID = "22222222-2222-4222-8222-222222222222";
 const AUDIT_ID = "33333333-3333-4333-8333-333333333333";
 
-function createBridge() {
+function createBridge(options = {}) {
   const calls = [];
   const mockFetch = async input => {
     const url = new URL(String(input));
@@ -19,7 +19,8 @@ function createBridge() {
     if (path.startsWith("systemusers?fetchXml=")) {
       body = { value: [{ systemuserid: USER_ID, fullname: "USD8 Test User" }] };
     } else if (path.startsWith("roles?fetchXml=")) {
-      body = { value: [{ roleid: ROLE_ID, name: "Sales Representative", _parentrootroleid_value: ROLE_ID, "bu.name": "Sales BU", "SU.fullname": "USD8 Test User", "SU.systemuserid": USER_ID, "BU.name": "Sales BU" }] };
+      const roleRow = { roleid: ROLE_ID, name: "Sales Representative", _parentrootroleid_value: ROLE_ID, "bu.name": "Sales BU", "SU.fullname": "USD8 Test User", "SU.systemuserid": USER_ID, "BU.name": "Sales BU" };
+      body = { value: options.bulkRoles ? Array.from({ length: 5000 }, () => ({ ...roleRow })) : [roleRow] };
     } else if (path.startsWith("privileges?fetchXml=")) {
       body = { value: [{ name: "prvReadSalesOrder" }, { name: "prvWriteSalesOrder" }, { name: "prvReadSalesOrder" }] };
     } else if (path.startsWith("systemuserrolescollection?fetchXml=")) {
@@ -153,4 +154,12 @@ test("security adapter rejects writes and multiple statements", async () => {
   const multiple = await bridge.run("SELECT name FROM account; SELECT name FROM contact");
   assert.equal(multiple.ok, false);
   assert.match(multiple.error, /one SELECT statement/);
+});
+
+test("security adapter flags results at the 5,000-row safety cap", async () => {
+  const result = await createBridge({ bulkRoles: true }).run(queries.userRoles);
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 5000);
+  assert.equal(result.truncated, true);
+  assert.match(result.warning, /may be incomplete/);
 });
