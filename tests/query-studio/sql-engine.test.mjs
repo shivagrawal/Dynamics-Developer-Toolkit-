@@ -11,6 +11,9 @@ const metadata = {
     ]},
     account: { logicalName:"account", entitySetName:"accounts", primaryIdAttribute:"accountid", columns:[
       {logicalName:"accountid",queryable:true},{logicalName:"name",queryable:true},{logicalName:"accountnumber",queryable:true}
+    ]},
+    opportunity: { logicalName:"opportunity", entitySetName:"opportunities", primaryIdAttribute:"opportunityid", columns:[
+      {logicalName:"opportunityid",queryable:true},{logicalName:"name",queryable:true},{logicalName:"parentaccountid",queryable:true}
     ]}
   }
 };
@@ -47,6 +50,12 @@ test("compiles a simple left join with explicit joined projection",()=>{
  const q=engine.compileSql("SELECT c.fullname, a.name FROM contact AS c LEFT JOIN account AS a ON c.parentcustomerid = a.accountid",metadata);
  assert.match(q.fetchXml,/<link-entity name="account" alias="a" from="accountid" to="parentcustomerid" link-type="outer"\/>/);
  assert.match(q.fetchXml,/<attribute name="name" alias="a_name"\/>/);
+});
+
+test("compiles chained joins as nested FetchXML link entities",()=>{
+ const q=engine.compileSql("SELECT c.fullname, a.name, o.name AS OpportunityName FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid INNER JOIN opportunity o ON a.accountid = o.parentaccountid",metadata);
+ assert.match(q.fetchXml,/<link-entity name="account"[^>]*link-type="outer">[\\s\\S]*<link-entity name="opportunity"[^>]*link-type="inner">/);
+ assert.match(q.fetchXml,/<attribute name="name" alias="o_name"\/>/);
 });
 
 test("validates WHERE columns and preserves boolean filter grouping",()=>{
