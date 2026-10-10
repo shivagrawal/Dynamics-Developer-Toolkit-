@@ -17,11 +17,24 @@ NuGet: https://www.nuget.org/packages/MarkMpn.Sql4Cds.Engine/
 
 Keep the package license / notice available in distributions. Review telemetry behavior before packaging: the engine initializes Application Insights, and detailed error telemetry can include SQL text when explicitly enabled. Detailed error telemetry must remain disabled and the companion must not log query values by default.
 
-## Scope
+## Current preview behavior
 
-- Query Studio UI shell (editor / Execute / result pane / environment status)
-- Local companion health and query API contract
-- SELECT-only guard using SQL Server ScriptDom
-- Follow-up: implement supported authentication, results serialization, cancellation and paging, then test in a disposable Dataverse environment.
+The extension currently executes supported read-only SQL through the native Dataverse Web API SQL endpoint from the Dynamics page context. It does not use the local SQL4CDS companion for query execution yet.
 
-This is an integration scaffold, not yet an executable SQL runner until the companion is installed, authenticated and end-to-end tested.
+- SQL editor, execution status, result grid, CSV / JSON export
+- Schema Explorer backed by Dataverse metadata APIs
+- Search tables by display or logical name
+- Inspect table columns, logical names, display names, types, read availability, required level, primary key / primary name, format and max length
+- Select columns, insert their logical names into the editor, or generate an explicit `SELECT TOP 100 ... FROM table` query
+- Lightweight table-column metadata request to avoid loading the full metadata/relationship/choice graph for each table
+- The native SQL endpoint remains read-only and supports only Microsoft's documented SQL subset. It does not support `SELECT *` or every SQL Server / SQL4CDS construct.
+
+## Remaining SQL4CDS integration work
+
+- Implement supported authentication for the local companion
+- Connect the companion to the SQL4CDS engine and serialize results
+- Add cancellation, paging, safe request pairing and execution limits
+- Test in a disposable Dataverse environment
+- Build a conservative SQL-to-FetchXML translator for constructs where translation preserves semantics
+
+The companion remains an integration scaffold, not an executable SQL4CDS runner until it is authenticated and end-to-end tested.
