@@ -10,7 +10,7 @@ const metadata = {
       {logicalName:"contactid",queryable:true},{logicalName:"fullname",queryable:true},{logicalName:"statecode",queryable:true},{logicalName:"parentcustomerid",queryable:true},{logicalName:"createdon",queryable:true},{logicalName:"annualincome",queryable:true}
     ]},
     account: { logicalName:"account", entitySetName:"accounts", primaryIdAttribute:"accountid", columns:[
-      {logicalName:"accountid",queryable:true},{logicalName:"name",queryable:true},{logicalName:"accountnumber",queryable:true}
+      {logicalName:"accountid",queryable:true},{logicalName:"name",queryable:true,attributeType:"String"},{logicalName:"accountnumber",queryable:true}
     ]},
     opportunity: { logicalName:"opportunity", entitySetName:"opportunities", primaryIdAttribute:"opportunityid", columns:[
       {logicalName:"opportunityid",queryable:true},{logicalName:"name",queryable:true},{logicalName:"parentaccountid",queryable:true}
@@ -65,6 +65,7 @@ test("compiles COUNT and SUM with GROUP BY and aggregate output aliases",()=>{
 test("rejects HAVING and invalid aggregate grouping rather than guessing",()=>{
  assert.throws(()=>engine.plan("SELECT statecode, COUNT(*) FROM contact GROUP BY statecode HAVING COUNT(*) > 1"),/HAVING is not supported/);
  assert.throws(()=>engine.plan("SELECT fullname, COUNT(*) FROM contact"),/Non-aggregate SELECT columns must appear in GROUP BY/);
+ assert.throws(()=>engine.compileSql("SELECT SUM(name) FROM account",metadata),/SUM requires a numeric column/);
 });
 
 test("compiles chained joins as nested FetchXML link entities",()=>{
