@@ -96,6 +96,7 @@
     const activeElement = host.getRootNode()?.activeElement || document.activeElement;
     const focusedFilter = host.contains(activeElement) ? activeElement.getAttribute("data-schema-filter") : null;
     const focusedFilterStart = focusedFilter ? activeElement.selectionStart : null;
+    const focusedAction = host.contains(activeElement) ? activeElement.getAttribute("data-act") : null;
     const allRows = state.results?.rows || [];
     const columns = state.results?.columns || [];
     const pageSize = state.pageSize || 100;
@@ -170,6 +171,12 @@
     if (filterToRestore) {
       filterToRestore.focus();
       try { filterToRestore.setSelectionRange(focusedFilterStart, focusedFilterStart); } catch {}
+    }
+    if (focusedAction) {
+      const actionToRestore = host.querySelector('[data-act="' + focusedAction + '"]');
+      if (actionToRestore && !actionToRestore.disabled) actionToRestore.focus();
+      else if (focusedAction === "nextPage") host.querySelector('[data-act="prevPage"]')?.focus();
+      else if (focusedAction === "prevPage") host.querySelector('[data-act="nextPage"]')?.focus();
     }
     const rememberEditorSelection = () => {
       state.editorSelectionStart = editor.selectionStart;
