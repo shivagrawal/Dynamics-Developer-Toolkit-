@@ -475,9 +475,9 @@ function devLensSecurityAuditBridge(action, p) {
       kind = "user-roles";
       assertSqlProjection(query, ["fullname", "systemuserid", "role_name", "role_businessunit"], kind);
       assertSqlShape(query, kind, [
-        [/\bJOIN\s+systemuser\s+SU\b/i, "the SystemUser join"],
-        [/\bJOIN\s+role\s+R\b/i, "the Role join"],
-        [/\bJOIN\s+businessunit\s+BU\b/i, "the BusinessUnit join"],
+        [/\bJOIN\s+systemuser\s+(?:AS\s+)?SU\b/i, "the SystemUser join"],
+        [/\bJOIN\s+role\s+(?:AS\s+)?R\b/i, "the Role join"],
+        [/\bJOIN\s+businessunit\s+(?:AS\s+)?BU\b/i, "the BusinessUnit join"],
         [/\bSUR\.systemuserid\s*=\s*SU\.systemuserid\b/i, "the user-role membership relationship"],
         [/\bSUR\.roleid\s*=\s*R\.roleid\b/i, "the role relationship"],
         [/\bR\.businessunitid\s*=\s*BU\.businessunitid\b/i, "the role business-unit relationship"]
