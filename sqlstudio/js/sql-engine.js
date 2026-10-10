@@ -258,10 +258,12 @@
         const groupedProjection = plan.columns.find(c => !c.aggregate && c.column.toLowerCase() === group.column.toLowerCase());
         return '<order alias="'+escapeXml(groupedProjection?.alias || group.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';
       }
-      const owner=(o.tableAlias||plan.alias).toLowerCase();
+      const projectionAlias = plan.columns.find(c => !c.aggregate && c.alias && c.alias.toLowerCase() === o.column.toLowerCase());
+      const orderColumn = projectionAlias?.column || o.column;
+      const owner=(o.tableAlias||projectionAlias?.tableAlias||plan.alias).toLowerCase();
       if(owner!==plan.alias.toLowerCase())fail("ORDER BY on joined columns is not supported yet.");
-      if(!base.columns?.some(c=>c.logicalName.toLowerCase()===o.column.toLowerCase()&&c.queryable!==false))fail("ORDER BY column '"+o.column+"' is not queryable.");
-      return '<order attribute="'+escapeXml(o.column)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';
+      if(!base.columns?.some(c=>c.logicalName.toLowerCase()===orderColumn.toLowerCase()&&c.queryable!==false))fail("ORDER BY column '"+o.column+"' is not queryable.");
+      return '<order attribute="'+escapeXml(orderColumn)+'" descending="'+(o.direction==="desc"?'true':'false')+'"/>';
     }).join("");
     // Deterministic ordering makes FetchXML paging stable when SQL leaves row order unspecified.
     if (!plan.aggregateQuery && !plan.top && !plan.distinct && !orders && base.primaryIdAttribute) orders = '<order attribute="'+escapeXml(base.primaryIdAttribute)+'"/>';
