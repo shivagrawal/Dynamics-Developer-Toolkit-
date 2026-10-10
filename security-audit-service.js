@@ -329,8 +329,12 @@ function devLensSecurityAuditBridge(action, p) {
     })), truncated: result.truncated };
   }
   function sqlAuditValue(values, key) {
-    const formatted = values?.[key + "@OData.Community.Display.V1.FormattedValue"];
-    return formatted !== undefined ? auditValue(formatted) : auditValue(values?.[key]);
+    const value = values?.[key];
+    if (value === null || value === undefined) return null;
+    if (typeof value !== "object") return S(value);
+    if (Object.prototype.hasOwnProperty.call(value, "Value")) return value.Value == null ? null : S(value.Value);
+    if (Object.prototype.hasOwnProperty.call(value, "Id")) return value.Id == null ? null : S(value.Id);
+    return JSON.stringify(value);
   }
   async function sqlAuditRows(recordId) {
     const id = G(recordId).toLowerCase();
