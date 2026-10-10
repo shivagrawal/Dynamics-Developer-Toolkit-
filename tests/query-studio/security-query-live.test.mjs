@@ -161,6 +161,22 @@ for (let index = 0; index < queries.length; index++) {
     assert.ok(Array.isArray(result.rows));
     assert.deepEqual(JSON.parse(JSON.stringify(result.columns)), expectedColumns[index]);
     assert.equal(result.rowCount, result.rows.length);
+    for (const row of result.rows) {
+      for (const column of expectedColumns[index]) assert.ok(Object.hasOwn(row, column), "Projected result row omitted a requested column.");
+    }
+    if (index === 0) {
+      for (const row of result.rows) assert.match(String(row.systemuserid), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    }
+    if (index === 1) {
+      const names = result.rows.map(row => row.privilege_name);
+      assert.equal(new Set(names).size, names.length, "DISTINCT privilege query returned duplicates.");
+    }
+    if (index === 4) {
+      const accessLevels = new Set(["User", "Business Unit", "Parent:Child BU", "Organization", "None"]);
+      for (const row of result.rows) for (const column of expectedColumns[index].slice(1)) {
+        assert.ok(accessLevels.has(row[column]), "Access summary returned an unknown depth label.");
+      }
+    }
     // Never emit row values, record IDs, audit payloads, or privilege assignments in CI logs.
   });
 }
