@@ -459,13 +459,38 @@ function devLensSecurityAuditBridge(action, p) {
     aliases.distinct = isDistinct;
     return aliases;
   }
-  function assertSqlProjection(sql, expected, shape) {
+  function normalizeSqlExpression(value) {
+    let output = "", quote = "";
+    for (let i = 0; i < value.length; i++) {
+      const ch = value[i], next = value[i + 1];
+      if (quote) {
+        output += ch;
+        if (ch === quote && next === quote) { output += next; i++; }
+        else if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'" || ch === '"') { quote = ch; output += ch; continue; }
+      if (ch === "[") { quote = "]"; output += ch; continue; }
+      if (/\s/.test(ch)) continue;
+      output += ch.toUpperCase();
+    }
+    return output;
+  }
+  function assertSqlProjection(sql, expected, shape, expectedExpressions, expectedDistinct) {
     const actual = sqlProjectionAliases(sql);
-    const got = actual;
-    const want = expected;
+    const got = actual, want = expected;
     if (got.length !== want.length || got.some((name, index) => name !== want[index])) {
       throw Error("Unsupported SELECT projection for " + shape + ". Expected columns in order: " +
         expected.join(", ") + "; found: " + (actual.map(name => name || "(expression needs an alias)").join(", ") || "(none)") + ".");
+    }
+    if (expectedDistinct !== undefined && actual.distinct !== expectedDistinct) {
+      throw Error("Unsupported SELECT DISTINCT setting for " + shape + ".");
+    }
+    if (expectedExpressions) {
+      if (actual.parts.length !== expectedExpressions.length ||
+          actual.parts.some((part, index) => normalizeSqlExpression(part) !== normalizeSqlExpression(expectedExpressions[index]))) {
+        throw Error("Unsupported SELECT expressions for " + shape + ". Expressions must preserve the SQL query semantics.");
+      }
     }
   }
 
