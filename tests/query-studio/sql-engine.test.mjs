@@ -71,6 +71,7 @@ test("rejects DML, unknown columns, unknown aliases, unsafe TOP and unsupported 
  assert.throws(()=>engine.compileSql("SELECT missingcolumn FROM contact",metadata),/not queryable/);
  assert.throws(()=>engine.compileSql("SELECT x.fullname FROM contact",metadata),/Unknown table alias/);
  assert.throws(()=>engine.plan("SELECT TOP 99999 fullname FROM contact"),/TOP must be/);
+ assert.throws(()=>engine.plan("SELECT c.fullname FROM contact c JOIN account c ON c.parentcustomerid = c.accountid"),/aliases must be unique/);
  assert.throws(()=>engine.plan("SELECT fullname FROM contact; SELECT name FROM account"),/one SQL statement/);
  assert.throws(()=>engine.plan("SELECT fullname FROM contact WHERE fullname <> NULL"),/IS NULL/);
 });
