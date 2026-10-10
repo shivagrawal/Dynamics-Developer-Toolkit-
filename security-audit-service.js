@@ -394,6 +394,67 @@ function devLensSecurityAuditBridge(action, p) {
     return false;
   }
 
+  function sqlProjectionAliases(sql) {
+    const select = /\bSELECT\b/i.exec(sql);
+    if (!select) throw Error("Security SQL must start with SELECT after comments.");
+    let start = select.index + select[0].length;
+    const distinct = /^\s*DISTINCT\b/i.exec(sql.slice(start));
+    if (distinct) start += distinct[0].length;
+    let depth = 0, quote = "", from = -1;
+    for (let i = start; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (ch === "[") { quote = "]"; continue; }
+      if (ch === "(") { depth++; continue; }
+      if (ch === ")") { depth--; continue; }
+      if (depth === 0 && sql.slice(i, i + 4).toUpperCase() === "FROM" &&
+          (i === 0 || !/[A-Za-z0-9_$]/.test(sql[i - 1])) &&
+          !/[A-Za-z0-9_$]/.test(sql[i + 4] || " ")) { from = i; break; }
+    }
+    if (from < 0 || quote || depth !== 0) throw Error("Could not parse the security SQL SELECT projection.");
+    const list = sql.slice(start, from), parts = [];
+    let begin = 0; depth = 0; quote = "";
+    for (let i = 0; i < list.length; i++) {
+      const ch = list[i], next = list[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (ch === "[") { quote = "]"; continue; }
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      else if (ch === "," && depth === 0) { parts.push(list.slice(begin, i).trim()); begin = i + 1; }
+    }
+    parts.push(list.slice(begin).trim());
+    const unquote = value => {
+      const v = String(value || "").trim();
+      if (v.startsWith("[") && v.endsWith("]")) return v.slice(1, -1).replace(/]]/g, "]");
+      if (v.startsWith('"') && v.endsWith('"')) return v.slice(1, -1).replace(/""/g, '"');
+      return v;
+    };
+    return parts.map(part => {
+      const as = /\s+AS\s+(\[[^\]]+\]|"(?:""|[^"])*"|[A-Za-z_][A-Za-z0-9_$]*)\s*$/i.exec(part);
+      if (as) return unquote(as[1]);
+      if (/^(?:\[[^\]]+\]|"(?:""|[^"])*"|[A-Za-z_][A-Za-z0-9_$]*)(?:\.(?:\[[^\]]+\]|"(?:""|[^"])*"|[A-Za-z_][A-Za-z0-9_$]*))?$/.test(part)) return unquote(part.split(".").pop());
+      return "";
+    });
+  }
+  function assertSqlProjection(sql, expected, shape) {
+    const actual = sqlProjectionAliases(sql);
+    const got = actual.map(name => name.toLowerCase()), want = expected.map(name => name.toLowerCase());
+    if (got.length !== want.length || got.some((name, index) => name !== want[index])) {
+      throw Error("Unsupported SELECT projection for " + shape + ". Expected columns in order: " +
+        expected.join(", ") + "; found: " + (actual.map(name => name || "(expression needs an alias)").join(", ") || "(none)") + ".");
+    }
+  }
+
   async function sqlQuery(sql) {
     const original = S(sql);
     if (!original.trim()) throw Error("Read-only SQL mode accepts SELECT statements only.");
