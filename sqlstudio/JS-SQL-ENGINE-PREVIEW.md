@@ -6,7 +6,7 @@ The Query Studio JavaScript engine is an original, bounded SQL-to-FetchXML imple
 
 - Read-only single SELECT statements.
 - Explicit column projections, SELECT * expansion from metadata, AS output aliases, DISTINCT, and integer TOP from 1 through 5000.
-- One base table with zero or more simple INNER JOIN / LEFT JOIN clauses whose equality condition directly connects the base entity and joined entity.
+- One base table with simple INNER JOIN / LEFT JOIN clauses using equality joins to the base table or a previously introduced joined table. Chained joins compile to nested FetchXML link entities.
 - WHERE comparisons (=, !=, <>, >, >=, <, <=), IS NULL, IS NOT NULL, IN, LIKE, parentheses, AND, and OR, using string, numeric, boolean, and NULL literals where valid.
 - Base-table ORDER BY with ASC or DESC.
 - Metadata validation for projected columns, filter columns, and join columns.
@@ -14,7 +14,7 @@ The Query Studio JavaScript engine is an original, bounded SQL-to-FetchXML imple
 
 ## Intentionally unsupported for now
 
-CTEs, subqueries, UNION, aggregation / GROUP BY / HAVING, scalar functions and computed expressions, CASE, variables, OFFSET/FETCH, NOT IN, NOT LIKE, multi-table join chains, non-equality joins, and ORDER BY on joined columns are rejected or not implemented. Do not assume SQL4CDS compatibility outside the supported subset.
+CTEs, subqueries, UNION, aggregation / GROUP BY / HAVING, scalar functions and computed expressions, CASE, variables, OFFSET/FETCH, NOT IN, NOT LIKE, non-equality joins, and ORDER BY on joined columns are rejected or not implemented. Do not assume SQL4CDS compatibility outside the supported subset.
 
 ## Safety and result limits
 
