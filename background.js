@@ -1583,8 +1583,8 @@ function stripSqlLiteralsAndComments(sql) {
 function isSecuritySqlCandidate(sql) {
   const query = stripSqlLiteralsAndComments(sql);
   return /\bFROM\s+systemuserroles\b/i.test(query) ||
-    (/\bFROM\s+privilege\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query)) ||
-    /\broleprivileges\b/i.test(query) ||
+    (/\bFROM\s+privilege\b/i.test(query) && /\bJOIN\s+privilegeobjecttypecodes\b/i.test(query)) ||
+    /\b(?:FROM|JOIN)\s+roleprivileges\b/i.test(query) ||
     (/\bFROM\s+audit\b/i.test(query) && /\bCROSS\s+APPLY\s+OPENJSON\b/i.test(query));
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
