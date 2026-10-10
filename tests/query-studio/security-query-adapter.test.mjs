@@ -303,7 +303,7 @@ test("DISTINCT uses case-insensitive Dataverse string collation", async () => {
   const result = await createBridge({ caseVariantPrivileges: true }).run(queries.privileges);
   assert.equal(result.ok, true);
   assert.equal(result.rows.length, 2);
-  assert.deepEqual(result.rows.map(row => row.privilege_name), ["prvReadSalesOrder", "prvWriteSalesOrder"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.rows.map(row => row.privilege_name))), ["prvReadSalesOrder", "prvWriteSalesOrder"]);
 });
 
 test("security adapter preserves SQL LIKE prefix matching instead of widening it to contains", async () => {
