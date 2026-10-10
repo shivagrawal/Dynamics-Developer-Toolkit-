@@ -372,6 +372,20 @@ test("FetchXML action runs read-only queries and filters annotation fields", asy
   assert.equal(Object.keys(result.rows[0]).some(key => key.includes("@")), false);
 });
 
+test("FetchXML action rejects aggregate and mutation-like payloads", async () => {
+  const harness = createHarness({ fetchXmlResponse: { entities: [] } });
+  const aggregate = await harness.runAction("queryFetchXml", {
+    tableName: "contact",
+    fetchXml: '<fetch aggregate="true"><entity name="contact"/></fetch>'
+  });
+  assert.equal(aggregate.result.ok, false);
+  const mutation = await harness.runAction("queryFetchXml", {
+    tableName: "contact",
+    fetchXml: '<fetch><entity name="contact"><delete/></entity></fetch>'
+  });
+  assert.equal(mutation.result.ok, false);
+});
+
 test("FetchXML action rejects a mismatched base entity before Dataverse execution", async () => {
   const harness = createHarness({ fetchXmlResponse: { entities: [] } });
   const { result } = await harness.runAction("queryFetchXml", {
