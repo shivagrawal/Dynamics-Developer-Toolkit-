@@ -254,3 +254,74 @@ test("invalid SELECT response metadata is not silently accepted", async () => {
   assert.equal(result.ok, false);
   assert.match(result.error, /verifiable SQL result projection/i);
 });
+
+test("DISTINCT and TOP projections with WHERE and ORDER BY validate correctly", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#contacts(fullname,contactid)",
+      value: [{ fullname: "Ada Lovelace", contactid: "contact-guid" }],
+    },
+  });
+  const { result } = await harness.runQuery(
+    "SELECT DISTINCT TOP 10 fullname FROM contact WHERE fullname IS NOT NULL ORDER BY fullname",
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(Array.from(result.columns), ["fullname", "contactid"]);
+});
+
+test("case-insensitive SQL projection validation accepts differently cased OData columns", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#contacts(FullName,ContactId)",
+      value: [{ FullName: "Ada Lovelace", ContactId: "contact-guid" }],
+    },
+  });
+  const { result } = await harness.runQuery("SELECT fullname FROM contact");
+  assert.equal(result.ok, true);
+  assert.ok(Array.from(result.columns).some((column) => column.toLowerCase() === "fullname"));
+});
+
+test("qualified single-table projections validate by logical column name", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#contacts(fullname,contactid)",
+      value: [{ fullname: "Ada Lovelace", contactid: "contact-guid" }],
+    },
+  });
+  const { result } = await harness.runQuery("SELECT c.fullname FROM contact AS c");
+  assert.equal(result.ok, true);
+  assert.ok(Array.from(result.columns).includes("fullname"));
+});
+
+test("empty result sets still require matching projection metadata", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#contacts(contactid)",
+      value: [],
+    },
+  });
+  const { result } = await harness.runQuery("SELECT fullname FROM contact WHERE fullname = 'no-match'");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /does not match the SELECT projection/i);
+});
+
+test("alias normalization preserves ordinary fields while dropping annotations", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#contacts(fullname,contactid)",
+      value: [{
+        fullname: "Ada Lovelace",
+        contactid: "contact-guid",
+        a_x002e_name: "Contoso",
+        "a_x002e_name@Microsoft.Dynamics.CRM.lookuplogicalname": "account",
+      }],
+    },
+  });
+  const { result } = await harness.runQuery(
+    "SELECT c.fullname, a.name FROM contact AS c LEFT JOIN account AS a ON c.accountid = a.accountid",
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.rows[0]["a.name"], "Contoso");
+  assert.equal(Object.keys(result.rows[0]).some((key) => key.includes("@")), false);
+});
+
