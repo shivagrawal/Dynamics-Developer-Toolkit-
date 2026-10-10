@@ -11,10 +11,10 @@ const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
 function createHarness({ response, entityMetadata = {}, fetchResponse, metadataError, fetchXmlResponse } = {}) {
   let messageListener;
-  let requestedUrl;
+  let requestedUrl;\n  let fetchXmlCallCount = 0;\n  const requestedFetchXml = [];
   const clientUrl = "https://example.crm.dynamics.com";
   const xrm = {
-    WebApi: { retrieveMultipleRecords: async (table, query, pageSize) => fetchXmlResponse || { entities: [], nextLink: null } },
+    WebApi: { retrieveMultipleRecords: async (table, query, pageSize) => { requestedFetchXml.push({ table, query, pageSize }); if (Array.isArray(fetchXmlResponse)) return fetchXmlResponse[fetchXmlCallCount++] || { entities: [] }; return fetchXmlResponse || { entities: [], nextLink: null }; } },
     Utility: {
       getGlobalContext: () => ({
         getClientUrl: () => clientUrl,
@@ -84,7 +84,7 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, metadataE
     return { result, requestedUrl };
   }
   async function runQuery(sql) { return runAction("querySql", { sql }); }
-  return { runQuery, runAction };
+  return { runQuery, runAction, requestedFetchXml };
 }
 
 test("simple SELECT returns requested columns and preserves null-capable metadata columns", async () => {
@@ -394,4 +394,25 @@ test("FetchXML action rejects a mismatched base entity before Dataverse executio
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /does not match/i);
+});
+
+test("FetchXML action follows paging cookies and returns multiple pages", async () => {
+  const firstPage = Array.from({ length: 500 }, (_, index) => ({ contactid: "contact-" + index }));
+  const cookie = '<cookie pagenumber="2" pagingcookie="%253ccookie%2520page%253d%25221%2522%253e%253ccontactid%2520last%253d%2522abc%2522%252f%253e%253c%252fcookie%253e" istracking="False" />';
+  const harness = createHarness({
+    fetchXmlResponse: [
+      { entities: firstPage, fetchXmlPagingCookie: cookie },
+      { entities: [{ contactid: "contact-final" }] }
+    ]
+  });
+  const { result } = await harness.runAction("queryFetchXml", {
+    tableName: "contact",
+    fetchXml: '<fetch><entity name="contact"><attribute name="contactid"/></entity></fetch>'
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.pagesFetched, 2);
+  assert.equal(result.rows.length, 501);
+  assert.match(harness.requestedFetchXml[0].query, /count="500"/);
+  assert.match(harness.requestedFetchXml[1].query, /page="2"/);
+  assert.match(harness.requestedFetchXml[1].query, /paging-cookie="&lt;cookie/);
 });
