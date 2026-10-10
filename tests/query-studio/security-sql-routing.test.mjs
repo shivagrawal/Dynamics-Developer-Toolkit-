@@ -50,6 +50,7 @@ test("ordinary queries are not routed because a string or comment mentions a sec
   assert.equal(context.isSecuritySqlCandidate("SELECT name FROM account WHERE name = 'x /* roleprivileges */'"), false);
   assert.equal(context.isSecuritySqlCandidate("SELECT name FROM account -- FROM systemuserroles"), false);
   assert.equal(context.isSecuritySqlCandidate("/* FROM audit CROSS APPLY OPENJSON */ SELECT name FROM account"), false);
+  assert.equal(context.isSecuritySqlCandidate("/* outer /* nested FROM systemuserroles */ still outer */ SELECT name FROM account"), false);
   assert.equal(context.isSecuritySqlCandidate("SELECT TOP 5 accountid, name FROM account"), false);
 });
 
