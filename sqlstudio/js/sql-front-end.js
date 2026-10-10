@@ -83,6 +83,26 @@
     parts.push(tokens.slice(start)); return parts;
   }
 
+  function normalizeTokenText(tokens) {
+    let out = "";
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i], prev = tokens[i - 1], next = tokens[i + 1];
+      const v = t.value;
+      if (v === ".") { out = out.trimEnd() + "."; continue; }
+      if (prev && prev.value === ".") { out += v; continue; }
+      if ([",", ")", ";"].includes(v)) { out = out.trimEnd() + v; continue; }
+      if (v === "(") {
+        const functionCall = prev && (prev.type === "word" || prev.type === "keyword" || prev.type === "quotedIdentifier");
+        out = out.trimEnd() + (functionCall ? " " : "") + v;
+        continue;
+      }
+      if (prev && ["(", "."].includes(prev.value)) { out += v; continue; }
+      if (out && !out.endsWith(" ")) out += " ";
+      out += v;
+    }
+    return out.replace(/\\s+/g, " ");
+  }
+
   function parseSelect(sql) {
     const all = significant(tokenize(sql));
     if (!all.length) return { ok: false, error: "Enter a SQL query." };
@@ -105,7 +125,7 @@
     }
     clauses[current] = clauseTokens;
     const projectionTokens = clauses.SELECT || [];
-    const projection = splitTopLevel(projectionTokens, ",").map(part => part.map(t => t.value).join(" ").trim()).filter(Boolean);
+    const projection = splitTopLevel(projectionTokens, ",").map(part => normalizeTokenText(part).trim()).filter(Boolean);
     const fromTokens = clauses.FROM || [];
     const table = fromTokens.length ? unquoteIdentifier(fromTokens[0].value) : null;
     const aliasToken = fromTokens.length > 1 && fromTokens[1].value.toUpperCase() === "AS" ? fromTokens[2] : fromTokens[1];
