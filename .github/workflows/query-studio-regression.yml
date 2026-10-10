@@ -1,0 +1,30 @@
+name: Query Studio Regression Tests
+
+on:
+  push:
+    branches:
+      - feature/sql4cds-query-studio
+  pull_request:
+    branches:
+      - main
+      - feature/sql4cds-query-studio
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  query-studio-regression:
+    name: Query Studio regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run Query Studio regression suite
+        run: node --test tests/query-studio/*.test.mjs
