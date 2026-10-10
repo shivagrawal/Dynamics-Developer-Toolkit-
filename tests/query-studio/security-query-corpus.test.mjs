@@ -82,10 +82,15 @@ test("security query 2: distinct privilege names by entity and ORDER BY", () => 
   assert.deepEqual(result.resultColumns.map(column => column.label), ["privilege_name"]);
 });
 
-// These TODOs are deliberate: the current compiler must not be represented as
-// supporting syntax it cannot yet execute. Promote each to an executable
-// fixture test only when its parser, planner and execution semantics are ready.
-test.todo("security query 3: CASE expressions, role root inheritance and role privileges");
-test.todo("security query 4: role privilege lookup and CASE depth mapping");
-test.todo("security query 5: ISNULL, MAX(CASE...), CASE projections and GROUP BY");
-test.todo("security query 6: audit changedata JSON expansion (OPENJSON/CROSS APPLY) and CASE");
+// These SQL Server constructs are handled by the specialized security-query
+// adapter, not by the generic FetchXML compiler. The generic compiler must
+// reject them rather than silently producing a semantically different query.
+test("generic compiler fails closed for security SQL constructs delegated to the adapter", () => {
+  const unsupported = [
+    "SELECT su.fullname, CASE rp.privilegedepthmask WHEN 1 THEN 'User' END AS depth FROM systemuser su",
+    "SELECT r.name, CASE rp.privilegedepthmask WHEN 1 THEN 'User' END AS depth FROM role r",
+    "SELECT ISNULL(MAX(CASE WHEN p.name LIKE 'prvRead%' THEN 'User' END), 'None') AS ReadAccess FROM role r GROUP BY r.name",
+    "SELECT ca.logicalname FROM audit a CROSS APPLY OPENJSON(a.changedata, '$.changedAttributes') WITH (logicalname NVARCHAR(100) '$.logicalName') ca"
+  ];
+  for (const sql of unsupported) assert.throws(() => engine.plan(sql));
+});
