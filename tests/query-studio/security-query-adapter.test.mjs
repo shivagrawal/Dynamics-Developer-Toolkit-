@@ -71,7 +71,7 @@ INNER JOIN privilegeobjecttypecodes potc ON potc.privilegeid = p.privilegeid
 INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
 WHERE e.logicalname = 'salesorder' ORDER BY p.name`,
   userTable: `SELECT DISTINCT su.fullname, ur.name AS role_name, bu.name AS role_businessunit, p.name AS privilege_name,
-CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END AS depth
+CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' ELSE CAST(rp.privilegedepthmask AS VARCHAR(10)) END AS depth
 FROM systemuser su INNER JOIN systemuserroles sur ON sur.systemuserid = su.systemuserid
 INNER JOIN role ur ON ur.roleid = sur.roleid INNER JOIN businessunit bu ON bu.businessunitid = ur.businessunitid
 INNER JOIN role pr ON pr.parentrootroleid = ur.parentrootroleid INNER JOIN roleprivileges rp ON rp.roleid = pr.roleid
@@ -80,7 +80,7 @@ INNER JOIN entity e ON e.objecttypecode = potc.objecttypecode
 WHERE su.fullname LIKE '%USD8%' AND e.logicalname = 'quote'
 ORDER BY su.fullname, ur.name, p.name`,
   rolesByPrivilege: `SELECT DISTINCT r.name AS role_name, bu.name AS business_unit, p.name AS privilege_name,
-CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END AS depth
+CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' ELSE CAST(rp.privilegedepthmask AS VARCHAR(10)) END AS depth
 FROM role r INNER JOIN roleprivileges rp ON rp.roleid = r.roleid
 INNER JOIN privilege p ON p.privilegeid = rp.privilegeid INNER JOIN businessunit bu ON bu.businessunitid = r.businessunitid
 WHERE p.name = 'prvReadwesco_legalentity' ORDER BY r.name, bu.name`,
