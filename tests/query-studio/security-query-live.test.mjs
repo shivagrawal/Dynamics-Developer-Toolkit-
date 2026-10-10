@@ -120,10 +120,14 @@ async function acquireToken() {
 }
 
 function createLiveBridge() {
-  const authenticatedFetch = (input, init = {}) => fetch(input, {
-    ...init,
-    headers: { ...(init.headers || {}), Authorization: "Bearer " + token, Accept: "application/json" }
-  });
+  const calls = [];
+  const authenticatedFetch = (input, init = {}) => {
+    calls.push(new URL(String(input)).pathname + new URL(String(input)).search);
+    return fetch(input, {
+      ...init,
+      headers: { ...(init.headers || {}), Authorization: "Bearer " + token, Accept: "application/json" }
+    });
+  };
   const context = {
     URL, fetch: authenticatedFetch, window: {},
     Xrm: { Utility: { getGlobalContext: () => ({ getClientUrl: () => baseUrl, organizationSettings: {} }) } },
@@ -131,7 +135,16 @@ function createLiveBridge() {
     console, setTimeout, clearTimeout
   };
   vm.runInNewContext(source, context, { filename: "security-audit-service.js" });
-  return sql => context.devLensSecurityAuditBridge("sqlQuery", { sql });
+  return {
+    run: sql => context.devLensSecurityAuditBridge("sqlQuery", { sql }),
+    calls,
+    get: async path => {
+      const response = await authenticatedFetch(baseUrl + "/api/data/v9.2/" + path);
+      const body = await response.json().catch(() => ({}));
+      assert.equal(response.ok, true, "Dataverse API request failed (HTTP " + response.status + "): " + (body.error?.message || "no details"));
+      return body;
+    }
+  };
 }
 
 test.before(async () => {
@@ -142,7 +155,7 @@ test.before(async () => {
 
 for (let index = 0; index < queries.length; index++) {
   test("live Dataverse security query " + (index + 1) + " returns the expected projection", async () => {
-    const result = await bridge(queries[index]);
+    const result = await bridge.run(queries[index]);
     assert.equal(result.ok, true, "Query adapter failed: " + (result.error || "unknown error"));
     assert.equal(result.readOnly, true);
     assert.ok(Array.isArray(result.rows));
@@ -151,3 +164,16 @@ for (let index = 0; index < queries.length; index++) {
     // Never emit row values, record IDs, audit payloads, or privilege assignments in CI logs.
   });
 }
+
+test("live audit detail expansion is exercised when the environment has audit rows", async () => {
+  const data = await bridge.get("audits?$select=_objectid_value&$top=10&$orderby=createdon%20desc");
+  const candidate = (data.value || []).map(row => String(row._objectid_value || "").replace(/[{}]/g, ""))
+    .find(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+  if (!candidate) return; // The environment has no recent audit record with an object ID to exercise.
+  const query = queries[5].replace("bb20fca4-e8a2-f111-b8db-7c1e5280e98a", candidate);
+  const result = await bridge.run(query);
+  assert.equal(result.ok, true, "Audit detail adapter failed: " + (result.error || "unknown error"));
+  assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")), "An audited record was found but RetrieveAuditDetails was not called.");
+  assert.deepEqual(JSON.parse(JSON.stringify(result.columns)), expectedColumns[5]);
+  // Never emit audit values, record IDs, or user names in CI logs.
+});
