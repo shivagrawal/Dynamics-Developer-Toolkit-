@@ -108,6 +108,7 @@ test("security query 2 maps distinct privilege names to a table", async () => {
 test("security query 3 returns user privilege depth and role details", async () => {
   const result = await createBridge().run(queries.userTable);
   assert.equal(result.ok, true);
+  assert.equal(result.compatibilityMode, "user-entity-privileges");
   assert.equal(result.rows[0].fullname, "USD8 Test User");
   assert.equal(result.rows[0].privilege_name, "prvReadQuote");
   assert.equal(result.rows[0].depth, "Organization");
