@@ -391,9 +391,9 @@
         ? metadata.entities[plan.table].columns.filter(column => column.queryable).map(column => ({label: column.logicalName, key: column.logicalName}))
         : plan.columns.map(column => {
             const label = column.alias || (column.tableAlias ? column.tableAlias + "." : "") + column.column;
-            const key = column.tableAlias && column.tableAlias.toLowerCase() !== plan.alias.toLowerCase()
+            const key = column.alias || (column.tableAlias && column.tableAlias.toLowerCase() !== plan.alias.toLowerCase()
               ? column.tableAlias + "_" + column.column
-              : column.column;
+              : column.column);
             return { label, key };
           });
       const columns = [...new Set(projections.map(p => p.label))];
