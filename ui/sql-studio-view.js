@@ -28,7 +28,9 @@
     columnFilter: "",
     selectedColumns: [],
     editorSelectionStart: -1,
-    editorSelectionEnd: -1
+    editorSelectionEnd: -1,
+    pageIndex: 0,
+    pageSize: 100
   };
   let host = null;
 
@@ -94,8 +96,13 @@
     const activeElement = host.getRootNode()?.activeElement || document.activeElement;
     const focusedFilter = host.contains(activeElement) ? activeElement.getAttribute("data-schema-filter") : null;
     const focusedFilterStart = focusedFilter ? activeElement.selectionStart : null;
-    const rows = state.results?.rows || [];
+    const allRows = state.results?.rows || [];
     const columns = state.results?.columns || [];
+    const pageSize = state.pageSize || 100;
+    const pageCount = Math.max(1, Math.ceil(allRows.length / pageSize));
+    state.pageIndex = Math.max(0, Math.min(state.pageIndex || 0, pageCount - 1));
+    const pageStart = state.pageIndex * pageSize;
+    const rows = allRows.slice(pageStart, pageStart + pageSize);
     host.innerHTML = `
       <div class="sqlstudio">
         <style>
@@ -109,6 +116,7 @@
           .ss-error{border-color:#7f1d1d;color:#fecaca;background:#450a0a;white-space:pre-wrap}
           .ss-editor{width:100%;min-height:210px;box-sizing:border-box;resize:vertical;background:#020617;color:#e2e8f0;border:1px solid #475569;border-radius:7px;padding:10px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:2}
           .ss-results{border:1px solid #334155;border-radius:7px;overflow:auto;max-height:42vh;background:#020617}
+          .ss-pagination{align-items:center;justify-content:flex-end}
           .ss-results table{border-collapse:collapse;width:max-content;min-width:100%;font-size:12px}
           .ss-results th,.ss-results td{border-bottom:1px solid #334155;border-right:1px solid #1e293b;padding:6px 9px;text-align:left;white-space:nowrap;max-width:420px;overflow:hidden;text-overflow:ellipsis}
           .ss-results th{position:sticky;top:0;background:#1e293b;color:#bfdbfe}
@@ -134,7 +142,7 @@
         <div class="ss-meta">Native Dataverse SQL endpoint remains the default. JS engine preview compiles its supported SELECT subset to FetchXML; unsupported SQL is rejected. Both paths are read-only and run as your current Dynamics user.</div>
         ${state.error ? `<div class="ss-status ss-error">${esc(state.error)}</div>` : ""}
         ${state.results ? `<div class="ss-meta">Query: ${esc(state.lastQuery)} · ${state.results.truncated ? "Results limited" : "Server response received"}${state.results.provider ? " · " + esc(state.results.provider) + (state.results.compatibilityMode ? " (" + esc(state.results.compatibilityMode) + ")" : "") : ""}${state.results.warning ? " · " + esc(state.results.warning) : ""}</div>` : ""}
-        ${state.results ? `<div class="ss-results"><table><thead><tr>${columns.map(c=>`<th title="${esc(c)}">${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td title="${esc(row[c])}">${esc(formatValue(row[c]))}</td>`).join("")}</tr>`).join("")}</tbody></table>${rows.length ? "" : '<div class="ss-empty">The query returned no rows.</div>'}</div><div class="ss-top"><button class="ss-btn" data-act="csv">Export CSV</button><button class="ss-btn" data-act="copy">Copy JSON</button></div>` : ""}
+        ${state.results ? `<div class="ss-results"><table><thead><tr>${columns.map(c=>`<th title="${esc(c)}">${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td title="${esc(row[c])}">${esc(formatValue(row[c]))}</td>`).join("")}</tr>`).join("")}</tbody></table>${rows.length ? "" : '<div class="ss-empty">The query returned no rows.</div>'}</div>${allRows.length > pageSize ? `<div class="ss-top ss-pagination"><span class="ss-meta">Rows ${pageStart + 1}–${Math.min(pageStart + rows.length, allRows.length)} of ${allRows.length}</span><button class="ss-btn" data-act="prevPage" ${state.pageIndex <= 0 ? "disabled" : ""}>Previous</button><span class="ss-meta">Page ${state.pageIndex + 1} of ${pageCount}</span><button class="ss-btn" data-act="nextPage" ${state.pageIndex >= pageCount - 1 ? "disabled" : ""}>Next</button></div>` : ""}<div class="ss-top"><button class="ss-btn" data-act="csv">Export CSV</button><button class="ss-btn" data-act="copy">Copy JSON</button></div>` : ""}
       </div>`;
     const editor = host.querySelector("textarea");
     editor.value = state.sql;
@@ -320,6 +328,7 @@
     state.running = true;
     state.error = "";
     state.results = null;
+    state.pageIndex = 0;
     state.lastQuery = state.sql;
     state.status = "Executing…";
     const started = performance.now();
@@ -360,6 +369,7 @@
     state.running = true;
     state.error = "";
     state.results = null;
+    state.pageIndex = 0;
     state.lastQuery = state.sql + "  [JavaScript SQL engine]";
     state.status = "Planning SQL and loading metadata…";
     const started = performance.now();
@@ -447,7 +457,14 @@
     if (action === "generateAllSelect") return generateSelect(true);
     if (action === "execute") return execute();
     if (action === "executeEngine") return executeEngine();
-    if (action === "clear") { state.results = null; state.error = ""; state.status = "Ready"; render(); return; }
+    if (action === "clear") { state.results = null; state.pageIndex = 0; state.error = ""; state.status = "Ready"; render(); return; }
+    if (action === "prevPage") { state.pageIndex = Math.max(0, state.pageIndex - 1); render(); return; }
+    if (action === "nextPage") {
+      const pageCount = Math.max(1, Math.ceil((state.results?.rows?.length || 0) / state.pageSize));
+      state.pageIndex = Math.min(pageCount - 1, state.pageIndex + 1);
+      render();
+      return;
+    }
     if (action === "csv") {
       const columns = state.results?.columns || [];
       const rows = state.results?.rows || [];
