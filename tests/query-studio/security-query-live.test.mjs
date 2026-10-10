@@ -165,11 +165,18 @@ for (let index = 0; index < queries.length; index++) {
       for (const column of expectedColumns[index]) assert.ok(Object.hasOwn(row, column), "Projected result row omitted a requested column.");
     }
     if (index === 0) {
-      for (const row of result.rows) assert.match(String(row.systemuserid), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      for (const row of result.rows) {
+        assert.match(String(row.systemuserid), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+        assert.ok(row.role_name && row.role_businessunit, "User role projection is missing role or business unit values.");
+      }
     }
     if (index === 1) {
       const names = result.rows.map(row => row.privilege_name);
       assert.equal(new Set(names).size, names.length, "DISTINCT privilege query returned duplicates.");
+      for (const name of names) assert.ok(name.startsWith("prv"), "Privilege projection contains a malformed privilege name.");
+    }
+    if (index === 2 || index === 3) {
+      for (const row of result.rows) assert.match(String(row.depth), /^(User|Business Unit|Parent:Child BU|Organization|\\d+)$/, "Privilege depth CASE mapping is invalid.");
     }
     if (index === 4) {
       const accessLevels = new Set(["User", "Business Unit", "Parent:Child BU", "Organization", "None"]);
@@ -177,19 +184,25 @@ for (let index = 0; index < queries.length; index++) {
         assert.ok(accessLevels.has(row[column]), "Access summary returned an unknown depth label.");
       }
     }
+    console.log("Live security SQL query " + (index + 1) + ": PASS; rows=" + result.rowCount);
     // Never emit row values, record IDs, audit payloads, or privilege assignments in CI logs.
   });
 }
 
 test("live audit detail expansion is exercised when the environment has audit rows", async () => {
-  const data = await bridge.get("audits?$select=_objectid_value&$top=10&$orderby=createdon%20desc");
-  const candidate = (data.value || []).map(row => String(row._objectid_value || "").replace(/[{}]/g, ""))
-    .find(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+  const data = await bridge.get("audits?$select=_objectid_value,operation&$top=50&$orderby=createdon%20desc");
+  const candidates = (data.value || []).map(row => ({
+    id: String(row._objectid_value || "").replace(/[{}]/g, ""),
+    operation: Number(row.operation)
+  })).filter(row => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(row.id));
+  const candidate = candidates.find(row => row.operation === 2) || candidates[0];
   if (!candidate) return; // The environment has no recent audit record with an object ID to exercise.
-  const query = queries[5].replace("bb20fca4-e8a2-f111-b8db-7c1e5280e98a", candidate);
+  const query = queries[5].replace("bb20fca4-e8a2-f111-b8db-7c1e5280e98a", candidate.id);
   const result = await bridge.run(query);
   assert.equal(result.ok, true, "Audit detail adapter failed: " + (result.error || "unknown error"));
   assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")), "An audited record was found but RetrieveAuditDetails was not called.");
   assert.deepEqual(JSON.parse(JSON.stringify(result.columns)), expectedColumns[5]);
+  if (candidate.operation === 2) assert.ok(result.rows.length > 0, "An update audit record was found but no changed attributes were projected.");
+  console.log("Live audit detail smoke test: PASS; changed-attribute rows=" + result.rowCount);
   // Never emit audit values, record IDs, or user names in CI logs.
 });
