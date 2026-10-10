@@ -777,15 +777,28 @@ function pageBridge(action, payload) {
       cache: "no-store"
     });
     const contextColumns = columnsFromODataContext(result["@odata.context"]);
-    if (expectedProjection && contextColumns) {
+    if (expectedProjection) {
+      if (!contextColumns) {
+        return {
+          ok: false,
+          error: "Dataverse did not return a verifiable SQL result projection. Query Studio has stopped this result rather than displaying potentially unrelated columns. Check whether the SQL query option is supported by this environment."
+        };
+      }
       const actual = new Set(contextColumns.map(column => column.toLowerCase()));
+      const expected = new Set(expectedProjection);
+      const primaryId = String(metadata.PrimaryIdAttribute || "").toLowerCase();
       const missing = expectedProjection.filter(column => !actual.has(column));
-      if (missing.length) {
+      const unexpected = contextColumns.filter(column => !expected.has(column.toLowerCase()) && column.toLowerCase() !== primaryId);
+      if (missing.length || unexpected.length) {
+        const details = [
+          missing.length ? "Missing from response metadata: " + missing.join(", ") : "",
+          unexpected.length ? "Unexpected response columns: " + unexpected.join(", ") : ""
+        ].filter(Boolean).join(". ");
         return {
           ok: false,
           error: "Dataverse returned result metadata that does not match the SELECT projection. Requested: " +
             expectedProjection.join(", ") + ". Returned metadata: " + contextColumns.join(", ") +
-            ". Query Studio has stopped this result rather than displaying unrelated columns. Check the SQL endpoint response and the table/column names."
+            ". " + details + ". Query Studio has stopped this result rather than displaying unrelated columns. Check the SQL endpoint response and the table/column names."
         };
       }
     }
