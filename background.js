@@ -696,6 +696,45 @@ function pageBridge(action, payload) {
     return{ok:true,entityName:ctx.entityName,rows};
   }
   async function shellContext() { const ctx=await context({requireEntity:false,requireForm:false}); return {ok:true,clientUrl:ctx.clientUrl,environmentId:ctx.environmentId,currentUser:{id:ctx.userId,name:ctx.userName}}; }
+  async function schemaTable(logicalName) {
+    const requested = String(logicalName || "").trim().toLowerCase();
+    if (!/^[a-z_][a-z0-9_]*$/.test(requested))
+      return { ok: false, error: "Enter a valid Dataverse table logical name." };
+    const ctx = await context({ requireEntity: false, requireForm: false });
+    const base = `${ctx.clientUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${escapeOData(requested)}')`;
+    const definition = await fetchJson(
+      `${base}?$select=LogicalName,SchemaName,EntitySetName,MetadataId,DisplayName,PrimaryIdAttribute,PrimaryNameAttribute,IsCustomEntity&$expand=Attributes($select=LogicalName,SchemaName,DisplayName,AttributeType,IsCustomAttribute,IsValidForRead,IsValidForAdvancedFind,RequiredLevel,MaxLength,Precision,Format)`,
+    );
+    const columns = (definition.Attributes || []).map((attribute) => ({
+      logicalName: attribute.LogicalName || "",
+      schemaName: attribute.SchemaName || "",
+      displayName: localizedLabel(attribute.DisplayName) || attribute.LogicalName || "",
+      attributeType: attribute.AttributeType || "Unknown",
+      isCustom: attribute.IsCustomAttribute === true,
+      validForRead: attribute.IsValidForRead !== false,
+      validForAdvancedFind: attribute.IsValidForAdvancedFind !== false,
+      requiredLevel: attribute.RequiredLevel?.Value || "None",
+      maxLength: attribute.MaxLength ?? null,
+      precision: attribute.Precision ?? null,
+      format: attribute.Format || "",
+      isPrimaryId: attribute.LogicalName === definition.PrimaryIdAttribute,
+      isPrimaryName: attribute.LogicalName === definition.PrimaryNameAttribute
+    })).sort((a, b) => a.logicalName.localeCompare(b.logicalName));
+    return {
+      ok: true,
+      data: {
+        logicalName: definition.LogicalName,
+        schemaName: definition.SchemaName,
+        displayName: localizedLabel(definition.DisplayName) || definition.LogicalName,
+        entitySetName: definition.EntitySetName,
+        metadataId: definition.MetadataId,
+        isCustom: definition.IsCustomEntity === true,
+        primaryIdAttribute: definition.PrimaryIdAttribute || "",
+        primaryNameAttribute: definition.PrimaryNameAttribute || "",
+        columns
+      }
+    };
+  }
   async function querySqlReadOnly(sql) {
     if (typeof sql !== "string" || !sql.trim()) return { ok: false, error: "Enter a SELECT query." };
     if (sql.length > 100000) return { ok: false, error: "Query exceeds the 100,000 character limit." };
@@ -1251,7 +1290,9 @@ function pageBridge(action, payload) {
                   ? Promise.resolve(cancelMetadataIndex())
             : action === "metadataEntity"
               ? metadataEntity(payload?.logicalName)
-              : action === "processExplorer"
+              : action === "schemaTable"
+                ? schemaTable(payload?.logicalName)
+                : action === "processExplorer"
                 ? surfaceContext({ requireEntity: true, requireForm: false }).then((ctx) => processExplorer(ctx, !!payload?.force))
               : action === "querySql"
           ? querySqlReadOnly(payload?.sql)
