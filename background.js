@@ -855,7 +855,6 @@ function pageBridge(action, payload) {
       }
       if (pageEntities.length < pageSize) { moreRecords = false; break; }
       // Without a cookie, fall back to simple paging, still bounded by the 10,000-row engine cap.
-      if (page >= 100) { moreRecords = true; break; }
       pagingCookie = null;
       page++;
     }
