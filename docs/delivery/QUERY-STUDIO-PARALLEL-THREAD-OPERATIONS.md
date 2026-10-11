@@ -7,16 +7,86 @@
 
 ## User action required now
 
-The user does not need to copy/paste a long prompt. Open each listed existing project thread and send only **Continue**. Each thread must read this file and its assigned issue before acting.
+The Engineering Lead triggers each existing project thread by sending only **Continue**. The coordinator maintains this document and assigns distinct implementation boundaries so threads can progress independently without overwriting shared files.
 
-Trigger the threads in this order:
+**Current assignments (the earlier QA-only assignment for Thread B is complete):**
 
-1. **Thread B — QA and Test Strategy**: trigger first. Verify the latest feature-branch regression changes and report exact test/CI evidence. Do not edit runtime implementation.
-2. **Thread C — SQL Safety Specialist**: trigger second. Review the committed policy-gate implementation and adversarial tests for correctness, bypasses, and security regressions. Coordinate with Thread B; do not rewrite QA-owned tests or change shared execution files without documenting a specific defect and notifying the coordinator in the issue comment.
-3. **Thread A — Query Studio Architect**: trigger third. Review the current implementation against the accepted contract and identify contract/compatibility gaps. Do not implement code or revise the shared contract; publish findings and decisions needed.
-4. Return to the **primary integration thread** with the reports/evidence. The coordinator will reconcile findings, make any required changes, run/verify integration, and continue provider/result/UI work.
+- **Thread A — Query Studio Architect → Execution Coordinator Developer**, issue [#4](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/4): implement the execution coordinator and single Execute UI against the accepted contract.
+- **Thread B — QA and Test Strategy → Result Normalization Developer**, issue [#8](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/8): implement a provider-independent normalizer and isolated contract tests. Its earlier QA matrix deliverable is complete; this is a new bounded assignment.
+- **Thread C — SQL Safety Specialist**, issue [#5](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/5): audit and minimally harden the existing fail-closed gate and its own policy/routing safety tests.
 
-Do not trigger all threads simultaneously. Sequential starts reduce stale-branch assumptions and conflicting edits. If a thread says the work is complete, ask it to verify the current branch head and exact evidence before considering its issue done.
+The user may trigger A, B, and C in any order. Every thread must re-read the latest branch head before acting. Since all changes target the shared integration branch and tool operations are not guaranteed to execute concurrently, the coordinator must reconcile each commit before the next shared-branch write; do not claim independent background agents are continuously running.
+
+## Thread A — Execution Coordinator Developer (formerly Architect)
+
+**Issue:** https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/4  
+**Owned output:** execution coordinator and one-Execute UI implementation plus coordinator tests.
+
+### File ownership
+- Owns background.js, background-entry.js, ui/sql-studio-view.js, and coordinator/UI tests only where necessary.
+- Must not edit sqlstudio/js/sql-policy.js, sqlstudio/js/sql-engine.js, or the result-normalizer module/tests owned by Thread B.
+- Integrate the normalizer through its exported API after inspecting Thread B's committed module; if the API is not yet present, use a small local contract fixture and leave integration pending rather than creating a competing implementation.
+
+### Instructions
+- Read AGENTS.md, this file, the continuity protocol, issue #4 and comments, the accepted execution contract, architecture review, and current code.
+- Implement one Execute action with deterministic capability-first routing through the shared policy gate. Preserve the six named security/audit routes and native SQL as a provider.
+- Never fallback on auth, authorization, metadata permission, timeout, transport, throttling, data, or internal failures. Capability fallback requires an explicit typed capability rejection and semantic equivalence.
+- Keep the policy gate as the allow/deny boundary; do not duplicate or weaken its checks.
+- Preserve existing UI result paging, export, metadata and warning behavior through a compatibility adapter.
+- Add focused routing/dispatch/UI tests, including no provider calls for rejected requests and no fallback for non-capability failures.
+- Do not invent support for unimplemented SQL syntax. Do not claim end-to-end parse-once if the runtime still reparses downstream; document exact limitations.
+- Commit bounded changes and update issue #4 with commit SHA, changed files, tests/evidence, blockers and next action.
+
+## Thread B — Result Normalization Developer (QA assignment complete)
+
+**Issue:** https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/8  
+**Owned output:** a pure provider-independent result/error normalizer and isolated contract tests.
+
+### File ownership
+- Owns new sqlstudio/js/sql-result-normalizer.js and new tests/query-studio/sql-result-normalizer.test.mjs.
+- May update the regression workflow only after coordinating with the coordinator; do not edit background.js, background-entry.js, ui/sql-studio-view.js, sqlstudio/js/sql-policy.js, sqlstudio/js/sql-engine.js, or security-audit-service.js.
+- Do not integrate the normalizer into provider call sites; Thread A owns that integration.
+
+### Instructions
+- Read AGENTS.md, this file, the continuity protocol, issue #8 and comments, the accepted execution contract and current native/FetchXML/security-audit response shapes.
+- Implement a pure, dependency-light normalizer for ordered column descriptors, duplicate output labels without value loss, alias casing, SQL NULL, empty-result metadata, explicit truncation, unknown versus exact-zero counts, provider/duration/warnings, and safe normalized error categories.
+- Preserve a compatibility adapter for existing string-column/UI consumers, but keep UI integration outside this assignment.
+- Never expose secrets, raw headers, result values in diagnostics, or unsafe server payloads. Never reinterpret generic execution failures as capability rejections.
+- Add fixtures for native SQL, FetchXML, and named security/audit shapes; include null-only rows, zero rows with known columns, duplicate labels, partial/truncated output, unknown counts, and every error category/fallback classification.
+- If the duplicate-column key strategy is not unambiguously specified by the accepted contract, record a deterministic proposal in the report/issue before finalizing it; do not silently alter the public UI contract.
+- Add the new suite to the regression workflow only after the module/test contract is stable and notify the coordinator. Commit and comment on issue #8 with exact evidence and next action.
+
+## Thread C — SQL Safety Specialist
+
+**Issue:** https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/5  
+**Owned output:** safety audit/addendum, minimal safety fixes, and policy-specific adversarial tests.
+
+### File ownership
+- Owns sqlstudio/js/sql-policy.js, sqlstudio/js/sql-engine.js only for concrete parser-limit bypass defects, and tests/query-studio/sql-policy.test.mjs plus focused security-routing safety assertions.
+- Must not edit background.js, background-entry.js, ui/sql-studio-view.js, or result-normalizer files owned by A/B. Report dispatch-boundary defects to the coordinator with reproduction and expected minimal fix.
+- Do not rewrite QA-owned regression inventory or broaden into automatic routing.
+
+### Instructions
+- Read AGENTS.md, this file, issue #5 and comments, the policy design, execution contract, current policy/engine and safety tests.
+- Verify parse-once where possible; malformed/unsupported SQL fails closed; token/depth/node/join/IN limits apply to relevant parser/compiler entry points; quoted semicolons/comments and stacked statements are handled correctly; unsafe requests cause zero provider/bridge calls.
+- Trace every real FetchXML caller and its actual payload contract. Confirm base entity, well-formedness, and disallowed constructs are validated at the true trust boundary. Trace all six named security/audit SQL shapes and ensure near-matches cannot reach specialized adapters.
+- Preserve existing specialized adapter checks and semantics. Do not weaken/delete tests to obtain green results.
+- Make only minimal fixes in owned files. For defects requiring coordinator-owned dispatch changes, add a concrete finding to issue #5 and notify Thread A/primary coordinator.
+- Commit review/addendum and tests, then comment on issue #5 with exact head SHA, evidence, remaining risks and next action.
+
+## Shared rules for all threads
+
+- Work only on feature/sql4cds-query-studio; preserve main.
+- Re-read the latest branch head and assigned issue before every work session.
+- Keep edits inside the assigned file boundary. If a shared-file change is unavoidable, stop and coordinate rather than racing another thread.
+- Do not request credentials in chat, expose secrets, or alter production/shared environment security configuration.
+- Never claim tests, CI, or live Dataverse verification passed without evidence tied to an exact commit.
+- Record decisions as accepted/proposed/deferred, and record commits and evidence in the assigned issue.
+- End each handoff with: **status**, **branch/head SHA**, **changed files/commit SHAs**, **tests/evidence**, **blockers**, **next action**.
+
+## Suggested short prompt for any assigned thread
+
+> Continue your current Query Studio assignment. First read docs/delivery/QUERY-STUDIO-PARALLEL-THREAD-OPERATIONS.md, the continuity protocol, and your assigned GitHub issue/comments. Verify the current feature/sql4cds-query-studio head and actual code before acting. Follow only your role's assignment and file ownership. Preserve main; avoid overlapping edits; do not claim unverified tests or live results. Commit bounded changes and update your assigned issue comment before handing back.
 
 ## Current implementation checkpoint
 
