@@ -1677,7 +1677,15 @@ function isSupportedSecuritySqlShape(sql) {
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "DEVLENS_ACTION") return;
   if (message.action === "querySql") {
-    const specializedSecurity = isSecuritySqlCandidate(message.payload?.sql) && isSupportedSecuritySqlShape(message.payload?.sql) && typeof devLensSecurityAuditBridge === "function";
+    const securityCandidate = isSecuritySqlCandidate(message.payload?.sql);
+    const supportedSecurityShape = isSupportedSecuritySqlShape(message.payload?.sql);
+    // A query that touches a named security/audit surface must match an approved adapter
+    // shape. Never let an unsupported near-match fall through to the generic SQL provider.
+    if (securityCandidate && !supportedSecurityShape) {
+      reply({ ok: false, code: "UNSUPPORTED_SECURITY_SQL_SHAPE", error: "This security/audit SQL query does not match a supported read-only query shape." });
+      return;
+    }
+    const specializedSecurity = securityCandidate && supportedSecurityShape && typeof devLensSecurityAuditBridge === "function";
     const decision = globalThis.DevLensSqlPolicy?.evaluate(message.payload?.sql, globalThis.DevLensSqlEngine, { specializedSecurity });
     if (!decision?.ok) {
       reply({ ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only SQL policy is unavailable; execution was stopped." });
