@@ -156,6 +156,31 @@
     return { ok: true, code: "OK", error: null, route: "native-sql", plan, limits: LIMITS };
   }
 
+  function validXmlReferences(value) {
+    const named = new Set(["amp", "lt", "gt", "apos", "quot"]);
+    let cursor = 0;
+    while (cursor < value.length) {
+      const amp = value.indexOf("&", cursor);
+      if (amp < 0) return true;
+      const semi = value.indexOf(";", amp + 1);
+      if (semi < 0) return false;
+      const reference = value.slice(amp + 1, semi);
+      if (!named.has(reference)) {
+        let codePoint;
+        if (/^#[0-9]+$/.test(reference)) codePoint = Number(reference.slice(1));
+        else if (/^#x[0-9a-f]+$/i.test(reference)) codePoint = Number.parseInt(reference.slice(2), 16);
+        else return false;
+        const validCodePoint = codePoint === 0x9 || codePoint === 0xA || codePoint === 0xD ||
+          (codePoint >= 0x20 && codePoint <= 0xD7FF) ||
+          (codePoint >= 0xE000 && codePoint <= 0xFFFD) ||
+          (codePoint >= 0x10000 && codePoint <= 0x10FFFF);
+        if (!validCodePoint) return false;
+      }
+      cursor = semi + 1;
+    }
+    return true;
+  }
+
   // Bounded structural XML scan: avoid trusting regex matches in comments,
   // attributes, or nested entities when identifying the FetchXML base entity.
   function inspectFetchXml(xml) {
@@ -172,7 +197,8 @@
         if (xml.slice(i).includes(">")) return null;
         break;
       }
-      if (xml.slice(i, open).includes("]]>")) return null;
+      const text = xml.slice(i, open);
+      if (text.includes("]]>") || (!stack.length && text.trim()) || !validXmlReferences(text)) return null;
       i = open;
       if (xml.startsWith("<!--", i)) {
         const end = xml.indexOf("-->", i + 4);
@@ -238,7 +264,7 @@
         const end = xml.indexOf(quote, cursor + 1);
         if (end < 0) return null;
         const value = xml.slice(cursor + 1, end);
-        if (value.includes("<") || Object.prototype.hasOwnProperty.call(attributes, attrName)) return null;
+        if (value.includes("<") || !validXmlReferences(value) || Object.prototype.hasOwnProperty.call(attributes, attrName)) return null;
         attributes[attrName] = value;
         cursor = end + 1;
       }
