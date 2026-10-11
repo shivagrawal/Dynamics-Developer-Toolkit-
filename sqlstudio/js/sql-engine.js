@@ -266,6 +266,7 @@
     if (!entities[plan.table]) fail("Metadata is required for base table '" + plan.table + "'.");
     for(const j of plan.joins) if(!entities[j.table]) fail("Metadata is required for joined table '" + j.table + "'.");
     const base=entities[plan.table], attrs=[];
+    const joinedAttrs = new Map(plan.joins.map(join => [join.alias.toLowerCase(), []]));
     const resolveEntity = owner => {
       const normalized = String(owner || plan.alias).toLowerCase();
       if (normalized === plan.alias.toLowerCase()) return base;
@@ -341,7 +342,9 @@
         const entity=owner===plan.alias.toLowerCase()?base:entities[plan.joins.find(j=>j.alias.toLowerCase()===owner).table];
         if(!entity.columns?.some(x=>x.logicalName.toLowerCase()===c.column.toLowerCase()&&x.queryable!==false)) fail("Column '"+c.column+"' is not queryable on table '"+entity.logicalName+"'.");
         const outputAlias = c.alias || (owner!==plan.alias.toLowerCase() ? owner+'_'+c.column : null);
-        attrs.push('<attribute name="'+escapeXml(c.column)+'"'+(outputAlias?' alias="'+escapeXml(outputAlias)+'"':'')+'/>' );
+        const attributeXml = '<attribute name="'+escapeXml(c.column)+'"'+(outputAlias?' alias="'+escapeXml(outputAlias)+'"':'')+'/>';
+        if (owner === plan.alias.toLowerCase()) attrs.push(attributeXml);
+        else joinedAttrs.get(owner).push(attributeXml);
         resultColumns.push({label:c.alias || (owner!==plan.alias.toLowerCase() ? owner+'.'+c.column : c.column),key:outputAlias || c.column});
       }
     }
@@ -446,6 +449,7 @@
     const renderJoin = node => {
       const j = node.join;
       return '<link-entity name="'+escapeXml(j.table)+'" alias="'+escapeXml(j.alias)+'" from="'+escapeXml(node.from)+'" to="'+escapeXml(node.to)+'" link-type="'+j.kind+'">'+
+        (joinedAttrs.get(j.alias.toLowerCase()) || []).join("")+
         node.children.map(renderJoin).join("")+'</link-entity>';
     };
     const links = joinNodes.filter(node => node.parentAlias === plan.alias.toLowerCase()).map(renderJoin).join("");
