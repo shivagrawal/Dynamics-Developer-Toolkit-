@@ -353,6 +353,13 @@
     return /^[a-z0-9][a-z0-9._:-]{0,99}$/.test(normalized) ? normalized : fallback;
   }
 
+  function isSecurityAuditQuery(sql) {
+    // Conservative UI-side fallback guard only. The authoritative exact-shape
+    // recognition and policy checks remain in background.js.
+    return /\\b(?:systemuserroles|roleprivileges|privilegeobjecttypecodes|audit)\\b/i.test(String(sql || "")) ||
+      /\\bFROM\\s+privilege\\b/i.test(String(sql || ""));
+  }
+
   function legacyNormalizedResult(response, durationMs, fallbackProvider) {
     const normalizer = window.DevLensSqlResultNormalizer;
     if (!normalizer?.normalizeResult || !normalizer?.toLegacyResult) throw new Error("Query result normalization is unavailable. Reload the Dynamics tab.");
@@ -379,7 +386,7 @@
       if (!api?.send) throw new Error("DevLens Dataverse bridge is not available. Reload the Dynamics tab.");
       const response = await api.send("querySql", { sql: state.sql });
       if (!response?.ok) {
-        if (response?.code === "PROVIDER_CAPABILITY_REJECTION") {
+        if (response?.code === "PROVIDER_CAPABILITY_REJECTION" && !isSecurityAuditQuery(state.sql)) {
           state.running = false;
           await executeEngine();
           return;
