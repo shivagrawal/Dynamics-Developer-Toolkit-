@@ -120,6 +120,20 @@
     }
     let where=null;
     if (peek("WHERE")) { take(); where=parsePredicate(); }
+    if (where) {
+      const pending = [{ node: where, depth: 1 }];
+      let predicateNodes = 0;
+      while (pending.length) {
+        const current = pending.pop();
+        if (!current.node || typeof current.node !== "object") continue;
+        predicateNodes++;
+        if (current.depth > 64) { const error = Error("Predicate nesting exceeds the maximum depth of 64."); error.code = "QUERY_LIMIT_EXCEEDED"; throw error; }
+        if (predicateNodes > 512) { const error = Error("Query exceeds the maximum of 512 predicate nodes."); error.code = "QUERY_LIMIT_EXCEEDED"; throw error; }
+        if (current.node.type === "and" || current.node.type === "or") {
+          pending.push({ node: current.node.left, depth: current.depth + 1 }, { node: current.node.right, depth: current.depth + 1 });
+        }
+      }
+    }
     const groupBy = [];
     if (peek("GROUP")) {
       take(); expect("BY");
