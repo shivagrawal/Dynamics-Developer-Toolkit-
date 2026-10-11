@@ -80,14 +80,19 @@ function pageBridge(action, payload) {
       headers,
     });
     if (!response.ok) {
-      let detail = "";
-      try {
-        detail = (await response.json())?.error?.message || "";
-      } catch {}
-      throw Error(
-        detail ||
+      let body = null;
+      try { body = await response.json(); } catch {}
+      const providerError = body?.error;
+      const error = Error(
+        providerError?.message ||
           `Dataverse request failed: ${response.status} ${response.statusText}`,
       );
+      // Only preserve this exact, typed capability result. Never infer fallback
+      // eligibility from an HTTP status or provider error text.
+      if (providerError?.code === "PROVIDER_CAPABILITY_REJECTION") {
+        error.code = "PROVIDER_CAPABILITY_REJECTION";
+      }
+      throw error;
     }
     if (response.status === 204) return {};
     return response.json();
@@ -1564,6 +1569,7 @@ function pageBridge(action, payload) {
                 : Promise.resolve({ ok: false, error: "Unknown action" });
   return task.catch((error) => ({
     ok: false,
+    ...(error?.code === "PROVIDER_CAPABILITY_REJECTION" ? { code: "PROVIDER_CAPABILITY_REJECTION" } : {}),
     error: error.message || String(error),
   }));
 }
