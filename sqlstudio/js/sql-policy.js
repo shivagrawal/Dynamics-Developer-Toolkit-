@@ -88,20 +88,15 @@
     if (!engine || typeof engine.parse !== "function" || typeof engine.tokenize !== "function") {
       return denied("POLICY_UNAVAILABLE", "The read-only SQL policy is unavailable; execution was stopped.");
     }
-    let tokens;
-    try {
-      // Tokenize once here to enforce a hard pre-parse token cap. The parser's
-      // own tokenizer also enforces the cap so direct parser callers stay safe.
-      tokens = engine.tokenize(sql);
-    } catch (error) {
-      return denied(error?.code || "SQL_SYNTAX", error?.message || "SQL could not be tokenized.");
-    }
-    if (tokens.length > LIMITS.tokens) return denied("QUERY_LIMIT_EXCEEDED", "Query exceeds the " + LIMITS.tokens + " token limit.");
     const isSecurityAdapter = options.specializedSecurity === true;
     if (isSecurityAdapter) {
+      let tokens;
+      try { tokens = engine.tokenize(sql); }
+      catch (error) { return denied(error?.code || "SQL_SYNTAX", error?.message || "SQL could not be tokenized."); }
+      if (tokens.length > LIMITS.tokens) return denied("QUERY_LIMIT_EXCEEDED", "Query exceeds the " + LIMITS.tokens + " token limit.");
       // The named adapter retains its stricter projection/join/predicate checks
-      // before any Dataverse data request. This envelope only rejects batches
-      // and non-SELECT input before dispatch to that adapter.
+      // before any Dataverse data request. This envelope rejects batches and
+      // non-SELECT input before dispatch to that adapter.
       if (!tokens.length || tokens[0].value.toUpperCase() !== "SELECT") return denied("READ_ONLY_POLICY", "Read-only mode accepts SELECT statements only.");
       const semicolons = tokens.filter(token => token.value === ";");
       if (semicolons.length > 1 || (semicolons.length === 1 && tokens[tokens.length - 1] !== semicolons[0])) {
@@ -111,6 +106,8 @@
     }
     let plan;
     try {
+      // The SQL engine is the sole parser and enforces its token cap while
+      // tokenizing. Calling parse once yields the trusted internal plan.
       plan = engine.parse(sql);
     } catch (error) {
       return denied(error?.code || "SQL_UNSUPPORTED", error?.message || "SQL is not supported by the read-only policy.");
