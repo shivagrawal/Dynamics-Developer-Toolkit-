@@ -219,9 +219,11 @@ test("the background rejects a fifth concurrent Query Studio execution and relea
   const completed = await Promise.all(running);
   assert.equal(completed.every(result => result.ok), true);
   await new Promise(resolve => setTimeout(resolve, 0));
-  const next = await dispatch(query);
-  assert.equal(next.ok, true, "a completed execution releases its concurrency slot");
+  const nextPromise = dispatch(query);
   assert.equal(calls.length, 5);
+  pending[4]([{ result: { ok: true, rows: [], columns: [] } }]);
+  const next = await nextPromise;
+  assert.equal(next.ok, true, "a completed execution releases its concurrency slot");
 });
 
 test("FetchXML result accumulation stops at the configured output-byte cap and marks truncation", async () => {
