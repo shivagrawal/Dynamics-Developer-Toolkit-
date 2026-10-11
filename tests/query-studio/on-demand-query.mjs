@@ -97,10 +97,10 @@ try {
   const nativeResult = await api(`${entities[baseTable].entitySetName}?sql=${encodeURIComponent(sql)}`, token);
   assert.ok(Array.isArray(nativeResult.value), "Dataverse native SQL endpoint did not return a value array.");
   assert.ok(nativeResult.value.length <= 25, "Native SQL query returned more than 25 rows.");
-  const contextMatch = String(nativeResult["@odata.context"] || "").match(/#([A-Za-z_][A-Za-z0-9_]*)\\(([^()]*)\\)/);
+  const contextMatch = String(nativeResult["@odata.context"] || "").match(/#([A-Za-z_][A-Za-z0-9_]*)\(([^()]*)\)/);
   assert.ok(contextMatch, "Native SQL endpoint did not return verifiable projection metadata.");
   const nativeColumns = contextMatch[2].split(",").map(value => value.trim()).filter(Boolean);
-  const selectMatch = sql.match(/^SELECT\\s+(?:DISTINCT\\s+)?TOP\\s+\\d+\\s+([\\s\\S]+?)\\s+FROM\\b/i);
+  const selectMatch = sql.match(/^SELECT\s+(?:DISTINCT\s+)?TOP\s+\d+\s+([\s\S]+?)\s+FROM\b/i);
   assert.ok(selectMatch, "Could not identify the explicit native SQL projection.");
   const requestedColumns = selectMatch[1].split(",").map(value => value.trim().split(".").pop().toLowerCase());
   const nativeSet = new Set(nativeColumns.map(value => value.toLowerCase()));
