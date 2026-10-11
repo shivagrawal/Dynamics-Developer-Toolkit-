@@ -1,6 +1,6 @@
-# JavaScript SQL engine preview
+# In-house JavaScript SQL planner/compiler
 
-The Query Studio JavaScript engine is an original, bounded SQL-to-FetchXML implementation. It is not yet a full SQL4CDS port and must remain a preview until live Dataverse verification is complete.
+The Query Studio JavaScript engine is an original, bounded SQL-to-FetchXML implementation. It is an independent, bounded implementation. SQL4CDS and XrmToolBox are not runtime dependencies. It is not yet a general-purpose SQL Server-compatible engine; feature claims must match the tested compatibility matrix.
 
 ## Supported subset
 
@@ -14,11 +14,11 @@ The Query Studio JavaScript engine is an original, bounded SQL-to-FetchXML imple
 
 ## Intentionally unsupported for now
 
-CTEs, subqueries, UNION, HAVING, scalar functions and computed expressions, CASE, variables, non-equality joins and aggregate queries with joins are rejected or not implemented. Do not assume SQL4CDS compatibility outside the supported subset.
+CTEs, subqueries, UNION, HAVING, scalar functions and computed expressions, CASE, variables, non-equality joins and aggregate queries with joins are rejected or not implemented. Do not claim compatibility outside the implemented and tested subset. The roadmap in IMPLEMENTATION-ROADMAP.md defines the planned expansion.
 
 ## Safety and result limits
 
-The JavaScript engine preview is a separate button; the existing native Dataverse SQL endpoint remains the default path. The execution bridge accepts read-only FetchXML, including supported aggregate queries, and checks that its base entity matches the requested table. Dataverse authorization still applies. FetchXML paging cookies are followed for queries without TOP, with a safety cap of 10,000 rows per execution. Results are marked limited if additional pages may remain. Queries using TOP do not use paging-cookie continuation.
+The native SQL endpoint and this in-house compiler are separate providers today. The target architecture is a single Execute action with automatic provider selection. Do not require users to choose an engine. The execution bridge accepts read-only FetchXML, including supported aggregate queries, and checks that its base entity matches the requested table. Dataverse authorization still applies. FetchXML paging cookies are followed for queries without TOP, with a safety cap of 10,000 rows per execution. Results are marked limited if additional pages may remain. Queries using TOP do not use paging-cookie continuation.
 
 ## Validation
 
