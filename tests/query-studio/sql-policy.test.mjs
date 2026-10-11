@@ -89,11 +89,17 @@ test("FetchXML policy validates document structure and root entity, not regex ne
     "<fetch><entity name=\"contact\"></fetch>",
     "<fetch><entity name=\"contact\" /><entity name=\"account\" /></fetch>",
     "<fetch><entity name=\"contact\" /><update /></fetch>",
-    "<fetch><entity name=\"contact\" /><!DOCTYPE fetch></fetch>"
+    "<fetch><entity name=\"contact\" /><!DOCTYPE fetch></fetch>",
+    "prefix<fetch><entity name=\"contact\" /></fetch>",
+    "<fetch><entity name=\"contact\" /></fetch>suffix",
+    "<fetch><entity name=\"contact&bad;\" /></fetch>",
+    "<fetch><entity name=\"contact&\" /></fetch>",
+    "<fetch><entity name=\"contact&#0;\" /></fetch>"
   ]) {
     assert.equal(policy.validateFetchXml(xml, "contact").ok, false, xml);
   }
-  assert.equal(policy.validateFetchXml("<fetch><entity name='contact'><attribute name='fullname' /></entity></fetch>", "contact").ok, true);
+  assert.equal(policy.validateFetchXml("<fetch><entity name='contact' alias='A&amp;B'><attribute name='fullname' /></entity></fetch>", "contact").ok, true);
+  assert.equal(policy.validateFetchXml("  <fetch><entity name='contact' /></fetch>  ", "contact").ok, true);
 });
 
 test("unexpected parser failure fails closed with no plan", () => {
