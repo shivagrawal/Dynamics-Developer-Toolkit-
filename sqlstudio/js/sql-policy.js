@@ -194,7 +194,8 @@
     while (i < xml.length) {
       const open = xml.indexOf("<", i);
       if (open < 0) {
-        if (xml.slice(i).includes(">")) return null;
+        const tail = xml.slice(i);
+        if (tail.includes(">") || tail.includes("]]>") || (!stack.length && tail.trim()) || !validXmlReferences(tail)) return null;
         break;
       }
       const text = xml.slice(i, open);
