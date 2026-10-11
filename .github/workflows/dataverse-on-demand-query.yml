@@ -17,7 +17,7 @@ on:
         description: "Read-only SQL query. Must use SELECT TOP N (N 1–25) or bounded OFFSET/FETCH (offset + fetch ≤25); only account/contact/systemuser tables. Do not enter sensitive values."
         required: true
         type: string
-        default: "SELECT systemuserid, fullname FROM systemuser WHERE fullname IS NOT NULL AND fullname LIKE '%dataverse%' ORDER BY systemuserid OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY"
+        default: "SELECT TOP 10 accountid, accountnumber FROM account WHERE accountnumber IS NULL ORDER BY accountid"
 
 permissions:
   contents: read
@@ -45,7 +45,7 @@ jobs:
           DATAVERSE_TENANT_ID: ${{ secrets.DATAVERSE_TENANT_ID }}
           DATAVERSE_CLIENT_ID: ${{ secrets.DATAVERSE_CLIENT_ID }}
           DATAVERSE_CLIENT_SECRET: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
-          SQL_QUERY: ${{ inputs.sql_query || 'SELECT systemuserid, fullname FROM systemuser WHERE fullname IS NOT NULL AND fullname LIKE ''%dataverse%'' ORDER BY systemuserid OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY' }}
+          SQL_QUERY: ${{ inputs.sql_query || 'SELECT TOP 10 accountid, accountnumber FROM account WHERE accountnumber IS NULL ORDER BY accountid' }}
         run: node tests/query-studio/on-demand-query.mjs
 
       - name: Publish live SQL smoke-test checkpoint
