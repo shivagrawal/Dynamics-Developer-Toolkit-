@@ -192,6 +192,8 @@ try {
   const unmatchedSql = "SELECT TOP 5 c.contactid, a.accountid FROM contact c LEFT JOIN account a ON c.contactid = a.accountid ORDER BY c.contactid";
   const unmatchedCompiled = engine.compileSql(unmatchedSql, { entities });
   assert.equal(unmatchedCompiled.readOnly, true, "left-join-null-extension: compiler did not mark query read-only");
+  assert.match(unmatchedCompiled.fetchXml, /<link-entity name="account" alias="a"[^>]*><attribute name="accountid" alias="a_accountid"\/>/,
+    "left-join-null-extension: joined account ID was not projected inside the link entity");
   const unmatchedFetch = await api(unmatchedCompiled.entitySetName + "?fetchXml=" + encodeURIComponent(unmatchedCompiled.fetchXml), token);
   const unmatchedNative = await api(entities.contact.entitySetName + "?sql=" + encodeURIComponent(unmatchedSql), token);
   assert.ok(Array.isArray(unmatchedFetch.value), "left-join-null-extension: FetchXML returned no value array");
@@ -202,8 +204,9 @@ try {
   const joinedAccountId = row => {
     const key = Object.keys(row).find(candidate =>
       candidate.toLowerCase().endsWith("accountid") && candidate.toLowerCase() !== "contactid");
-    assert.ok(key, "left-join-null-extension: joined account ID column is missing");
-    return row[key] === undefined ? null : row[key];
+    // FetchXML may omit an aliased linked attribute entirely when the LEFT JOIN
+    // has no match; absence is its null representation.
+    return key === undefined || row[key] === undefined ? null : row[key];
   };
   assert.ok(unmatchedFetch.value.every(row => joinedAccountId(row) === null),
     "left-join-null-extension: FetchXML failed to null-extend unmatched account rows");
