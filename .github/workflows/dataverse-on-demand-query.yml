@@ -47,3 +47,17 @@ jobs:
           DATAVERSE_CLIENT_SECRET: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
           SQL_QUERY: ${{ inputs.sql_query || 'SELECT TOP 25 systemuserid, fullname FROM systemuser WHERE fullname LIKE ''%dataverse%''' }}
         run: node tests/query-studio/on-demand-query.mjs
+
+      - name: Publish live SQL smoke-test checkpoint
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Dataverse live SQL checkpoint"
+            echo "- Branch: `$GITHUB_REF_NAME`"
+            echo "- Commit: `$GITHUB_SHA`"
+            echo "- Job result: **$JOB_STATUS**"
+            echo "- Environment: `dataverse-test`"
+            echo "- The harness checks both FetchXML and native SQL endpoint paths; row values and credentials are not logged."
+          } >> "$GITHUB_STEP_SUMMARY"
