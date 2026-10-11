@@ -171,3 +171,22 @@ Do not assign simultaneous edits to the same file. A dependent stream may build 
 1. Complete baseline test inventory and link it to issue #2.
 2. Review and approve this contract under issue #3.
 3. Only then allocate implementation threads for coordinator, policy, provider adapters and QA.
+
+
+## 1.1 Offline test inventory
+
+The current workflow explicitly runs these seven test files:
+
+| Test file | Primary responsibility | Coverage boundary / next improvement |
+|---|---|---|
+| `tests/query-studio/sql-engine.test.mjs` | In-house SQL parser/planner and FetchXML compiler | Add semantic edge cases and per-feature tests as grammar grows; live equivalence is separate |
+| `tests/query-studio/sql-front-end.test.mjs` | Tokenization, clause/projection parsing for editor assistance, completion context | Keep completion parsing distinct from execution-policy parsing; malformed input should suppress suggestions safely |
+| `tests/query-studio/query-studio-regression.test.mjs` | Query Studio regression behaviors and shared execution helper scenarios | Map each test to capability and expected provider; add normalized result/error contract assertions |
+| `tests/query-studio/security-query-corpus.test.mjs` | Golden corpus for six named security/audit SQL shapes and their semantics | Expand only when adapter behavior is implemented and validated; reject unimplemented semantic variants |
+| `tests/query-studio/security-query-adapter.test.mjs` | Specialized adapter projection/condition/ordering validation and bounded audit behavior | Add shared policy-gate integration assertions and normalized adapter output tests |
+| `tests/query-studio/security-sql-routing.test.mjs` | Ensures named security SQL uses the specialized bridge while ordinary SQL remains on native route | Migrate assertions to the coordinator/provider decision contract when it exists |
+| `tests/query-studio/sql-studio-ui.test.mjs` | UI behavior including result pagination/export and metadata retention | Add one-Execute-action, provider diagnostics, truncation and normalized error tests |
+
+Workflow-level checks also run `node --check` for the background bridge, security/audit service, UI, front-end parser, SQL engine and live-query harness, and parse `manifest.json`.
+
+This inventory is a test-file map, not a claim that every possible behavior within each area is covered. Detailed capability-to-test traceability remains part of QS-0.
