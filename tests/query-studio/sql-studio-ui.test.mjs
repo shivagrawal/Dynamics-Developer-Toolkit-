@@ -111,7 +111,7 @@ test("Query Studio paginates large result sets without losing exportable results
   };
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
-  assert.match(host.innerHTML, />Execute SQL<\/button>/);
+  assert.match(host.innerHTML, />Execute<\/button>/);
   assert.match(host.innerHTML, /security\/metadata query shapes use the JavaScript compatibility adapter/);
 
   await click(host, "execute");
