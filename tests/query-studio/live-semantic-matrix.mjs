@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const engine = require("../../sqlstudio/js/sql-engine.js");
-const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\\/+$/, "");
+const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\/+$/, "");
 const tenantId = process.env.DATAVERSE_TENANT_ID || "";
 const clientId = process.env.DATAVERSE_CLIENT_ID || "";
 const clientSecret = process.env.DATAVERSE_CLIENT_SECRET || "";
@@ -12,7 +12,7 @@ function validateEnvironment() {
   assert.ok(baseUrl && tenantId && clientId && clientSecret, "Dataverse integration secrets are not fully configured.");
   const parsed = new URL(baseUrl);
   assert.equal(parsed.protocol, "https:", "DATAVERSE_URL must use HTTPS.");
-  assert.match(parsed.hostname, /\\.crm(?:\\d+)?\\.dynamics\\.com$|\\.crm\\.microsoftdynamics\\.us$|\\.crm\\.dynamics\\.cn$/i,
+  assert.match(parsed.hostname, /\.crm(?:\d+)?\.dynamics\.com$|\.crm\.microsoftdynamics\.us$|\.crm\.dynamics\.cn$/i,
     "DATAVERSE_URL must be a Dataverse organization URL.");
 }
 
