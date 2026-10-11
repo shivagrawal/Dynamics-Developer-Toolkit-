@@ -43,6 +43,21 @@ test("enforces hard join, predicate-depth, token and IN-list caps", () => {
   assert.equal(policy.evaluate(manyTokens, engine).code, "QUERY_LIMIT_EXCEEDED");
 });
 
+test("rejects malformed or unknown predicate AST nodes fail-closed", () => {
+  const base = { type: "select", joins: [], top: null, offset: null, fetch: null };
+  for (const where of [
+    { type: "function", name: "unsafe", field: { column: "statecode" } },
+    { type: "and", left: { type: "compare", field: { column: "statecode" }, operator: "eq", value: { type: "number", value: 1 } } },
+    { type: "compare", field: { column: "statecode" }, operator: "raw-sql", value: { type: "number", value: 1 } },
+    { type: "in", field: { column: "statecode" }, not: false, values: [{ type: "null", value: null }] }
+  ]) {
+    const result = policy.validatePlan({ ...base, where });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "READ_ONLY_POLICY");
+    assert.equal(result.plan, null);
+  }
+});
+
 test("semicolons inside string literals are content, not statement separators", () => {
   const result = policy.evaluate("SELECT fullname FROM contact WHERE fullname = 'A;B'", engine);
   assert.equal(result.ok, true);
