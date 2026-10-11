@@ -952,21 +952,16 @@ function pageBridge(action, payload) {
       const lookupBackingFields = new Set(lookupMappings.map(mapping => mapping.backing));
       const lookupColumns = new Set(lookupMappings.map(mapping => mapping.column));
       const missing = expectedProjection.filter(column => !actual.has(column) && !lookupColumns.has(column));
-      const unexpected = contextColumns.filter(column =>
-        !expected.has(column.toLowerCase()) &&
-        column.toLowerCase() !== primaryId &&
-        !lookupBackingFields.has(column.toLowerCase())
-      );
-      if (missing.length || unexpected.length) {
-        const details = [
-          missing.length ? "Missing from response metadata: " + missing.join(", ") : "",
-          unexpected.length ? "Unexpected response columns: " + unexpected.join(", ") : ""
-        ].filter(Boolean).join(". ");
+      // Some Dataverse SQL endpoint responses include extra context columns (for example,
+      // ownerid) even when every requested column is present. Missing requested columns
+      // remain a hard failure; extra columns are safely removed from the final projection below.
+      if (missing.length) {
         return {
           ok: false,
           error: "Dataverse returned result metadata that does not match the SELECT projection. Requested: " +
             expectedProjection.join(", ") + ". Returned metadata: " + contextColumns.join(", ") +
-            ". " + details + ". Query Studio has stopped this result rather than displaying unrelated columns. Check the SQL endpoint response and the table/column names."
+            ". Missing from response metadata: " + missing.join(", ") +
+            ". Query Studio stopped because a requested column could not be verified."
         };
       }
       }
@@ -1002,9 +997,20 @@ function pageBridge(action, payload) {
       }
     }
     const rowColumns = [...new Set(rows.flatMap(row => Object.keys(row)))];
-    // OData context may omit aliased JOIN projections. Merge it with actual row fields
-    // so joined columns are visible while context-only fields (including null projections) remain.
-    const columns = [...new Set([...(contextColumns || []).filter(column => !projectedLookupBackings.has(column.toLowerCase())), ...rowColumns])];
+    // For a simple verified projection, expose only columns explicitly requested in SQL.
+    // This safely handles endpoint-generated extras without weakening missing-column checks.
+    const isSimpleProjection = expectedProjection && !(expectedProjection.length === 1 && expectedProjection[0] === "*");
+    const outputRows = isSimpleProjection ? rows.map(row => {
+      const projected = {};
+      for (const column of expectedProjection) {
+        const actualKey = Object.keys(row).find(key => key.toLowerCase() === column.toLowerCase());
+        if (actualKey !== undefined) projected[column] = row[actualKey];
+      }
+      return projected;
+    }) : rows;
+    const columns = isSimpleProjection
+      ? expectedProjection
+      : [...new Set([...(contextColumns || []).filter(column => !projectedLookupBackings.has(column.toLowerCase())), ...rowColumns])];
     const totalRecordCount = result["@Microsoft.Dynamics.CRM.totalrecordcount"] ?? null;
     const totalRecordCountLimitExceeded = result["@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded"] ?? false;
     const resultTruncated = truncated || totalRecordCountLimitExceeded === true;
@@ -1014,7 +1020,7 @@ function pageBridge(action, payload) {
       environmentId: ctx.environmentId,
       currentUser: { id: ctx.userId, name: ctx.userName },
       columns,
-      rows,
+      rows: outputRows,
       responseContext: result["@odata.context"] || null,
       totalRecordCount,
       totalRecordCountLimitExceeded,
