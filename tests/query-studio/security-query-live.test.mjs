@@ -352,6 +352,11 @@ test("live audit adapter expands a disposable record's actual audited attribute 
     const query = queries[5].replace("bb20fca4-e8a2-f111-b8db-7c1e5280e98a", accountId);
     let result = await bridge.run(query);
     assert.equal(result.ok, true, "Audit adapter failed for the temporary record: " + (result.error || "unknown error"));
+    console.log("Live audit description shape: " + JSON.stringify(result.rows.filter(row => row.logicalname === "description").map(row => ({
+      event: row.Event, oldPresent: row.oldvalue != null, newPresent: row.newvalue != null,
+      oldType: typeof row.oldvalue, newType: typeof row.newvalue,
+      oldLength: String(row.oldvalue ?? "").length, newLength: String(row.newvalue ?? "").length
+    }))));
     let descriptionChange = result.rows.find(row => row.logicalname === "description" &&
       String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     if (!descriptionChange) {
