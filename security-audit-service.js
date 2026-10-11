@@ -378,7 +378,7 @@ function devLensSecurityAuditBridge(action, p) {
     async function expandAuditRow(auditRow) {
       const auditId = G(auditRow.auditid);
       if (!auditId) return [];
-      const response = await get("audits(" + auditId + ")/Microsoft.Dynamics.CRM.RetrieveAuditDetails");
+      const response = await get("audits(" + auditId + ")/Microsoft.Dynamics.CRM.RetrieveAuditDetails()");
       const detail = response.AuditDetail || {};
       const oldValues = detail.OldValue?.Attributes || detail.OldValue || {};
       const newValues = detail.NewValue?.Attributes || detail.NewValue || {};
