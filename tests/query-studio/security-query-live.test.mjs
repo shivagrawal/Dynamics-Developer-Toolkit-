@@ -202,7 +202,8 @@ for (let index = 0; index < queries.length; index++) {
         assert.ok(accessLevels.has(row[column]), "Access summary returned an unknown depth label.");
       }
     }
-    console.log("Live security SQL query " + (index + 1) + ": PASS; rows=" + result.rowCount);
+    const label = index === 4 ? "DATA-BACKED" : "FILTER-SMOKE";
+    console.log("Live security SQL query " + (index + 1) + ": " + label + "; rows=" + result.rowCount);
     // Never emit row values, record IDs, audit payloads, or privilege assignments in CI logs.
   });
 }
@@ -271,7 +272,8 @@ test("live user entity privilege query returns mapped account privileges", async
     const query = queries[2].replace("%USD8%", "%" + escaped + "%").replace("e.logicalname = 'quote'", "e.logicalname = 'account'");
     const result = await bridge.run(query);
     assert.equal(result.ok, true, "User entity privilege query failed: " + (result.error || "unknown error"));
-    if (!result.rows.some(row => row.fullname === fullname)) continue;
+    assert.ok(result.rows.some(row => row.fullname === fullname),
+      "A user with role membership returned no account privilege rows; this is a semantic regression.");
     for (const row of result.rows.filter(row => row.fullname === fullname)) {
       assert.ok(row.role_name && row.role_businessunit && row.privilege_name);
       assert.match(String(row.depth), /^(User|Business Unit|Parent:Child BU|Organization|\d+)$/);
