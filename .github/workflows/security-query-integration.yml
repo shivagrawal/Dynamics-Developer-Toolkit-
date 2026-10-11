@@ -1,5 +1,6 @@
 name: Security SQL Live Dataverse Integration
 
+# Verification trigger: validate the six supported security/audit query shapes and a disposable audit-history fixture in dataverse-test.
 on:
   push:
     branches:
