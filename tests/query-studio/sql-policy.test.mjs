@@ -82,6 +82,20 @@ test("FetchXML policy rejects writes, invalid base tables and oversized XML", ()
   assert.equal(policy.validateFetchXml("<fetch>" + " ".repeat(1000000) + "</fetch>", "contact").code, "QUERY_LIMIT_EXCEEDED");
 });
 
+test("FetchXML policy validates document structure and root entity, not regex near-matches", () => {
+  for (const xml of [
+    "<fetch><!-- <entity name=\"contact\" /> --><entity name=\"account\" /></fetch>",
+    "<fetch><link-entity name=\"contact\" /><entity name=\"account\" /></fetch>",
+    "<fetch><entity name=\"contact\"></fetch>",
+    "<fetch><entity name=\"contact\" /><entity name=\"account\" /></fetch>",
+    "<fetch><entity name=\"contact\" /><update /></fetch>",
+    "<fetch><entity name=\"contact\" /><!DOCTYPE fetch></fetch>"
+  ]) {
+    assert.equal(policy.validateFetchXml(xml, "contact").ok, false, xml);
+  }
+  assert.equal(policy.validateFetchXml("<fetch><entity name='contact'><attribute name='fullname' /></entity></fetch>", "contact").ok, true);
+});
+
 test("unexpected parser failure fails closed with no plan", () => {
   const brokenEngine = { parse() { throw new Error("unexpected parser fault"); }, tokenize: engine.tokenize };
   const result = policy.evaluate("SELECT fullname FROM contact", brokenEngine);
