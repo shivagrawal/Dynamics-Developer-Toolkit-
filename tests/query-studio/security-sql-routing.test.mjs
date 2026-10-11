@@ -218,6 +218,7 @@ test("the background rejects a fifth concurrent Query Studio execution and relea
   for (const resolve of pending) resolve([{ result: { ok: true, rows: [], columns: [] } }]);
   const completed = await Promise.all(running);
   assert.equal(completed.every(result => result.ok), true);
+  await new Promise(resolve => setTimeout(resolve, 0));
   const next = await dispatch(query);
   assert.equal(next.ok, true, "a completed execution releases its concurrency slot");
   assert.equal(calls.length, 5);
@@ -245,7 +246,43 @@ test("FetchXML result accumulation stops at the configured output-byte cap and m
   assert.equal(result.moreRecords, true);
 });
 
-test("security table names only in literals or comments retain ordinary SQL routing", async () =>
+test("native SQL provider receives an AbortSignal and reports output-cap truncation", async () => {
+  const { context } = loadBackground();
+  context.window = {};
+  context.AbortController = AbortController;
+  let requestOptions;
+  context.Xrm = {
+    Utility: {
+      getGlobalContext: () => ({
+        getClientUrl: () => "https://example.crm.dynamics.com",
+        organizationSettings: { bapEnvironmentId: "test-env" },
+        userSettings: { userId: "test-user", userName: "QA User" }
+      }),
+      getEntityMetadata: async () => ({ EntitySetName: "accounts", PrimaryIdAttribute: "accountid" })
+    }
+  };
+  context.fetch = async (_url, options) => {
+    requestOptions = options;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid)",
+        value: [{ accountid: "large-row", description: "this row exceeds the test output cap" }]
+      })
+    };
+  };
+  const result = await context.pageBridge("querySql", {
+    sql: "SELECT * FROM account",
+    __devlensExecution: { deadlineAt: Date.now() + 10000, maxOutputBytes: 1 }
+  });
+  assert.equal(typeof requestOptions.signal?.aborted, "boolean");
+  assert.equal(result.ok, true);
+  assert.equal(result.truncated, true);
+  assert.equal(result.rows.length, 0);
+});
+
+test("security table names only in literals or comments retain ordinary SQL routing", async () => {
   const ordinaryQueries = [
     "SELECT name FROM account WHERE name = 'roleprivileges'",
     "SELECT name FROM account -- FROM systemuserroles",
