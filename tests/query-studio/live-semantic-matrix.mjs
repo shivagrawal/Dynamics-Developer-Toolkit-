@@ -43,7 +43,7 @@ async function api(path, token) {
     },
   });
   const body = await response.json().catch(() => ({}));
-  assert.equal(response.ok, true, `Dataverse request failed (HTTP ${response.status}): ${body.error?.message || "no details"}`);
+  assert.equal(response.ok, true, `Dataverse request failed (HTTP ${response.status})`);
   return body;
 }
 
