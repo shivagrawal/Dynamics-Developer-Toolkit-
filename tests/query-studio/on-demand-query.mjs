@@ -189,7 +189,10 @@ try {
   // compare actual returned values across the native SQL and FetchXML paths.
   // Row order is intentionally ignored because only ORDER BY guarantees it.
   const hasOrderBy = /\bORDER\s+BY\b/i.test(sql);
-  const simpleParityQuery = !/\bJOIN\b|\bGROUP\s+BY\b|\bCOUNT\s*\(|\bSUM\s*\(|\bAVG\s*\(|\bMIN\s*\(|\bMAX\s*\(/i.test(sql) &&
+  const safeContactAccountLeftJoin = /\bFROM\s+contact\s+c\s+LEFT\s+JOIN\s+account\s+a\s+ON\s+c\.parentcustomerid\s*=\s*a\.accountid\b/i.test(sql);
+  const hasJoin = /\bJOIN\b/i.test(sql);
+  const simpleParityQuery = !/\bGROUP\s+BY\b|\bCOUNT\s*\(|\bSUM\s*\(|\bAVG\s*\(|\bMIN\s*\(|\bMAX\s*\(/i.test(sql) &&
+    (!hasJoin || safeContactAccountLeftJoin) &&
     !/\bAS\b/i.test(selectMatch[1]) && requestedColumns.every(column => /^[a-z_][a-z0-9_]*$/i.test(column));
   const nativePageRows = pagingMatch
     ? nativeResult.value.slice(Number(pagingMatch[1]), Number(pagingMatch[1]) + Number(pagingMatch[2]))
