@@ -75,6 +75,21 @@ test("duplicate output labels retain distinct canonical row keys and values", ()
   }]);
 });
 
+test("handles prototype-like column keys as ordinary data in canonical and legacy rows", () => {
+  const sourceRow = Object.create(null);
+  sourceRow["__proto__"] = "literal column value";
+  const canonical = normalizer.normalizeResult({
+    columns: ["__proto__"],
+    rows: [sourceRow]
+  });
+  const legacy = normalizer.toLegacyResult(canonical);
+
+  assert.equal(Object.hasOwn(canonical.rows[0], "__proto__"), true);
+  assert.equal(canonical.rows[0]["__proto__"], "literal column value");
+  assert.equal(Object.hasOwn(legacy.rows[0], "__proto__"), true);
+  assert.equal(legacy.rows[0]["__proto__"], "literal column value");
+});
+
 test("legacy adapter disambiguates duplicate labels without losing either value", () => {
   const canonical = normalizer.normalizeResult({
     provider: "dataverse-security-query-adapter",
