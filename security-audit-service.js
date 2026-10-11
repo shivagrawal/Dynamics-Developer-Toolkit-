@@ -67,7 +67,8 @@ function devLensSecurityAuditBridge(action, p) {
       next = data["@odata.nextLink"] || "";
       pages++;
       if (pageRows.length > room) return { rows, truncated: true };
-      if (rows.length >= maxRows) return { rows, truncated: Boolean(next) };
+      // At an exact safety cap, completeness cannot be established even when the server omits a next link.
+      if (rows.length >= maxRows) return { rows, truncated: true };
     }
     return { rows, truncated: false };
   }
