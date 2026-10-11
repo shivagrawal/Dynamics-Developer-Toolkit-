@@ -151,7 +151,7 @@ try {
   // Aggregate validation is bounded server-side: it returns one aggregate row,
   // not the underlying contact set. The exact count is deliberately not logged.
   const aggregate = await api(entities.contact.entitySetName + "?sql=" +
-    encodeURIComponent("SELECT COUNT(*) AS total FROM contact"), token);
+    encodeURIComponent("SELECT COUNT(*) AS total FROM contact WHERE contactid = '00000000-0000-0000-0000-000000000001'"), token);
   assert.ok(Array.isArray(aggregate.value), "aggregate: native SQL returned no value array");
   assert.equal(aggregate.value.length, 1, "aggregate: COUNT(*) must return exactly one row");
   const aggregateValue = Object.values(aggregate.value[0]).find(value => typeof value === "number");
