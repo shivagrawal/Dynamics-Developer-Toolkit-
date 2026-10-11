@@ -49,6 +49,7 @@
   function safeIdentifier(value, maxLength = 100) {
     if (typeof value !== "string") return "";
     const text = value.trim();
+    if (/^(?:bearer|token|secret|authorization)[-_:]/i.test(text)) return "";
     return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(text) ? text.slice(0, maxLength) : "";
   }
 
@@ -60,6 +61,12 @@
   function safeWarning(value) {
     if (typeof value !== "string") return "";
     return value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 500);
+  }
+
+  function setOwn(target, key, value) {
+    Object.defineProperty(target, key, {
+      value, enumerable: true, writable: true, configurable: true
+    });
   }
 
   function uniqueKey(baseValue, used) {
@@ -132,7 +139,7 @@
             value = rawRow[column.descriptor.name];
           }
         }
-        row[column.descriptor.name] = value === undefined ? null : value;
+        setOwn(row, column.descriptor.name, value === undefined ? null : value);
       });
       return row;
     });
@@ -230,9 +237,9 @@
     const rows = normalized.rows.map(row => {
       const legacyRow = {};
       normalized.columns.forEach((column, index) => {
-        legacyRow[legacyColumns[index]] = isRecord(row) && Object.prototype.hasOwnProperty.call(row, column.name)
+        setOwn(legacyRow, legacyColumns[index], isRecord(row) && Object.prototype.hasOwnProperty.call(row, column.name)
           ? row[column.name]
-          : null;
+          : null);
       });
       return legacyRow;
     });
