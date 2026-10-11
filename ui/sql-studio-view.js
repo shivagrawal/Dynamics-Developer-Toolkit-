@@ -382,7 +382,7 @@
     } catch (_) {
       // The authoritative background SQL policy returns the parser diagnostic.
     }
-    if (parsedPlan?.hasOffset) {
+    if (parsedPlan?.hasOffset && !isSecurityAuditQuery(state.sql)) {
       await executeEngine(parsedPlan);
       return;
     }
