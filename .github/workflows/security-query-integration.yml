@@ -6,6 +6,7 @@ on:
       - feature/sql4cds-query-studio
     paths:
       - "security-audit-service.js"
+      - "sqlstudio/js/sql-engine.js"
       - "tests/query-studio/security-query-live.test.mjs"
       - ".github/workflows/security-query-integration.yml"
   workflow_dispatch:
