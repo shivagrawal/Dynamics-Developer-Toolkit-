@@ -300,3 +300,19 @@ The coordinator owns the shared contract and dispatch integration. SQL Engine ow
 7. Run the complete offline regression workflow and bounded live checks in the designated development/test environment; record the exact tested commit and distinguish infrastructure failures from semantic results.
 
 `main` remains protected and is not a target for this work. No implementation step is complete until its code/tests and commit evidence exist.
+
+
+## Implementation checkpoint — shared read-only gate
+
+The first implementation slice is committed on `feature/sql4cds-query-studio`:
+
+- `sqlstudio/js/sql-policy.js` — pure typed policy decisions, canonical engine parse for ordinary SQL, cross-provider plan limits, specialized security-query envelope, and pre-dispatch FetchXML validation.
+- `sqlstudio/js/sql-engine.js` — 20,000-token, 64 predicate-depth, 512 predicate-node, 8-join, and 1,000-value IN-list hard caps are enforced in the parser itself so direct parser/compiler callers cannot bypass them.
+- `background-entry.js` and `background.js` — load the shared gate in the extension worker and reject unsafe SQL / invalid FetchXML before injecting an execution bridge. Specialized routing is narrowed to named query shapes; the security/audit adapter retains its own detailed projection, join, predicate and paging checks.
+- `tests/query-studio/sql-policy.test.mjs` and `tests/query-studio/security-sql-routing.test.mjs` — adversarial policy cases and zero-dispatch assertions; the regression workflow includes the new policy suite.
+
+**Implemented limits:** SQL text 100,000 characters (existing), 20,000 tokens, predicate AST depth 64, 512 predicate nodes, 8 joins, 1,000 values per IN list, TOP/FETCH and OFFSET bounded to the existing 10,000-row ceiling, and compiled FetchXML 1,000,000 characters.
+
+**Not yet implemented as unified coordinator controls:** four concurrent top-level executions, a 120-second end-to-end deadline/cancellation, a 64 MiB serialized-result budget, and one request-scoped cancellation lifecycle. Do not treat these proposals as enforced limits. Existing provider-specific row/page caps remain in place but need unified result/truncation verification.
+
+**Verification status:** code and regression workflow updates are committed; the connected GitHub status interface has not returned a check result for these commits. Do not mark the policy issue complete until the updated offline workflow is observed passing and live Dataverse verification is recorded separately. Security/audit routes also require a valid-shape regression run after the tightened dispatcher matcher.
