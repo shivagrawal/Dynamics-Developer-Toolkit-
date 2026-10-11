@@ -17,7 +17,7 @@
 
   function tokenize(sql) {
     const out = []; let i = 0;
-    const add = (type, start, end) => out.push({type, value: sql.slice(start, end), start, end});
+    const add = (type, start, end) => { if (out.length >= 20000) { const error = Error("Query exceeds the 20,000 token limit."); error.code = "QUERY_LIMIT_EXCEEDED"; throw error; } out.push({type, value: sql.slice(start, end), start, end}); };
     while (i < sql.length) {
       const s = i, c = sql[i], n = sql[i+1];
       if (/\s/.test(c)) { i++; while (i < sql.length && /\s/.test(sql[i])) i++; continue; }
@@ -104,6 +104,7 @@
     else if (tokens[p] && tokens[p].type === "identifier" && !["WHERE","ORDER","INNER","LEFT","JOIN","ON"].includes(tokens[p].value.toUpperCase())) baseAlias=identifier();
     const joins=[];
     while (peek("INNER") || peek("LEFT") || peek("JOIN")) {
+      if (joins.length >= 8) { const error = Error("Query exceeds the maximum of 8 joins."); error.code = "QUERY_LIMIT_EXCEEDED"; throw error; }
       let kind="inner";
       if (peek("LEFT")) { take(); kind="outer"; if (peek("OUTER")) take(); expect("JOIN"); }
       else if (peek("INNER")) { take(); expect("JOIN"); }
@@ -125,6 +126,7 @@
       do { groupBy.push(qualified()); if (!peek(",")) break; take(); } while (true);
     }
     if (peek("HAVING")) fail("HAVING is not supported in this engine version.");
+    let predicateNesting = 0;
     function parsePredicate() {
       const negatePredicate = node => {
         if (node.type === "and" || node.type === "or") {
@@ -144,8 +146,8 @@
         fail("NOT cannot be applied to this predicate.");
       };
       const parseAtom=()=>{
-        if (peek("NOT")) { take(); return negatePredicate(parseAtom()); }
-        if (peek("(")) { take(); const node=parseOr(); expect(")"); return node; }
+        if (peek("NOT")) { take(); if (++predicateNesting > 64) { const error = Error("Predicate nesting exceeds the maximum depth of 64."); error.code = "QUERY_LIMIT_EXCEEDED"; throw error; } const node = negatePredicate(parseAtom()); predicateNesting--; return node; }
+        if (peek("(")) { take(); if (++predicateNesting > 64) { const error = Error("Predicate nesting exceeds the maximum depth of 64."); error.code = "QUERY_LIMIT_EXCEEDED"; throw error; } const node=parseOr(); expect(")"); predicateNesting--; return node; }
         const field=qualified();
         if (peek("IS")) { take(); const not=!!(peek("NOT")&&take()); expect("NULL"); return {type:"null",field,not}; }
         let not=false; if (peek("NOT")) { take(); not=true; }
@@ -155,7 +157,7 @@
           if (lower.type === "null" || upper.type === "null") fail("BETWEEN bounds cannot be NULL.");
           return {type:"between",field,lower,upper,not};
         }
-        if (peek("IN")) { take(); expect("("); const values=[]; do { values.push(literal()); if(!peek(","))break; take(); } while(true); expect(")"); if(values.some(value=>value.type==="null")) fail("NULL values in IN lists are not supported; handle NULL explicitly."); return {type:"in",field,values,not}; }
+        if (peek("IN")) { take(); expect("("); const values=[]; do { if (values.length >= 1000) { const error = Error("IN lists are limited to 1,000 values."); error.code = "QUERY_LIMIT_EXCEEDED"; throw error; } values.push(literal()); if(!peek(","))break; take(); } while(true); expect(")"); if(values.some(value=>value.type==="null")) fail("NULL values in IN lists are not supported; handle NULL explicitly."); return {type:"in",field,values,not}; }
         if (peek("LIKE")) { take(); const value=literal(); if(value.type!=="string") fail("LIKE requires a string literal."); return {type:"like",field,value:value.value,not}; }
         const op=take(); if (!OPS[op.value]) fail("Unsupported WHERE operator '" + op.value + "'.");
         const value=literal(); if(value.type==="null") fail("Use IS NULL or IS NOT NULL instead of comparing with NULL."); return {type:"compare",field,operator:OPS[op.value],value};
