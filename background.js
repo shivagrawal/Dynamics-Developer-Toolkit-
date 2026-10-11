@@ -1,7 +1,49 @@
 "use strict";
 
+const DEVLENS_QUERY_MAX_CONCURRENT = 4;
+const DEVLENS_QUERY_DEADLINE_MS = 120000;
+const DEVLENS_QUERY_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+let devLensActiveQueryExecutions = 0;
+
 function pageBridge(action, payload) {
   "use strict";
+
+  const queryExecution = action === "querySql" || action === "queryFetchXml" ? (() => {
+    const suppliedDeadline = Number(payload?.__devlensExecution?.deadlineAt);
+    const deadlineAt = Number.isFinite(suppliedDeadline) && suppliedDeadline > Date.now()
+      ? Math.min(suppliedDeadline, Date.now() + DEVLENS_QUERY_DEADLINE_MS)
+      : Date.now() + DEVLENS_QUERY_DEADLINE_MS;
+    const suppliedBytes = Number(payload?.__devlensExecution?.maxOutputBytes);
+    const maxOutputBytes = Number.isInteger(suppliedBytes) && suppliedBytes > 0
+      ? Math.min(suppliedBytes, DEVLENS_QUERY_MAX_OUTPUT_BYTES)
+      : DEVLENS_QUERY_MAX_OUTPUT_BYTES;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
+    return {
+      deadlineAt, maxOutputBytes, controller, timer, outputBytes: 0, outputLimitHit: false,
+      assertActive() {
+        if (controller.signal.aborted || Date.now() >= deadlineAt) {
+          controller.abort();
+          const error = Error("Query execution exceeded the 120-second deadline.");
+          error.code = "QUERY_TIMEOUT";
+          throw error;
+        }
+      },
+      reserveRow(row) {
+        this.assertActive();
+        let serialized;
+        try { serialized = JSON.stringify(row); } catch { serialized = ""; }
+        const estimatedBytes = typeof serialized === "string" ? serialized.length * 2 : 0;
+        if (this.outputBytes + estimatedBytes > this.maxOutputBytes) {
+          this.outputLimitHit = true;
+          return false;
+        }
+        this.outputBytes += estimatedBytes;
+        return true;
+      },
+      finish() { clearTimeout(timer); }
+    };
+  })() : null;
 
   const clean = (value) => (value ? String(value).replace(/[{}]/g, "") : null);
   const localizedLabel = (value) =>
@@ -796,7 +838,7 @@ function pageBridge(action, payload) {
     return columns.length ? [...new Set(columns)] : null;
   }
 
-  async function queryFetchXmlReadOnly(fetchXml, tableName, offsetValue = 0, limitValue = null) {
+  async function queryFetchXmlReadOnly(fetchXml, tableName, offsetValue = 0, limitValue = null, queryExecution = null) {
     if (typeof fetchXml !== "string" || !fetchXml.trim()) return { ok: false, error: "A compiled FetchXML query is required." };
     if (fetchXml.length > 1000000) return { ok: false, error: "Compiled query exceeds the 1,000,000 character limit." };
     const table = String(tableName || "").trim().toLowerCase();
@@ -842,10 +884,16 @@ function pageBridge(action, payload) {
         pageXml = setFetchAttribute(pageXml, "page", page);
         if (pagingCookie) pageXml = setFetchAttribute(pageXml, "paging-cookie", pagingCookie);
       }
+      queryExecution?.assertActive();
       const result = await Xrm.WebApi.retrieveMultipleRecords(table, "?fetchXml=" + pageXml, 5000);
+      queryExecution?.assertActive();
       const pageEntities = Array.isArray(result?.entities) ? result.entities : [];
-      entities.push(...pageEntities);
+      for (const entity of pageEntities) {
+        if (queryExecution && !queryExecution.reserveRow(entity)) break;
+        entities.push(entity);
+      }
       pagesFetched++;
+      if (queryExecution?.outputLimitHit) { moreRecords = true; break; }
       if (hasTop) { moreRecords = !!result?.nextLink; break; }
       const nextCookie = decodePagingCookie(result?.fetchXmlPagingCookie);
       if (limit !== null && entities.length >= offset + limit) {
@@ -873,10 +921,10 @@ function pageBridge(action, payload) {
       }
       return cleanRow;
     });
-    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, rowsFetched: entities.length, pagesFetched, moreRecords: hasTop || limit !== null ? false : moreRecords };
+    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, rowsFetched: entities.length, pagesFetched, moreRecords: queryExecution?.outputLimitHit ? true : hasTop || limit !== null ? false : moreRecords, truncated: !!queryExecution?.outputLimitHit || (!hasTop && limit === null && moreRecords) };
   }
 
-  async function querySqlReadOnly(sql) {
+  async function querySqlReadOnly(sql, queryExecution = null) {
     if (typeof sql !== "string" || !sql.trim()) return { ok: false, error: "Enter a SELECT query." };
     if (sql.length > 100000) return { ok: false, error: "Query exceeds the 100,000 character limit." };
     const query = sql.trim();
@@ -887,16 +935,21 @@ function pageBridge(action, payload) {
     if (!match) return { ok: false, error: "Could not identify the base table after FROM." };
     const tableName = match[1].split(".").pop().replace(/^[\[\"]|[\]\"]$/g, "");
     const expectedProjection = simpleSqlProjection(query);
+    queryExecution?.assertActive();
     const ctx = await context({ requireEntity: false, requireForm: false });
+    queryExecution?.assertActive();
     const metadata = await Xrm.Utility.getEntityMetadata(tableName);
+    queryExecution?.assertActive();
     if (!metadata?.EntitySetName) return { ok: false, error: "Dataverse did not return an entity set for " + tableName + "." };
     const endpoint = new URL("/api/data/v9.2/" + metadata.EntitySetName, ctx.clientUrl);
     endpoint.searchParams.set("sql", query);
     const result = await fetchJson(endpoint.toString(), {
       method: "GET",
       headers: { Prefer: 'odata.include-annotations="*"' },
-      cache: "no-store"
+      cache: "no-store",
+      ...(queryExecution ? { signal: queryExecution.controller.signal } : {})
     });
+    queryExecution?.assertActive();
     const maxRows = 10000;
     const maxPages = 100;
     const rawRows = [];
@@ -905,13 +958,19 @@ function pageBridge(action, payload) {
     const appendPageRows = pageRows => {
       const rows = Array.isArray(pageRows) ? pageRows : [];
       const remaining = maxRows - rawRows.length;
-      rawRows.push(...rows.slice(0, Math.max(0, remaining)));
-      if (rows.length > remaining) truncated = true;
+      let added = 0;
+      for (const row of rows.slice(0, Math.max(0, remaining))) {
+        if (queryExecution && !queryExecution.reserveRow(row)) { truncated = true; break; }
+        rawRows.push(row);
+        added++;
+      }
+      if (rows.length > remaining || added < Math.min(rows.length, Math.max(0, remaining))) truncated = true;
     };
     appendPageRows(result.value);
     const seenPageLinks = new Set();
     let pagesFetched = 1;
-    while (nextLink && rawRows.length < maxRows && pagesFetched < maxPages) {
+    while (nextLink && rawRows.length < maxRows && pagesFetched < maxPages && !queryExecution?.outputLimitHit) {
+      queryExecution?.assertActive();
       if (seenPageLinks.has(nextLink)) throw Error("Dataverse returned a repeated paging link; query execution stopped safely.");
       seenPageLinks.add(nextLink);
       const pageUrl = new URL(nextLink, ctx.clientUrl);
@@ -922,8 +981,10 @@ function pageBridge(action, payload) {
       const page = await fetchJson(pageUrl.toString(), {
         method: "GET",
         headers: { Prefer: 'odata.include-annotations="*"' },
-        cache: "no-store"
+        cache: "no-store",
+        ...(queryExecution ? { signal: queryExecution.controller.signal } : {})
       });
+      queryExecution?.assertActive();
       appendPageRows(page.value);
       nextLink = page["@odata.nextLink"] || null;
       pagesFetched++;
@@ -1561,17 +1622,17 @@ function pageBridge(action, payload) {
                 : action === "processExplorer"
                 ? surfaceContext({ requireEntity: true, requireForm: false }).then((ctx) => processExplorer(ctx, !!payload?.force))
               : action === "queryFetchXml"
-          ? queryFetchXmlReadOnly(payload?.fetchXml, payload?.tableName, payload?.offset, payload?.limit)
+          ? queryFetchXmlReadOnly(payload?.fetchXml, payload?.tableName, payload?.offset, payload?.limit, queryExecution)
           : action === "querySql"
-          ? querySqlReadOnly(payload?.sql)
+          ? querySqlReadOnly(payload?.sql, queryExecution)
           : action === "tool"
                 ? tool(payload || {})
                 : Promise.resolve({ ok: false, error: "Unknown action" });
   return task.catch((error) => ({
     ok: false,
-    ...(error?.code === "PROVIDER_CAPABILITY_REJECTION" ? { code: "PROVIDER_CAPABILITY_REJECTION" } : {}),
-    error: error.message || String(error),
-  }));
+    ...(queryExecution?.controller.signal.aborted || error?.code === "QUERY_TIMEOUT" ? { code: "QUERY_TIMEOUT" } : error?.code === "PROVIDER_CAPABILITY_REJECTION" ? { code: "PROVIDER_CAPABILITY_REJECTION" } : {}),
+    error: queryExecution?.controller.signal.aborted || error?.code === "QUERY_TIMEOUT" ? "Query execution exceeded the 120-second deadline." : error.message || String(error),
+  })).finally(() => queryExecution?.finish());
 }
 
 function stripSqlLiteralsAndComments(sql) {
@@ -1705,6 +1766,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       return;
     }
   }
+  const isQueryExecution = message.action === "querySql" || message.action === "queryFetchXml";
+  if (isQueryExecution && devLensActiveQueryExecutions >= DEVLENS_QUERY_MAX_CONCURRENT) {
+    reply({ ok: false, code: "QUERY_CONCURRENCY_LIMIT", error: "Query Studio already has four queries executing. Wait for one to finish before starting another." });
+    return;
+  }
+  if (isQueryExecution) devLensActiveQueryExecutions++;
+  const executionPayload = isQueryExecution
+    ? { ...(message.payload || {}), __devlensExecution: { deadlineAt: Date.now() + DEVLENS_QUERY_DEADLINE_MS, maxOutputBytes: DEVLENS_QUERY_MAX_OUTPUT_BYTES } }
+    : (message.payload || {});
   const securitySql = message.action === "querySql" &&
     isSecuritySqlCandidate(message.payload?.sql) && isSupportedSecuritySqlShape(message.payload?.sql) &&
     typeof devLensSecurityAuditBridge === "function";
@@ -1714,8 +1784,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       world: "MAIN",
       func: securitySql ? devLensSecurityAuditBridge : pageBridge,
       args: securitySql
-        ? ["sqlQuery", { sql: message.payload.sql }]
-        : [message.action, message.payload || {}],
+        ? ["sqlQuery", { ...executionPayload, sql: message.payload.sql }]
+        : [message.action, executionPayload],
     })
     .then((results) =>
       reply(
@@ -1726,7 +1796,10 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           },
       ),
     )
-    .catch((error) => reply({ ok: false, error: error.message }));
+    .catch((error) => reply({ ok: false, error: error.message }))
+    .finally(() => {
+      if (isQueryExecution) devLensActiveQueryExecutions = Math.max(0, devLensActiveQueryExecutions - 1);
+    });
   return true;
 });
 
