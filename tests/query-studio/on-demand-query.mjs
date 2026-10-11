@@ -111,7 +111,8 @@ try {
   const nativeProjectedRows = nativeResult.value.map(row => Object.fromEntries(
     requestedColumns.map(column => {
       const actualKey = Object.keys(row).find(key => key.toLowerCase() === column);
-      return [column, actualKey === undefined ? null : row[actualKey]];
+      assert.notEqual(actualKey, undefined, "Native SQL row omitted requested column: " + column);
+      return [column, row[actualKey]];
     })
   ));
   assert.ok(nativeProjectedRows.every(row => Object.keys(row).every(key => requestedColumns.includes(key))),
