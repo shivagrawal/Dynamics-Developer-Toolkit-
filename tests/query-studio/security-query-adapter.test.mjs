@@ -468,8 +468,8 @@ test("audit detail calls use the documented bound-function URL syntax", async ()
   assert.equal(result.ok, true, result.error || "Audit query failed.");
   const detailCalls = bridge.calls.filter(path => path.includes("RetrieveAuditDetails"));
   assert.ok(detailCalls.length > 0, "Expected the audit adapter to retrieve audit details.");
-  assert.ok(detailCalls.every(path => path.endsWith("RetrieveAuditDetails()")),
-    "RetrieveAuditDetails must be invoked as an OData function with parentheses.");
+  assert.ok(detailCalls.every(path => /RetrieveAuditDetails$/.test(path)),
+    "RetrieveAuditDetails must use the documented bound-function URL without parentheses.");
 });
 
 test("audit detail expansion uses bounded concurrency and preserves all changed attributes", async () => {
