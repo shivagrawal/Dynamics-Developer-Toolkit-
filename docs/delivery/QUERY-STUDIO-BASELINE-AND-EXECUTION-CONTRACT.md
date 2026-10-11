@@ -19,6 +19,8 @@ This section supersedes older workflow counts below when describing the current 
 
 The offline gate and live security/audit gate are green for the recorded checkpoint. Release acceptance is **not yet complete**: broader live NULL/join-cardinality/ordering/paging/aggregate/empty-result verification remains incomplete; shared deadline/cancellation/concurrency/buffer controls are not proven enforced; and a final integrated-commit verification is still required after remaining changes.
 
+**Post-checkpoint verification work (pending CI evidence):** the branch now contains `tests/query-studio/live-semantic-matrix.mjs`, which adds bounded live checks for ordered simple projection, `IS NULL`, `IS NOT NULL`, `LIKE`, an empty primary-key result, contact/account LEFT JOIN projection/cardinality parity, and a bounded primary-key `COUNT(*)` probe across native SQL and FetchXML where applicable. The Dataverse on-demand workflow was updated to execute this matrix and the offline workflow syntax-checks it. These are test additions, **not test results**: do not mark them passing until a run on the resulting commit completes and its logs are inspected. This matrix does not yet prove real OFFSET/FETCH page-boundary behavior or full join unmatched-row/null-extension semantics.
+
 ### Contract reconciliation rules
 
 - Canonical provider identifiers remain `native-sql`, `fetchxml`, and `security-audit`. Existing legacy provider labels may be accepted at an adapter boundary for compatibility, but must be mapped to these canonical identifiers before they are represented as canonical results. Do not change current callers without a compatibility test.
