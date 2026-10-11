@@ -17,9 +17,9 @@ This matrix distinguishes four kinds of evidence:
 
 The baseline contract records workflow [run 38128383227](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38128383227), commit `fd068b920af1e86efed839b8c53477e489e35322`, as **111 passed, 0 failed, 0 skipped**, with JavaScript syntax and manifest validation passing. This is historical evidence for that commit, not a fresh run of the current branch. The contract says the latest offline workflow does not call Dataverse. It also records an earlier native SQL smoke/general integration pass and a later security/audit live run that failed with `ETIMEDOUT`; the latter is an infrastructure failure, not evidence of semantic correctness.
 
-The workflow command and file list below were verified from `.github/workflows/query-studio-regression.yml`. The matrix maps capabilities to test files and concrete observed assertions where reviewed; it does not claim exhaustive inspection of every test in every file.
+The workflow command and file list below were verified from `.github/workflows/query-studio-regression.yml` on the current feature branch. The branch now includes `tests/query-studio/sql-policy.test.mjs`; this update incorporates it and the policy syntax check. The matrix maps capabilities to test files and concrete observed assertions where reviewed; it does not claim exhaustive inspection of every test in every file.
 
-## 2. Current offline test inventory
+## 2. Current offline test inventory (8 suites)
 
 | Test file | Observed responsibility/evidence | Limits and additions |
 |---|---|---|
@@ -29,6 +29,7 @@ The workflow command and file list below were verified from `.github/workflows/q
 | `tests/query-studio/security-query-corpus.test.mjs` | Fixture metadata for security views; compiler checks for two supported generic query shapes; explicit rejection of CASE/ISNULL/aggregate/OPENJSON forms delegated to specialized adapters. | Offline compilation is not proof that adapter data matches native SQL4CDS semantics. Maintain negative variants for near-match/unsupported query shapes. |
 | `tests/query-studio/security-query-adapter.test.mjs` | Mocked bridge covers security and audit retrieval. Observed negative safety assertions include cross-origin metadata paging rejection, repeated next-link rejection, and a 10,000-row metadata cap. The harness also exposes duplicate, bulk, privilege-depth and audit-detail cases. | Verify every cap and edge fixture has an explicit assertion; add canonical output/error assertions and permission/throttle/timeout simulation. |
 | `tests/query-studio/security-sql-routing.test.mjs` | Detects six named security SQL shapes; avoids routing ordinary SQL when security table names appear in strings/comments; asserts specialized bridge dispatch for security SQL and native bridge dispatch for ordinary SQL. | Add provider decision reason codes, malformed/multi-statement adversarial cases, and assertions that fallback never occurs after auth, authorization, transport, timeout, throttling or data errors. |
+| `tests/query-studio/sql-policy.test.mjs` | Exercises the shared policy gate: read-only SELECT, write and stacked-statement rejection, malformed quote rejection, quoted semicolons, parser failure fail-closed behavior, join/depth/token/IN-list bounds, specialized security-query envelope, and FetchXML table/write/length checks. | Add provider-call-zero assertions for every rejected input at every entry point; test all six security adapter shapes end-to-end; exercise comment/bracket edge cases and ensure AST limits traverse every relevant node. Structural FetchXML validation and time/memory controls are not established by these tests. |
 | `tests/query-studio/sql-studio-ui.test.mjs` | Included in the workflow; baseline contract attributes UI result paging/export and metadata retention coverage to the UI/regression suites. | Confirm null display/export, truncation labeling, error normalization, paging boundaries and compatibility with string column-name consumers. |
 | `tests/query-studio/on-demand-query.mjs` | Workflow performs a JavaScript syntax check on the live-query harness. | Syntax validation is not a live test. Record environment, query set, assertions, commit and result for actual live runs. |
 
@@ -59,7 +60,7 @@ node --test \
   tests/query-studio/sql-studio-ui.test.mjs
 ```
 
-Run from the repository root with the workflow's Node.js 24 runtime for comparable CI evidence. Capture the actual commit SHA, command, exit status, pass/fail/skip counts and workflow URL. Do not copy the historical 111/0/0 result as the result of a new run.
+Run from the repository root with the workflow's Node.js 24 runtime for comparable CI evidence. The exact workflow command also includes `tests/query-studio/sql-policy.test.mjs`; the command above reflects the current workflow suite. Capture the actual commit SHA, command, exit status, pass/fail/skip counts and workflow URL. Do not copy the historical 111/0/0 result as the result of a new run.
 
 ## 3. Capability-to-test matrix
 
