@@ -409,7 +409,7 @@
     state.error = "";
     state.results = null;
     state.pageIndex = 0;
-    state.lastQuery = state.sql + "  [JavaScript SQL engine]";
+    state.lastQuery = state.sql + "  [FetchXML compatibility route]";
     state.status = "Planning SQL and loading metadata…";
     const started = performance.now();
     render();
