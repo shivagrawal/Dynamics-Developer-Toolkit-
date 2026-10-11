@@ -8,18 +8,20 @@
 
 This section supersedes older workflow counts below when describing the current integrated branch. Historical evidence remains historical.
 
-- Feature branch checkpoint: `2729fca5bbf6e71814437e2cca39ca75fac6f072`.
-- Offline regression: [run 38149849727](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38149849727), exact checkpoint SHA, **187 passed, 0 failed, 0 skipped**.
-- Live security/audit: [run 38149849692](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38149849692), exact checkpoint SHA, **12 passed, 0 failed, 1 skipped**. The skip is the salesorder metadata case unavailable in this environment. The disposable audit fixture exercised RetrieveAuditDetails and removed its temporary account in cleanup.
-- Live native SQL / FetchXML smoke: [run 38149720136](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38149720136), predecessor code-equivalent SHA `31efca73ec4465988ee06378af0338519fec9805`; bounded contact/account LEFT JOIN returned matching five-row results on both paths. This is not a full semantic matrix and is not an exact-HEAD run.
-- Protected `main` remains at `ac139117a2651e94fbdf368c5ae50ad0590821da`; no merge is authorized by this checkpoint.
+- Current integrated feature SHA: `e0b505f80ed5b9d71fd425219f2084e9cfa4a413`.
+- Offline regression: [run 38156100708](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156100708), exact SHA `e0b505f80ed5b9d71fd425219f2084e9cfa4a413`, **189 passed, 0 failed, 0 skipped**.
+- Live semantic matrix: [run 38156100763](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156100763), exact same SHA, **passed**. It verified simple projection/order, NULL and NOT NULL predicates, LIKE, empty results, LEFT JOIN cardinality parity, bounded COUNT, two FetchXML OFFSET/FETCH pages of five rows with zero overlap, and LEFT JOIN null-extension for a deterministic unmatched join. Values and aggregate counts were omitted from logs.
+- Live security/audit integration: [run 38156018818](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156018818), SHA `f77e015fcc57d9ee2ce3a37f26c9177f21adb62c`, **passed**. This run is on the immediately preceding code commit before subsequent test-only edits; inspect a new run if security/audit code changes.
+- Dataverse environment integration: [run 38156018839](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156018839), SHA `f77e015fcc57d9ee2ce3a37f26c9177f21adb62c`, **passed**.
+- Live native OFFSET/FETCH probe showed the native SQL endpoint returned more rows than the requested FETCH NEXT bound: [run 38155846050](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38155846050). Query Studio now routes parsed OFFSET/FETCH statements directly through the bounded FetchXML path; a regression test verifies the native SQL provider is not called for that syntax.
+- Branch reconciliation: feature is 0 commits behind `main`; PR #1 is mergeable but remains draft. Protected `main` remains at `ac139117a2651e94fbdf368c5ae50ad0590821da` and has not been modified by this work.
 - **Persistent environment side effect:** the live audit test enables organization auditing, account-table auditing, and account-description auditing where needed, and intentionally leaves them enabled. Do not automatically revert these settings without an explicit environment decision.
 
 ### Current release status
 
-The offline gate and live security/audit gate are green for the recorded checkpoint. Release acceptance is **not yet complete**: broader live NULL/join-cardinality/ordering/paging/aggregate/empty-result verification remains incomplete; shared deadline/cancellation/concurrency/buffer controls are not proven enforced; and a final integrated-commit verification is still required after remaining changes.
+The integrated offline regression and live semantic matrix are green on `e0b505f80ed5b9d71fd425219f2084e9cfa4a413`. Security/audit and environment integration were green on the immediately preceding code commit `f77e015fcc57d9ee2ce3a37f26c9177f21adb62c`; the subsequent changes were confined to test files. Release acceptance is **not yet complete** because the shared deadline, cancellation, concurrency, and output-buffer controls remain unverified at the authoritative coordinator boundary, and a final release-gate review is still required.
 
-**Post-checkpoint verification work (pending CI evidence):** the branch now contains `tests/query-studio/live-semantic-matrix.mjs`, which adds bounded live checks for ordered simple projection, `IS NULL`, `IS NOT NULL`, `LIKE`, an empty primary-key result, contact/account LEFT JOIN projection/cardinality parity, and a bounded primary-key `COUNT(*)` probe across native SQL and FetchXML where applicable. The Dataverse on-demand workflow was updated to execute this matrix and the offline workflow syntax-checks it. These are test additions, **not test results**: do not mark them passing until a run on the resulting commit completes and its logs are inspected. This matrix does not yet prove real OFFSET/FETCH page-boundary behavior or full join unmatched-row/null-extension semantics.
+**OFFSET/FETCH capability decision from live evidence:** the native Dataverse SQL endpoint did not enforce the requested row bound in the live probe. The UI therefore routes this syntax to FetchXML rather than trusting native SQL. FetchXML page/count can represent only exact page boundaries in this compiler; a missing FETCH NEXT or non-aligned offset is rejected rather than silently changing SQL semantics. The current live matrix verifies aligned page 1 and page 2 behavior. This is a tested capability-specific route, not generic fallback on an error.
 
 ### Contract reconciliation rules
 
@@ -115,6 +117,7 @@ Decision requirements:
 4. Keep named security/audit shapes routed to their dedicated adapter until equivalent generic execution is proven.
 5. Never use regex-only matching as the security gate. A specialized adapter must validate the exact projection, predicates, joins, grouping/order semantics it implements.
 6. Do not fetch unbounded datasets to emulate unsupported SQL locally.
+7. Route OFFSET/FETCH through the bounded FetchXML provider, not the native Dataverse SQL endpoint: live evidence showed the endpoint can return more rows than FETCH NEXT requests. The FetchXML compiler accepts only bounded, exact page boundaries (`offset % fetch === 0`) and rejects missing FETCH NEXT or non-aligned offsets rather than silently changing results. Evidence: [live semantic matrix](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156100763) and [native endpoint bound failure](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38155846050).
 
 ### 4.3 Canonical execution result
 
