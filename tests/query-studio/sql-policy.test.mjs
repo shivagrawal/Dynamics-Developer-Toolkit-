@@ -162,6 +162,40 @@ test("structurally malformed FetchXML is rejected at the background boundary bef
   }
 });
 
+test("background SQL dispatch rejects adversarial statements before any provider call", async () => {
+  const backgroundSource = await readFile(new URL("../../background.js", import.meta.url), "utf8");
+  let listener;
+  const providerCalls = [];
+  const chrome = {
+    runtime: { onMessage: { addListener: fn => { listener = fn; } } },
+    commands: { onCommand: { addListener: () => {} } },
+    scripting: {
+      executeScript: options => {
+        providerCalls.push(options);
+        return Promise.resolve([{ result: { ok: true, rows: [], columns: [] } }]);
+      }
+    },
+    tabs: {}
+  };
+  const context = { chrome, DevLensSqlEngine: engine, DevLensSqlPolicy: policy, console, URL, setTimeout, clearTimeout };
+  vm.runInNewContext(backgroundSource, context, { filename: "background.js" });
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const rejectedSql = [
+    "DELETE FROM contact",
+    "SELECT fullname FROM contact; DELETE FROM contact",
+    "SELECT fullname FROM contact UNION SELECT name FROM account",
+    "SELECT fullname FROM contact WHERE fullname = 'unterminated",
+    "SELECT fullname FROM contact INTO archive"
+  ];
+
+  for (const sql of rejectedSql) {
+    const result = await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql } });
+    assert.equal(result.ok, false, sql);
+    assert.ok(["SQL_SYNTAX", "SQL_UNSUPPORTED", "READ_ONLY_POLICY", "QUERY_LIMIT_EXCEEDED"].includes(result.code), sql + ": unexpected rejection code " + result.code);
+    assert.equal(providerCalls.length, 0, sql + ": unsafe SQL reached the provider dispatch boundary");
+  }
+});
+
 test("unexpected parser failure fails closed with no plan", () => {
   const brokenEngine = { parse() { throw new Error("unexpected parser fault"); }, tokenize: engine.tokenize };
   const result = policy.evaluate("SELECT fullname FROM contact", brokenEngine);
