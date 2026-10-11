@@ -162,6 +162,7 @@
     const stack = [];
     let rootName = null;
     let rootEntity = null;
+    let rootEntityCount = 0;
     let rootClosed = false;
     let i = 0;
     const namePattern = /^[A-Za-z_][A-Za-z0-9_.:-]*/;
@@ -242,7 +243,9 @@
         cursor = end + 1;
       }
       if (cursor > xml.length || xml[cursor - 1] !== ">" || (xml[cursor - 2] === "/" && !selfClosing)) return null;
-      if (parent === rootName && name.toLowerCase() === "entity" && rootEntity === null) {
+      if (parent === rootName && name.toLowerCase() === "entity") {
+        rootEntityCount++;
+        if (rootEntityCount > 1) return null;
         rootEntity = attributes.name || null;
       }
       if (["update", "delete", "create", "upsert", "insert"].includes(name.toLowerCase())) return null;
@@ -251,6 +254,7 @@
       i = cursor;
     }
     if (!rootName || !rootClosed || stack.length) return null;
+    if (rootEntityCount !== 1) return null;
     return { root: rootName.toLowerCase(), entity: rootEntity };
   }
 
