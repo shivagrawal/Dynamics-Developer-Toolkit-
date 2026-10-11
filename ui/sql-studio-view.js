@@ -392,7 +392,7 @@
           return;
         }
         const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(response || { code: "INTERNAL" });
-        throw new Error(safeError?.message || response?.error || "Query failed.");
+        throw Object.assign(new Error(safeError?.message || response?.error || "Query failed."), { code: safeError?.code || response?.code, category: safeError?.category });
       }
       state.ctx = { clientUrl: response.clientUrl, environmentId: response.environmentId, currentUser: response.currentUser };
       state.durationMs = Math.round(performance.now() - started);
@@ -447,7 +447,7 @@
       const response = await api.send("queryFetchXml", { tableName: plan.table, fetchXml: compiled.fetchXml, offset: plan.offset, limit: plan.fetch });
       if (!response?.ok) {
         const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(response || { code: "INTERNAL" });
-        throw new Error(safeError?.message || response?.error || "Compiled FetchXML execution failed.");
+        throw Object.assign(new Error(safeError?.message || response?.error || "Compiled FetchXML execution failed."), { code: safeError?.code || response?.code, category: safeError?.category });
       }
       const sourceRows = response.rows || [];
       const projections = compiled.resultColumns || (plan.columns.some(column => column.star)
