@@ -11,7 +11,7 @@ const AUDIT_ID = "33333333-3333-4333-8333-333333333333";
 
 function createBridge(options = {}) {
   const calls = [];
-  let activeAuditDetails = 0, maxConcurrentAuditDetails = 0;
+  let activeAuditDetails = 0, maxConcurrentAuditDetails = 0, entityPageIndex = 0;
   const mockFetch = async input => {
     const url = new URL(String(input));
     const path = url.pathname.split("/api/data/v9.2/")[1] + url.search;
@@ -44,6 +44,8 @@ function createBridge(options = {}) {
         });
         body = { value: accessRows };
       }
+    } else if (path.startsWith("EntityDefinitions?")) {
+      body = options.entityDefinitionsPages?.[entityPageIndex++] ?? { value: [] };
     } else if (path.startsWith("audits?")) {
       const audit = {
         auditid: AUDIT_ID,
@@ -77,7 +79,12 @@ function createBridge(options = {}) {
     console, setTimeout, clearTimeout
   };
   vm.runInNewContext(source, context, { filename: "security-audit-service.js" });
-  return { run: sql => context.devLensSecurityAuditBridge("sqlQuery", { sql }), calls, get maxConcurrentAuditDetails() { return maxConcurrentAuditDetails; } };
+  return {
+    run: sql => context.devLensSecurityAuditBridge("sqlQuery", { sql }),
+    runAction: (action, params = {}) => context.devLensSecurityAuditBridge(action, params),
+    calls,
+    get maxConcurrentAuditDetails() { return maxConcurrentAuditDetails; }
+  };
 }
 
 const queries = {
@@ -121,6 +128,49 @@ CROSS APPLY OPENJSON(a.changedata, '$.changedAttributes') WITH (logicalname NVAR
 LEFT JOIN systemuser u ON a.userid = u.systemuserid
 WHERE a.objectid = '33333333-3333-4333-8333-333333333333' ORDER BY a.createdon DESC`
 };
+
+test("metadata paging rejects a cross-origin next link without following it", async () => {
+  const bridge = createBridge({
+    entityDefinitionsPages: [{
+      value: [],
+      "@odata.nextLink": "https://attacker.example/api/data/v9.2/EntityDefinitions?$skiptoken=bad"
+    }]
+  });
+  const result = await bridge.runAction("tables");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /outside the current environment/i);
+  assert.equal(bridge.calls.length, 1);
+});
+
+test("metadata paging stops safely on repeated next links", async () => {
+  const nextLink = BASE + "/api/data/v9.2/EntityDefinitions?$skiptoken=repeat";
+  const bridge = createBridge({
+    entityDefinitionsPages: [
+      { value: [], "@odata.nextLink": nextLink },
+      { value: [], "@odata.nextLink": nextLink }
+    ]
+  });
+  const result = await bridge.runAction("tables");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /repeated paging link/i);
+  assert.equal(bridge.calls.length, 2);
+});
+
+test("metadata paging rejects more than 10,000 rows rather than silently returning a partial catalog", async () => {
+  const bridge = createBridge({
+    entityDefinitionsPages: [{
+      value: Array.from({ length: 10001 }, (_, index) => ({
+        LogicalName: "table" + index,
+        SchemaName: "Table" + index,
+        ObjectTypeCode: index,
+        EntitySetName: "table" + index
+      }))
+    }]
+  });
+  const result = await bridge.runAction("tables");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /10,000-row safety limit/i);
+});
 
 test("security query 1 returns role membership and business unit even with a leading SQL comment", async () => {
   const result = await createBridge().run("/* outer /* nested */ still outer */ -- Gets all roles for the user's BU\n" + queries.userRoles);
