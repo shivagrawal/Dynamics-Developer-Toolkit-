@@ -356,7 +356,8 @@ test("live audit adapter expands a disposable record's actual audited attribute 
       rowCount: result.rowCount,
       eventTypes: [...new Set(result.rows.map(row => row.Event))],
       attributeNames: [...new Set(result.rows.map(row => row.logicalname))].slice(0, 30),
-      fixtureAuditListCalls: bridge.calls.filter(path => path.startsWith("audits?") && path.includes(accountId)).length,
+      auditListCalls: bridge.calls.filter(path => path.includes("/audits?")).length,
+      fixtureAuditListCalls: bridge.calls.filter(path => path.includes("/audits?") && path.toLowerCase().includes(accountId.toLowerCase())).length,
       descriptionRows: result.rows.filter(row => row.logicalname === "description").map(row => ({
         event: row.Event, oldPresent: row.oldvalue != null, newPresent: row.newvalue != null,
         oldType: typeof row.oldvalue, newType: typeof row.newvalue,
