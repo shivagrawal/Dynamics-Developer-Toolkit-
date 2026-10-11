@@ -8,9 +8,9 @@
 
 This section supersedes older workflow counts below when describing the current integrated branch. Historical evidence remains historical.
 
-- Latest verified code/test checkpoint SHA: `e0b505f80ed5b9d71fd425219f2084e9cfa4a413`; subsequent commits in this sequence update delivery documentation only.
-- Latest completed offline regression: [run 38156199548](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156199548), SHA `b2b669ef9bd7979d05d2c1c190d60dc2a639b0c6`, **189 passed, 0 failed, 0 skipped**; later changes were documentation-only.
-- Live semantic matrix: [run 38156100763](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156100763), exact same SHA, **passed**. It verified simple projection/order, NULL and NOT NULL predicates, LIKE, empty results, LEFT JOIN cardinality parity, bounded COUNT, two FetchXML OFFSET/FETCH pages of five rows with zero overlap, and LEFT JOIN null-extension for a deterministic unmatched join. Values and aggregate counts were omitted from logs.
+- Latest verified application-code/test checkpoint SHA: `af432855b49872d91e3f73c94c8b6e6cc6a4c0a8`; subsequent commits in this sequence update delivery documentation only.
+- Latest completed offline regression: [run 38156403515](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156403515), exact SHA `af432855b49872d91e3f73c94c8b6e6cc6a4c0a8`, **190 passed, 0 failed, 0 skipped**.
+- Live semantic matrix: [run 38156387008](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156387008), SHA `25ee4dc97215565d6a9c5c44c0a89648c7a8eef7`, **passed**. It verified simple projection/order, NULL and NOT NULL predicates, LIKE, empty results, LEFT JOIN cardinality parity, bounded COUNT, two FetchXML OFFSET/FETCH pages of five rows with zero overlap, and LEFT JOIN null-extension for a deterministic unmatched join. The later `af432855` change adds a security-route guard and test. Values and aggregate counts were omitted from logs.
 - Live security/audit integration: [run 38156018818](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156018818), SHA `f77e015fcc57d9ee2ce3a37f26c9177f21adb62c`, **passed**. This run is on the immediately preceding code commit before subsequent test-only edits; inspect a new run if security/audit code changes.
 - Dataverse environment integration: [run 38156018839](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156018839), SHA `f77e015fcc57d9ee2ce3a37f26c9177f21adb62c`, **passed**.
 - Live native OFFSET/FETCH probe showed the native SQL endpoint returned more rows than the requested FETCH NEXT bound: [run 38155846050](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38155846050). Query Studio now routes parsed OFFSET/FETCH statements directly through the bounded FetchXML path; a regression test verifies the native SQL provider is not called for that syntax.
@@ -69,7 +69,7 @@ The current offline suite covers:
 | Read-only bounds and fail-closed parsing | Present in multiple layers | One shared policy gate before every provider |
 | Unified automatic execution coordinator | Not complete | Introduce agreed request/decision/result/error contracts |
 | Advanced SQL compatibility | Partial/not supported for several constructs | Add features one by one with fixtures and live evidence |
-| Bounded live semantic matrix | Listed cases passed on `e0b505f`; broader compatibility remains incomplete | Add more capability-specific fixtures and keep infrastructure failures distinct |
+| Bounded live semantic matrix | Listed cases passed on `25ee4dc`; broader compatibility remains incomplete | Add more capability-specific fixtures and keep infrastructure failures distinct |
 
 ## 3. Proposed architecture
 
@@ -117,7 +117,7 @@ Decision requirements:
 4. Keep named security/audit shapes routed to their dedicated adapter until equivalent generic execution is proven.
 5. Never use regex-only matching as the security gate. A specialized adapter must validate the exact projection, predicates, joins, grouping/order semantics it implements.
 6. Do not fetch unbounded datasets to emulate unsupported SQL locally.
-7. Route OFFSET/FETCH through the bounded FetchXML provider, not the native Dataverse SQL endpoint: live evidence showed the endpoint can return more rows than FETCH NEXT requests. The FetchXML compiler accepts only bounded, exact page boundaries (`offset % fetch === 0`) and rejects missing FETCH NEXT or non-aligned offsets rather than silently changing results. Evidence: [live semantic matrix](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156100763) and [native endpoint bound failure](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38155846050).
+7. Route OFFSET/FETCH through the bounded FetchXML provider, not the native Dataverse SQL endpoint: live evidence showed the endpoint can return more rows than FETCH NEXT requests. The FetchXML compiler accepts only bounded, exact page boundaries (`offset % fetch === 0`) and rejects missing FETCH NEXT or non-aligned offsets rather than silently changing results. Evidence: [live semantic matrix](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156387008) and [native endpoint bound failure](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38155846050).
 
 ### 4.3 Canonical execution result
 
