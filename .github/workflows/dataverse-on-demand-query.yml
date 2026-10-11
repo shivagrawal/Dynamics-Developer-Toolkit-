@@ -17,7 +17,7 @@ on:
         description: "Read-only SQL query. Must use SELECT TOP N (N 1–25); only account/contact/systemuser tables. Do not enter sensitive values."
         required: true
         type: string
-        default: "SELECT TOP 25 systemuserid, fullname FROM systemuser WHERE fullname LIKE '%dataverse%'"
+        default: "SELECT TOP 25 systemuserid, fullname FROM systemuser WHERE fullname LIKE '%dataverse%' ORDER BY systemuserid"
 
 permissions:
   contents: read

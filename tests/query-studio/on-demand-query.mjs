@@ -140,7 +140,8 @@ try {
   // For the simple single-table projection used by the default smoke query,
   // compare actual returned values across the native SQL and FetchXML paths.
   // Row order is intentionally ignored because only ORDER BY guarantees it.
-  const simpleParityQuery = !/\bJOIN\b|\bGROUP\s+BY\b|\bORDER\s+BY\b|\bCOUNT\s*\(|\bSUM\s*\(|\bAVG\s*\(|\bMIN\s*\(|\bMAX\s*\(/i.test(sql) &&
+  const hasOrderBy = /\bORDER\s+BY\b/i.test(sql);
+  const simpleParityQuery = !/\bJOIN\b|\bGROUP\s+BY\b|\bCOUNT\s*\(|\bSUM\s*\(|\bAVG\s*\(|\bMIN\s*\(|\bMAX\s*\(/i.test(sql) &&
     !/\bAS\b/i.test(selectMatch[1]) && requestedColumns.every(column => /^[a-z_][a-z0-9_]*$/i.test(column));
   let resultParity = "not-applicable";
   if (simpleParityQuery) {
@@ -152,8 +153,11 @@ try {
         normalized[column] = row[actualKey] === undefined ? null : row[actualKey];
       }
       return JSON.stringify(normalized);
-    }).sort();
-    assert.deepEqual(normalizeRows(fetchXmlResult.value), normalizeRows(nativeResult.value),
+    });
+    const fetchRows = normalizeRows(fetchXmlResult.value);
+    const nativeRows = normalizeRows(nativeResult.value);
+    if (!hasOrderBy) { fetchRows.sort(); nativeRows.sort(); }
+    assert.deepEqual(fetchRows, nativeRows,
       "Native SQL and FetchXML returned different projected row values for the same simple SELECT.");
     resultParity = "matched";
   }
@@ -166,6 +170,8 @@ try {
     nativeSqlMetadataColumns: nativeColumns,
     nativeSqlExtraColumnsExcluded: extraNativeColumns,
     requestedColumns,
+    resultParity,
+    orderChecked: simpleParityQuery && hasOrderBy,
     rowValuesOmitted: true,
   }, null, 2));
 } catch (error) {
