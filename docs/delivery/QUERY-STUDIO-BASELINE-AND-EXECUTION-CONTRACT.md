@@ -190,3 +190,113 @@ The current workflow explicitly runs these seven test files:
 Workflow-level checks also run `node --check` for the background bridge, security/audit service, UI, front-end parser, SQL engine and live-query harness, and parse `manifest.json`.
 
 This inventory is a test-file map, not a claim that every possible behavior within each area is covered. Detailed capability-to-test traceability remains part of QS-0.
+
+
+---
+
+## 2. Approved architectural decisions and implementation gate
+
+**Decision status:** the Engineering Lead approved the architectural direction on 2026-10-11. The exact numeric limits and detailed AST/provider interfaces below are recorded as proposals for implementation planning and must be validated against the existing runtime before code changes.
+
+The approved architectural decisions are:
+
+1. **One authoritative execution pipeline.** Parse the original SQL once into a trusted internal representation, apply a shared fail-closed read-only policy, assess capabilities, select an execution path, and normalize the outcome. No UI flag or provider entry point may bypass this sequence.
+2. **Capability-first automatic routing.** The coordinator selects the provider from the validated query's capabilities and verified semantics. There is no user-facing engine selector. If no provider is proven to preserve semantics, reject the query rather than approximate.
+3. **Strict capability-only fallback.** Fallback is permitted only after an explicit typed capability rejection and only when an approved alternate route is independently proven semantically equivalent for the query. Authentication, authorization, metadata permission, timeout, transport, throttling, data, and internal errors never trigger fallback. Generic messages, HTTP status alone, and broad DATAVERSE errors are not capability signals.
+4. **Canonical result/error contract with a compatibility adapter.** Ordered column descriptors are authoritative; duplicate labels must not overwrite values; aliases and SQL NULL semantics are preserved; empty results retain metadata; truncation is distinct from UI pagination; unknown count is distinct from exact zero. Existing string-column, paging, export and legacy warning consumers are preserved through an adapter during migration.
+5. **Preserve specialized security/audit routes.** Keep the six named query-shape routes and their adapter-specific validations and bounds. The shared policy gate is mandatory and additive; it does not replace specialized checks or Dataverse authorization.
+
+Implementation remains gated on agreement of the canonical AST/parse-once interface, typed decision and provider outcome shapes, precise hard limits/deadline behavior, duplicate-column key strategy, count semantics, and dispatch ownership. The specialist reports are linked from [issue #3](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/3) and [issue #5](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/5).
+
+### 2.1 Proposed canonical decision and provider outcome
+
+The following is a logical contract, not a required literal implementation shape:
+
+- Parse failure -> stable `SQL_SYNTAX`, no data-provider call.
+- Unsupported grammar -> stable `SQL_UNSUPPORTED`, no data-provider call.
+- Unsafe statement/policy violation -> `READ_ONLY_POLICY`, no data-provider call.
+- Query-level resource bound exceeded -> `QUERY_LIMIT_EXCEEDED`, no data-provider call.
+- Policy accepted -> provider capability planning consumes the same trusted parsed representation.
+- Provider capability assessment says unsupported -> consider another approved, semantically equivalent route before execution; otherwise reject.
+- Execution outcome -> success or normalized failure. Execution failures must not be reclassified as capability rejections by message matching.
+
+A typed discriminated union is preferred so invalid combinations (for example, a rejected decision with an executable provider) cannot be represented. The original AST must remain internal and must not be accepted from the UI as authoritative input.
+
+### 2.2 Exact limits: existing evidence and proposed initial caps
+
+The current code has several local limits but not yet one unified policy. The table distinguishes source-observed values from new recommended initial caps. New limits become binding only after implementation and tests enforce them at the authoritative boundary.
+
+| Dimension | Current source evidence | Recommended initial contract | Enforcement and notes |
+|---|---|---|---|
+| Original SQL text | `sqlstudio/js/sql-engine.js` rejects over 100,000 characters | **100,000 characters maximum** | Check before tokenization; applies to all providers and specialized routes |
+| Token count | No unified token-count cap verified | **20,000 tokens maximum** | Add to canonical tokenizer/parser boundary; reject before planning/provider dispatch |
+| AST nesting | No unified depth cap verified | **64 nested levels maximum** | Count parentheses/nesting structurally, not with regex |
+| Join count | Grammar supports bounded join forms; no shared hard join cap verified | **8 joins maximum** | Capability and policy checks share the same parsed representation |
+| IN/NOT IN list | No shared list-size cap verified | **1,000 items maximum** | Apply to each list and reject before provider dispatch |
+| Result rows | Native and security/audit paths use 10,000-row local caps; FetchXML retrieval is capped around 10,000 | **10,000 rows maximum per execution** | Applies across providers; set `truncated=true` if the cap prevents full result delivery |
+| Provider pages | Native and security/audit code use a 100-page bound | **100 pages maximum per execution** | Repeated links rejected; paging links must remain in the active environment |
+| Provider page size | FetchXML page size is at most 500 | **500 rows maximum per request/page where supported** | Do not claim native page size is 500 unless its actual API call is configured that way |
+| Compiled FetchXML | `background.js` rejects compiled FetchXML over 1,000,000 characters | **1,000,000 characters maximum** | Preserve existing local validation and enforce before Dataverse retrieval |
+| Security/audit expansion | Existing code uses a 1,000 audit-row expansion cap, 10,000 attribute-row cap and concurrency 4 | **1,000 audit rows; 10,000 attribute rows; 4 concurrent audit-detail calls** | Preserve existing specialized bounds; do not widen during centralization |
+| Concurrent top-level executions | No unified global cap verified | **4 concurrent executions per extension context** | Proposed conservative initial cap; reject/queue deterministically and test isolation |
+| End-to-end deadline | No unified coordinator deadline/cancellation contract verified | **120 seconds per execution** | Enforce at coordinator; abort underlying work when supported, ignore late completion, release concurrency slots, and return TIMEOUT. Verify actual abort support before claiming network cancellation |
+| Buffered output | No unified byte cap verified | **64 MiB estimated serialized result buffer per execution** | Proposed protective ceiling; estimate bounded normalized output and stop safely with truncation or a safe limit error per final contract |
+| Query cancellation | No unified cancellation contract verified | **One cancellation scope per request ID** | Cancellation must not affect concurrent requests; no provider fallback on cancellation/timeout |
+
+These are recommendations for the first implementation, not assertions that every cap already exists. If a proposed cap conflicts with a current supported use case, record the fixture and evidence before changing it; do not silently raise limits. Tests must prove each limit is enforced before dispatch where it is a query-level constraint and during retrieval where it is a runtime constraint.
+
+### 2.3 Paging and truncation contract
+
+- `rows` contains the normalized rows returned to the caller for this execution, subject to the execution row cap.
+- `columns` defines authoritative projection order and is returned even when `rows` is empty.
+- `truncated=true` only when execution cannot return the complete requested result because an execution cap or explicit truncation policy stopped retrieval. Merely having more rows on another UI page is not truncation.
+- `totalRecordCount` is nullable/unknown unless the provider can establish the count with the defined semantics. Never substitute zero for unknown.
+- Preserve explicit SQL ordering. If supported paging cannot be deterministic for a non-unique order, document the limitation or reject that paging form rather than silently inventing SQL ordering.
+- Follow only validated same-origin/environment paging links, reject repeated links, and apply the 100-page/10,000-row caps consistently.
+- The UI adapter must preserve current paging and CSV/JSON export behavior while mapping canonical column descriptors to the legacy string-column contract.
+
+### 2.4 Error classification and fallback matrix
+
+| Outcome | Retry/fallback policy |
+|---|---|
+| SQL syntax, unsupported SQL, read-only policy, query limit | No retry and no provider fallback |
+| Explicit typed provider capability rejection | Alternate route only when approved and equivalence-tested for the actual query |
+| Authentication, authorization, metadata permission | No provider fallback |
+| Timeout/cancellation | No provider fallback; do not automatically replay |
+| Transport failure | No semantic fallback; any future infrastructure retry must be separately bounded and explicit |
+| Throttling/service protection | Respect service-protection behavior; no provider fallback |
+| Data/Dataverse/internal error | Preserve normalized error; no fallback unless a future specific typed contract proves it is a capability outcome |
+
+A retry policy is not a fallback policy. Stable codes and safe, allowlisted, bounded diagnostics are required. Raw credentials, headers, query result values and sensitive service response bodies must not be exposed.
+
+### 2.5 Acceptance gates before provider integration
+
+- [ ] All policy-rejected queries produce zero data-provider calls across native SQL, FetchXML and security/audit routes.
+- [ ] Multi-statement, malformed, unsupported, write/DDL, comment/quote and parser-exception adversarial cases fail closed.
+- [ ] Provider capability rejection is typed; no message-text or generic HTTP-error fallback.
+- [ ] Authentication, authorization, metadata permission, timeout, transport, throttling, data and internal failures cause no provider fallback.
+- [ ] Exact resource caps and deadline behavior are enforced and covered by tests.
+- [ ] Duplicate columns, aliases, SQL NULL, empty result metadata, truncation, unknown count, and safe errors have contract tests.
+- [ ] Existing six named security/audit query shapes and specialized bounds remain intact.
+- [ ] Existing UI paging and export tests remain green through the compatibility adapter.
+- [ ] Fresh offline CI is recorded against the exact commit. Live Dataverse semantic checks are separately recorded as passed, failed, or infrastructure-blocked.
+
+## 3. Specialist report links and ownership
+
+- Architecture review: [QUERY-STUDIO-ARCHITECTURE-REVIEW.md](QUERY-STUDIO-ARCHITECTURE-REVIEW.md) — [issue #3](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/3).
+- QA/integration matrix: [QUERY-STUDIO-QA-TEST-MATRIX.md](QUERY-STUDIO-QA-TEST-MATRIX.md) — [issue #2](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/2).
+- Read-only policy design: [QUERY-STUDIO-READ-ONLY-POLICY-DESIGN.md](QUERY-STUDIO-READ-ONLY-POLICY-DESIGN.md) — [issue #5](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/5).
+
+The coordinator owns the shared contract and dispatch integration. SQL Engine owns parser/AST changes. Safety owns the isolated policy module and adversarial unit tests after the AST interface is agreed. QA owns test traceability and regression evidence. Security/Audit retains its adapter-specific implementation. Avoid concurrent edits to shared hot files.
+
+## 4. Next implementation sequence
+
+1. Validate the proposed limits against current code paths and agree the canonical AST, decision, provider outcome, deadline and cancellation interfaces.
+2. Implement the shared pure policy module and zero-provider-call tests.
+3. Integrate the mandatory gate in the coordinator before every provider/specialized adapter dispatch.
+4. Migrate provider capability outcomes and strict fallback classification.
+5. Add canonical result/error normalization and the legacy UI adapter.
+6. Consolidate the UI to one automatic Execute action after routing/normalization contract tests pass.
+7. Run the complete offline regression workflow and bounded live checks in the designated development/test environment; record the exact tested commit and distinguish infrastructure failures from semantic results.
+
+`main` remains protected and is not a target for this work. No implementation step is complete until its code/tests and commit evidence exist.
