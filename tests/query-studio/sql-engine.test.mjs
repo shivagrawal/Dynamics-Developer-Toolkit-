@@ -127,8 +127,7 @@ test("resolves simple projection aliases in ORDER BY",()=>{
 
 test("compiles a simple left join with explicit joined projection",()=>{
  const q=engine.compileSql("SELECT c.fullname, a.name FROM contact AS c LEFT JOIN account AS a ON c.parentcustomerid = a.accountid",metadata);
- assert.ok(q.fetchXml.includes('<link-entity name="account" alias="a" from="accountid" to="parentcustomerid" link-type="outer"></link-entity>'));
- assert.match(q.fetchXml,/<attribute name="name" alias="a_name"\/>/);
+ assert.match(q.fetchXml,/<link-entity name="account" alias="a" from="accountid" to="parentcustomerid" link-type="outer"><attribute name="name" alias="a_name"\/><\/link-entity>/);
 });
 
 test("adds a primary-key tie-breaker for non-unique ORDER BY values",()=>{
