@@ -1638,39 +1638,39 @@ function isSupportedSecuritySqlShape(sql) {
   const original = String(sql || "");
   const query = stripSqlLiteralsAndComments(original);
   const has = pattern => pattern.test(query);
-  const projection = pattern => pattern.test(query.slice(0, query.search(/\\bFROM\\b/i) < 0 ? query.length : query.search(/\\bFROM\\b/i)));
-  if (has(/\\bFROM\\s+systemuserroles\\s+(?:AS\\s+)?SUR\\b/i) &&
-      has(/\\bJOIN\\s+systemuser\\s+(?:AS\\s+)?SU\\s+ON\\s+SUR\\.systemuserid\\s*=\\s*SU\\.systemuserid\\b/i)) {
-    return projection(/\\bSELECT\\s+SU\\.fullname\\s*,\\s*SU\\.systemuserid\\s*,\\s*R\\.name\\s+AS\\s+role_name\\s*,\\s*BU\\.name\\s+AS\\s+role_businessunit\\b/i) &&
-      has(/\\bJOIN\\s+role\\s+(?:AS\\s+)?R\\s+ON\\s+SUR\\.roleid\\s*=\\s*R\\.roleid\\b/i) &&
-      has(/\\bJOIN\\s+businessunit\\s+(?:AS\\s+)?BU\\s+ON\\s+R\\.businessunitid\\s*=\\s*BU\\.businessunitid\\b/i) &&
-      /\\bSU\\.fullname\\s+LIKE\\s+'(?:''|[^'])*'/i.test(original);
+  const projection = pattern => pattern.test(query.slice(0, query.search(/\bFROM\b/i) < 0 ? query.length : query.search(/\bFROM\b/i)));
+  if (has(/\bFROM\s+systemuserroles\s+(?:AS\s+)?SUR\b/i) &&
+      has(/\bJOIN\s+systemuser\s+(?:AS\s+)?SU\s+ON\s+SUR\.systemuserid\s*=\s*SU\.systemuserid\b/i)) {
+    return projection(/\bSELECT\s+SU\.fullname\s*,\s*SU\.systemuserid\s*,\s*R\.name\s+AS\s+role_name\s*,\s*BU\.name\s+AS\s+role_businessunit\b/i) &&
+      has(/\bJOIN\s+role\s+(?:AS\s+)?R\s+ON\s+SUR\.roleid\s*=\s*R\.roleid\b/i) &&
+      has(/\bJOIN\s+businessunit\s+(?:AS\s+)?BU\s+ON\s+R\.businessunitid\s*=\s*BU\.businessunitid\b/i) &&
+      /\bSU\.fullname\s+LIKE\s+'(?:''|[^'])*'/i.test(original);
   }
-  if (has(/\\bFROM\\s+privilege\\s+(?:AS\\s+)?P\\b/i) && has(/\\bJOIN\\s+privilegeobjecttypecodes\\s+(?:AS\\s+)?POTC\\s+ON\\s+POTC\\.privilegeid\\s*=\\s*P\\.privilegeid\\b/i)) {
-    return projection(/\\bSELECT\\s+DISTINCT\\s+P\\.name\\s+AS\\s+privilege_name\\b/i) &&
-      has(/\\bJOIN\\s+entity\\s+(?:AS\\s+)?E\\s+ON\\s+E\\.objecttypecode\\s*=\\s*POTC\\.objecttypecode\\b/i) &&
-      /\\bE\\.logicalname\\s*=\\s*'(?:''|[^'])*'/i.test(original);
+  if (has(/\bFROM\s+privilege\s+(?:AS\s+)?P\b/i) && has(/\bJOIN\s+privilegeobjecttypecodes\s+(?:AS\s+)?POTC\s+ON\s+POTC\.privilegeid\s*=\s*P\.privilegeid\b/i)) {
+    return projection(/\bSELECT\s+DISTINCT\s+P\.name\s+AS\s+privilege_name\b/i) &&
+      has(/\bJOIN\s+entity\s+(?:AS\s+)?E\s+ON\s+E\.objecttypecode\s*=\s*POTC\.objecttypecode\b/i) &&
+      /\bE\.logicalname\s*=\s*'(?:''|[^'])*'/i.test(original);
   }
-  if (has(/\\bFROM\\s+systemuser\\s+(?:AS\\s+)?SU\\b/i) && has(/\\bJOIN\\s+systemuserroles\\s+(?:AS\\s+)?SUR\\s+ON\\s+SUR\\.systemuserid\\s*=\\s*SU\\.systemuserid\\b/i) && has(/\\bJOIN\\s+roleprivileges\\s+(?:AS\\s+)?RP\\b/i)) {
-    return projection(/\\bSELECT\\s+SU\\.fullname\\s*,[\\s\\S]*\\bCASE\\s+RP\\.privilegedepthmask\\b/i) &&
-      has(/\\bJOIN\\s+privilegeobjecttypecodes\\s+(?:AS\\s+)?POTC\\b/i) &&
-      has(/\\bJOIN\\s+entity\\s+(?:AS\\s+)?E\\b/i) &&
-      /\\bSU\\.fullname\\s+LIKE\\s+'(?:''|[^'])*'/i.test(original) &&
-      /\\bE\\.logicalname\\s*=\\s*'(?:''|[^'])*'/i.test(original);
+  if (has(/\bFROM\s+systemuser\s+(?:AS\s+)?SU\b/i) && has(/\bJOIN\s+systemuserroles\s+(?:AS\s+)?SUR\s+ON\s+SUR\.systemuserid\s*=\s*SU\.systemuserid\b/i) && has(/\bJOIN\s+roleprivileges\s+(?:AS\s+)?RP\b/i)) {
+    return projection(/\bSELECT\s+SU\.fullname\s*,[\s\S]*\bCASE\s+RP\.privilegedepthmask\b/i) &&
+      has(/\bJOIN\s+privilegeobjecttypecodes\s+(?:AS\s+)?POTC\b/i) &&
+      has(/\bJOIN\s+entity\s+(?:AS\s+)?E\b/i) &&
+      /\bSU\.fullname\s+LIKE\s+'(?:''|[^'])*'/i.test(original) &&
+      /\bE\.logicalname\s*=\s*'(?:''|[^'])*'/i.test(original);
   }
-  if (has(/\\bFROM\\s+role\\s+(?:AS\\s+)?R\\b/i) && has(/\\bJOIN\\s+roleprivileges\\s+(?:AS\\s+)?RP\\s+ON\\s+RP\\.roleid\\s*=\\s*R\\.roleid\\b/i)) {
-    if (has(/\\bGROUP\\s+BY\\s+E\\.logicalname\\b/i)) {
-      return projection(/\\bSELECT\\s+E\\.logicalname\\b/i) &&
-        has(/\\bJOIN\\s+privilegeobjecttypecodes\\s+(?:AS\\s+)?POTC\\b/i) &&
-        /\\bR\\.name\\s*=\\s*'(?:''|[^'])*'/i.test(original);
+  if (has(/\bFROM\s+role\s+(?:AS\s+)?R\b/i) && has(/\bJOIN\s+roleprivileges\s+(?:AS\s+)?RP\s+ON\s+RP\.roleid\s*=\s*R\.roleid\b/i)) {
+    if (has(/\bGROUP\s+BY\s+E\.logicalname\b/i)) {
+      return projection(/\bSELECT\s+E\.logicalname\b/i) &&
+        has(/\bJOIN\s+privilegeobjecttypecodes\s+(?:AS\s+)?POTC\b/i) &&
+        /\bR\.name\s*=\s*'(?:''|[^'])*'/i.test(original);
     }
-    return (has(/\\bJOIN\\s+privilege\\s+(?:AS\\s+)?P\\b/i) &&
-      ( /\\bP\\.name\\s*=\\s*'(?:''|[^'])*'/i.test(original) || /\\bR\\.name\\s*=\\s*'(?:''|[^'])*'/i.test(original) ));
+    return (has(/\bJOIN\s+privilege\s+(?:AS\s+)?P\b/i) &&
+      ( /\bP\.name\s*=\s*'(?:''|[^'])*'/i.test(original) || /\bR\.name\s*=\s*'(?:''|[^'])*'/i.test(original) ));
   }
-  if (has(/\\bFROM\\s+audit\\s+(?:AS\\s+)?A\\b/i)) {
-    return has(/\\bCROSS\\s+APPLY\\s+OPENJSON\\s*\\(\\s*A\\.changedata/i) &&
-      /\\bA\\.objectid\\s*=\\s*'(?:''|[^'])*'/i.test(original) &&
-      has(/\\bLEFT\\s+JOIN\\s+systemuser\\s+(?:AS\\s+)?U\\s+ON\\s+A\\.userid\\s*=\\s*U\\.systemuserid\\b/i);
+  if (has(/\bFROM\s+audit\s+(?:AS\s+)?A\b/i)) {
+    return has(/\bCROSS\s+APPLY\s+OPENJSON\s*\(\s*A\.changedata/i) &&
+      /\bA\.objectid\s*=\s*'(?:''|[^'])*'/i.test(original) &&
+      has(/\bLEFT\s+JOIN\s+systemuser\s+(?:AS\s+)?U\s+ON\s+A\.userid\s*=\s*U\.systemuserid\b/i);
   }
   return false;
 }
