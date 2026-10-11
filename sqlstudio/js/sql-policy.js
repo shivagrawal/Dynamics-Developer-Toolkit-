@@ -156,15 +156,114 @@
     return { ok: true, code: "OK", error: null, route: "native-sql", plan, limits: LIMITS };
   }
 
+  // Bounded structural XML scan: avoid trusting regex matches in comments,
+  // attributes, or nested entities when identifying the FetchXML base entity.
+  function inspectFetchXml(xml) {
+    const stack = [];
+    let rootName = null;
+    let rootEntity = null;
+    let rootClosed = false;
+    let i = 0;
+    const namePattern = /^[A-Za-z_][A-Za-z0-9_.:-]*/;
+    while (i < xml.length) {
+      const open = xml.indexOf("<", i);
+      if (open < 0) {
+        if (xml.slice(i).includes(">")) return null;
+        break;
+      }
+      if (xml.slice(i, open).includes("]]>")) return null;
+      i = open;
+      if (xml.startsWith("<!--", i)) {
+        const end = xml.indexOf("-->", i + 4);
+        if (end < 0 || xml.slice(i + 4, end).includes("--")) return null;
+        i = end + 3;
+        continue;
+      }
+      if (xml.startsWith("<![CDATA[", i)) {
+        if (!stack.length) return null;
+        const end = xml.indexOf("]]>", i + 9);
+        if (end < 0) return null;
+        i = end + 3;
+        continue;
+      }
+      if (xml.startsWith("<?", i)) {
+        const end = xml.indexOf("?>", i + 2);
+        if (end < 0 || stack.length || rootName !== null) return null;
+        i = end + 2;
+        continue;
+      }
+      if (xml.startsWith("<!", i)) return null;
+      if (xml.startsWith("</", i)) {
+        const match = namePattern.exec(xml.slice(i + 2));
+        if (!match) return null;
+        const name = match[0];
+        let end = i + 2 + name.length;
+        while (/\s/.test(xml[end] || "")) end++;
+        if (xml[end] !== ">" || stack.pop() !== name) return null;
+        i = end + 1;
+        if (!stack.length) rootClosed = true;
+        continue;
+      }
+      const match = namePattern.exec(xml.slice(i + 1));
+      if (!match) return null;
+      const name = match[0];
+      if (rootClosed) return null;
+      const parent = stack.length ? stack[stack.length - 1] : null;
+      if (!parent) {
+        if (rootName !== null || name.toLowerCase() !== "fetch") return null;
+        rootName = name;
+      }
+      let cursor = i + 1 + name.length;
+      let selfClosing = false;
+      const attributes = Object.create(null);
+      while (cursor < xml.length) {
+        while (/\s/.test(xml[cursor] || "")) cursor++;
+        if (xml[cursor] === ">") { cursor++; break; }
+        if (xml[cursor] === "/" && xml[cursor + 1] === ">") {
+          selfClosing = true;
+          cursor += 2;
+          break;
+        }
+        const attrMatch = namePattern.exec(xml.slice(cursor));
+        if (!attrMatch) return null;
+        const attrName = attrMatch[0].toLowerCase();
+        cursor += attrMatch[0].length;
+        while (/\s/.test(xml[cursor] || "")) cursor++;
+        if (xml[cursor] !== "=") return null;
+        cursor++;
+        while (/\s/.test(xml[cursor] || "")) cursor++;
+        const quote = xml[cursor];
+        if (quote !== '"' && quote !== "'") return null;
+        const end = xml.indexOf(quote, cursor + 1);
+        if (end < 0) return null;
+        const value = xml.slice(cursor + 1, end);
+        if (value.includes("<") || Object.prototype.hasOwnProperty.call(attributes, attrName)) return null;
+        attributes[attrName] = value;
+        cursor = end + 1;
+      }
+      if (cursor > xml.length || xml[cursor - 1] !== ">" || (xml[cursor - 2] === "/" && !selfClosing)) return null;
+      if (parent === rootName && name.toLowerCase() === "entity" && rootEntity === null) {
+        rootEntity = attributes.name || null;
+      }
+      if (["update", "delete", "create", "upsert", "insert"].includes(name.toLowerCase())) return null;
+      if (!selfClosing) stack.push(name);
+      else if (!stack.length) rootClosed = true;
+      i = cursor;
+    }
+    if (!rootName || !rootClosed || stack.length) return null;
+    return { root: rootName.toLowerCase(), entity: rootEntity };
+  }
+
   function validateFetchXml(fetchXml, tableName) {
     if (typeof fetchXml !== "string" || !fetchXml.trim()) return denied("SQL_SYNTAX", "A compiled FetchXML query is required.");
     if (fetchXml.length > LIMITS.fetchXmlCharacters) return denied("QUERY_LIMIT_EXCEEDED", "Compiled query exceeds the 1,000,000 character limit.");
     const table = String(tableName || "").trim().toLowerCase();
     if (!/^[a-z_][a-z0-9_]*$/.test(table)) return denied("READ_ONLY_POLICY", "Invalid Dataverse table logical name.");
-    if (!/^\s*<fetch(?:\s|>)/i.test(fetchXml)) return denied("READ_ONLY_POLICY", "Only FetchXML queries are accepted.");
-    const entityMatch = fetchXml.match(/<entity\s+[^>]*name\s*=\s*["']([a-z_][a-z0-9_]*)["']/i);
-    if (!entityMatch || entityMatch[1].toLowerCase() !== table) return denied("READ_ONLY_POLICY", "FetchXML base entity does not match the requested table.");
-    if (/<(?:update|delete|create|upsert|insert)\b/i.test(fetchXml)) return denied("READ_ONLY_POLICY", "Only read-only FetchXML is accepted.");
+    const inspected = inspectFetchXml(fetchXml);
+    if (!inspected) return denied("READ_ONLY_POLICY", "Malformed or unsupported FetchXML structure.");
+    if (!inspected.entity || !/^[a-z_][a-z0-9_]*$/i.test(inspected.entity) || inspected.entity.toLowerCase() !== table) {
+      return denied("READ_ONLY_POLICY", "FetchXML base entity does not match the requested table.");
+    }
     return { ok: true, code: "OK", error: null, route: "fetchxml", plan: null, limits: LIMITS };
   }
 
