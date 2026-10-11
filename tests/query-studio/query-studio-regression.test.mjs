@@ -263,6 +263,27 @@ test("projection mismatch fails closed instead of returning misleading results",
   assert.match(result.error, /accountidname/i);
 });
 
+test("native SQL safely removes unexpected endpoint columns from a verified explicit projection", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#systemusers(systemuserid,fullname,ownerid)",
+      value: [{
+        systemuserid: "user-guid",
+        fullname: "Dataverse Test User",
+        ownerid: "unexpected-owner-value",
+      }],
+    },
+  });
+  const { result } = await harness.runQuery(
+    "SELECT TOP 100 systemuserid, fullname FROM systemuser WHERE fullname LIKE '%dataverse%'",
+  );
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(Array.from(result.columns), ["systemuserid", "fullname"]);
+  assert.deepEqual(Object.keys(result.rows[0]), ["systemuserid", "fullname"]);
+  assert.equal(result.rows[0].fullname, "Dataverse Test User");
+  assert.equal(Object.hasOwn(result.rows[0], "ownerid"), false);
+});
+
 test("non-SELECT statements are rejected before any Dataverse request", async () => {
   const harness = createHarness({ response: { value: [] } });
   const { result, requestedUrl } = await harness.runQuery("DELETE FROM contact");
