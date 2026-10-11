@@ -333,10 +333,10 @@
 
   function safeProviderWarning(value) {
     if (typeof value !== "string") return "";
-    return value.replace(/\\bBearer\\s+[^\\s,;]+/gi, "Bearer [redacted]")
-      .replace(/\\b(access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password)\\s*[:=]\\s*[^\\s,;]+/gi, "$1=[redacted]")
-      .replace(/https?:\\/\\/[^\\s"<>]+/gi, "[URL redacted]")
-      .replace(/[\\u0000-\\u001f\\u007f]/g, " ").replace(/\\s+/g, " ").trim().slice(0, 500);
+    return value.replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [redacted]")
+      .replace(/\b(access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+      .replace(/https?:\/\/[^\s"<>]+/gi, "[URL redacted]")
+      .replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 500);
   }
 
   function canonicalProviderId(value, fallback) {
@@ -361,6 +361,7 @@
     if (Array.isArray(source.warnings)) source.warnings = source.warnings.map(safeProviderWarning).filter(Boolean);
     return normalizer.toLegacyResult(normalizer.normalizeResult(source, { durationMs }));
   }
+
   async function execute() {
     if (state.running) return;
     if (!state.sql.trim()) { state.error = "Enter a SELECT query first."; render(); return; }
