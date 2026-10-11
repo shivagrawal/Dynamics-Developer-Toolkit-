@@ -364,18 +364,14 @@ test("live audit adapter expands a disposable record's actual audited attribute 
       descriptionChange = result.rows.find(row => row.logicalname === "description" &&
         String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     }
-    const descriptionRows = result.rows.filter(row => row.logicalname === "description");
     const directAuditRows = await bridge.get("audits?$select=operation,action&$filter=_objectid_value%20eq%20" + accountId + "&$top=10");
     const persistedAccount = await bridge.get("accounts(" + accountId + ")?$select=description");
-    console.log("Audit fixture diagnostics: descriptionRows=" + descriptionRows.length +
-      "; expectedOld=" + descriptionRows.some(row => String(row.oldvalue).includes("before update")) +
-      "; expectedNew=" + descriptionRows.some(row => String(row.newvalue).includes("after update")) +
-      "; events=" + descriptionRows.map(row => String(row.Event)).join(",") +
-      "; oldNull=" + descriptionRows.map(row => row.oldvalue == null).join(",") +
-      "; newNull=" + descriptionRows.map(row => row.newvalue == null).join(",") +
-      "; directOperations=" + (directAuditRows.value || []).map(row => String(row.operation)).join(",") +
-      "; directActions=" + (directAuditRows.value || []).map(row => String(row.action)).join(",") +
-      "; persistedAfterValue=" + (persistedAccount.description === "DevLens audit fixture after update"));
+    assert.equal(persistedAccount.description, "DevLens audit fixture after update",
+      "The disposable record's update was not persisted.");
+    assert.ok((directAuditRows.value || []).some(row => Number(row.operation) === 2),
+      "Dataverse did not expose an Update audit operation for the disposable record.");
+    descriptionChange = result.rows.find(row => row.logicalname === "description" && row.Event === "Update" &&
+      String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     assert.ok(descriptionChange, "Audit detail expansion did not reconstruct the known description change.");
     assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")), "Audit details API was not called.");
     console.log("Live disposable audit fixture: PASS; audit attribute rows=" + result.rowCount);
