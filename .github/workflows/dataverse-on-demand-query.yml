@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/dataverse-on-demand-query.yml"
       - "tests/query-studio/on-demand-query.mjs"
+      - "tests/query-studio/live-semantic-matrix.mjs"
       - "sqlstudio/js/sql-engine.js"
       - "background.js"
       - "security-audit-service.js"
@@ -60,5 +61,5 @@ jobs:
             echo "- Commit: ${GITHUB_SHA}"
             echo "- Job result: **$JOB_STATUS**"
             echo "- Environment: dataverse-test"
-            echo "- The harness checks both FetchXML and native SQL endpoint paths; row values and credentials are not logged."
+            echo "- The smoke and semantic-matrix harnesses check bounded native SQL and FetchXML behavior; row values and credentials are not logged."
           } >> "$GITHUB_STEP_SUMMARY"
