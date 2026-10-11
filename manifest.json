@@ -69,6 +69,7 @@
         "ui/custom-control-view.js",
         "ui/security-audit-view.js",
         "sqlstudio/js/sql-engine.js",
+        "sqlstudio/js/sql-result-normalizer.js",
         "ui/sql-studio-view.js",
         "content-ui.js",
         "impersonation-ui.js"
