@@ -146,3 +146,56 @@ test("each canonical supported security shape is policy-accepted and dispatched 
     });
   }
 });
+
+
+test("unsupported security/audit near-matches fail closed before every provider call", async t => {
+  const unsupported = [
+    {
+      name: "roleprivileges without an approved role/privilege projection",
+      sql: "SELECT name FROM roleprivileges"
+    },
+    {
+      name: "privilege join missing the approved entity join and projection",
+      sql: "SELECT P.name FROM privilege P INNER JOIN privilegeobjecttypecodes POTC ON POTC.privilegeid = P.privilegeid"
+    },
+    {
+      name: "systemuserroles without the approved user/role/business-unit shape",
+      sql: "SELECT SUR.systemuserid FROM SystemUserRoles SUR"
+    },
+    {
+      name: "audit OPENJSON missing required object filter and user join",
+      sql: "SELECT A.auditid, CA.logicalname FROM audit A CROSS APPLY OPENJSON(A.changedata, '$.changedAttributes') CA"
+    }
+  ];
+
+  for (const sample of unsupported) {
+    await t.test(sample.name, async () => {
+      const { listener, calls, context } = loadBackground();
+      assert.equal(context.isSecuritySqlCandidate(sample.sql), true, sample.sql);
+      assert.equal(context.isSupportedSecuritySqlShape(sample.sql), false, sample.sql);
+      const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+      const result = await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: sample.sql } });
+      assert.equal(result.ok, false);
+      assert.equal(result.code, "UNSUPPORTED_SECURITY_SQL_SHAPE");
+      assert.equal(calls.length, 0, sample.sql);
+    });
+  }
+});
+
+test("security table names only in literals or comments retain ordinary SQL routing", async () => {
+  const ordinaryQueries = [
+    "SELECT name FROM account WHERE name = 'roleprivileges'",
+    "SELECT name FROM account -- FROM systemuserroles",
+    "/* FROM audit CROSS APPLY OPENJSON */ SELECT name FROM account"
+  ];
+  for (const sql of ordinaryQueries) {
+    const { listener, calls, context, securityBridge } = loadBackground();
+    assert.equal(context.isSecuritySqlCandidate(sql), false, sql);
+    const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+    const result = await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql } });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(calls.length, 1, sql);
+    assert.equal(calls[0].func, context.pageBridge, sql);
+    assert.notEqual(calls[0].func, securityBridge, sql);
+  }
+});
