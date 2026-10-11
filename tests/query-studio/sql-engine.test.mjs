@@ -87,6 +87,18 @@ test("supports unary NOT with De Morgan semantics and inverse comparison operato
  const simple=engine.compileSql("SELECT fullname FROM contact WHERE NOT statecode = 1",metadata);
  assert.match(simple.fetchXml,/<condition attribute="statecode" operator="ne" value="1"\/>/);
 
+ const comparatorCases = [
+  ["statecode != 1", "ne"],
+  ["statecode <> 1", "ne"],
+  ["statecode >= 1", "ge"],
+  ["statecode < 1", "lt"],
+  ["statecode <= 1", "le"]
+ ];
+ for (const [predicate, operator] of comparatorCases) {
+  const query=engine.compileSql("SELECT fullname FROM contact WHERE "+predicate,metadata);
+  assert.match(query.fetchXml,new RegExp(`<condition attribute="statecode" operator="${operator}" value="1"\\/>`),predicate);
+ }
+
  const grouped=engine.compileSql("SELECT fullname FROM contact WHERE NOT (statecode = 0 OR fullname LIKE 'A%')",metadata);
  assert.ok(grouped.fetchXml.includes('<filter type="and"><condition attribute="statecode" operator="ne" value="0"/><condition attribute="fullname" operator="not-like" value="A%"/></filter>'));
 
