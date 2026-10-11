@@ -62,6 +62,20 @@ test("escapes string literals and translates null, IN, LIKE and boolean filters"
  assert.match(like.fetchXml,/%DevLens%/);
 });
 
+test("compiles NOT IN, BETWEEN, NOT BETWEEN and preserves AND/OR precedence",()=>{
+ const notIn=engine.compileSql("SELECT fullname FROM contact WHERE statecode NOT IN (0, 2)",metadata);
+ assert.match(notIn.fetchXml,/<condition attribute="statecode" operator="not-in"><value>0<\/value><value>2<\/value><\/condition>/);
+
+ const between=engine.compileSql("SELECT fullname FROM contact WHERE statecode BETWEEN 1 AND 3",metadata);
+ assert.match(between.fetchXml,/<condition attribute="statecode" operator="between"><value>1<\/value><value>3<\/value><\/condition>/);
+
+ const notBetween=engine.compileSql("SELECT fullname FROM contact WHERE statecode NOT BETWEEN 1 AND 3",metadata);
+ assert.match(notBetween.fetchXml,/<condition attribute="statecode" operator="not-between"><value>1<\/value><value>3<\/value><\/condition>/);
+
+ const grouped=engine.compileSql("SELECT fullname FROM contact WHERE statecode = 0 OR statecode = 1 AND fullname LIKE 'A%'",metadata);
+ assert.match(grouped.fetchXml,/<filter type="or"><condition attribute="statecode" operator="eq"><value>0<\/value><\/condition><filter type="and"><condition attribute="statecode" operator="eq"><value>1<\/value><\/condition><condition attribute="fullname" operator="like"><value>A%<\/value><\/condition><\/filter><\/filter>/);
+});
+
 test("adds stable paging order for DISTINCT base projections",()=>{
  const q=engine.compileSql("SELECT DISTINCT fullname, statecode FROM contact ORDER BY fullname",metadata);
  assert.match(q.fetchXml,/<fetch distinct="true">/);
