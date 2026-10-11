@@ -11,11 +11,11 @@ function pageBridge(action, payload) {
   const queryExecution = action === "querySql" || action === "queryFetchXml" ? (() => {
     const suppliedDeadline = Number(payload?.__devlensExecution?.deadlineAt);
     const deadlineAt = Number.isFinite(suppliedDeadline) && suppliedDeadline > 0
-      ? Math.min(suppliedDeadline, Date.now() + DEVLENS_QUERY_DEADLINE_MS)
-      : Date.now() + DEVLENS_QUERY_DEADLINE_MS;
+      ? Math.min(suppliedDeadline, Date.now() + 120000)
+      : Date.now() + 120000;
     const suppliedBytes = Number(payload?.__devlensExecution?.maxOutputBytes);
     const maxOutputBytes = Number.isInteger(suppliedBytes) && suppliedBytes > 0
-      ? Math.min(suppliedBytes, DEVLENS_QUERY_MAX_OUTPUT_BYTES)
+      ? Math.min(suppliedBytes, 64 * 1024 * 1024)
       : DEVLENS_QUERY_MAX_OUTPUT_BYTES;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
