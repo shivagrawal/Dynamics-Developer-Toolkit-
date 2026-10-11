@@ -55,9 +55,9 @@ jobs:
         run: |
           {
             echo "## Dataverse live SQL checkpoint"
-            echo "- Branch: `$GITHUB_REF_NAME`"
-            echo "- Commit: `$GITHUB_SHA`"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Commit: ${GITHUB_SHA}"
             echo "- Job result: **$JOB_STATUS**"
-            echo "- Environment: `dataverse-test`"
+            echo "- Environment: dataverse-test"
             echo "- The harness checks both FetchXML and native SQL endpoint paths; row values and credentials are not logged."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -46,8 +46,8 @@ jobs:
         run: |
           {
             echo "## Query Studio regression checkpoint"
-            echo "- Branch: `$GITHUB_REF_NAME`"
-            echo "- Commit: `$GITHUB_SHA`"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Commit: ${GITHUB_SHA}"
             echo "- Job result: **$JOB_STATUS**"
             echo "- Syntax validation includes the live SQL harness."
             echo "- Full regression suite command is recorded in the preceding step."
