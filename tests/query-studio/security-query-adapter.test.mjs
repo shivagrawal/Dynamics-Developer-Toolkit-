@@ -403,6 +403,26 @@ test("security adapter rejects writes and multiple statements", async () => {
   assert.match(multiple.error, /one SELECT statement/);
 });
 
+test("security adapter rejects unsupported extra JOIN clauses instead of ignoring their semantics", async () => {
+  const sql = queries.userRoles.replace(
+    "INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid",
+    "INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid INNER JOIN contact c ON c.contactid = SU.systemuserid"
+  );
+  const result = await createBridge().run(sql);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /expected 3 JOIN\(s\)/i);
+  assert.equal(createBridge().calls.length, 0, "Unsupported join shapes must be rejected before Dataverse requests.");
+});
+
+test("security adapter rejects comma-separated FROM sources", async () => {
+  const sql = queries.userRoles.replace("FROM SystemUserRoles AS SUR", "FROM SystemUserRoles AS SUR, contact c");
+  const bridge = createBridge();
+  const result = await bridge.run(sql);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /comma joins/i);
+  assert.equal(bridge.calls.length, 0);
+});
+
 test("security adapter flags results at the 5,000-row safety cap", async () => {
   const result = await createBridge({ bulkRoles: true }).run(queries.userRoles);
   assert.equal(result.ok, true);
