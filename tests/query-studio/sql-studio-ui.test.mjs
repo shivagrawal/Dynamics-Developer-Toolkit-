@@ -195,6 +195,57 @@ test("single Execute uses native SQL first and only falls back on typed capabili
   assert.doesNotMatch(host.innerHTML, /secret-value|access_token=secret|example\.invalid/);
 });
 
+test("single Execute routes OFFSET/FETCH directly through bounded FetchXML", async () => {
+  const calls = [];
+  const plan = {
+    table: "contact", joins: [], columns: [{ column: "fullname" }], offset: 5, fetch: 5,
+    hasOffset: true, alias: "c", orderBy: [{ column: "contactid", direction: "asc" }], groupBy: []
+  };
+  const window = {
+    DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlEngine: {
+      plan: () => plan,
+      compile: () => ({
+        fetchXml: '<fetch page="2" count="5"><entity name="contact"><attribute name="fullname"/></entity></fetch>',
+        resultColumns: [{ label: "fullname", key: "fullname" }]
+      })
+    },
+    D365AnalyzerApi: {
+      send: async (action, payload) => {
+        calls.push({ action, payload });
+        if (action === "schemaTable") return { ok: true, data: {
+          logicalName: "contact", entitySetName: "contacts", primaryIdAttribute: "contactid",
+          columns: [
+            { logicalName: "contactid", attributeType: "uniqueidentifier", validForRead: true },
+            { logicalName: "fullname", attributeType: "string", validForRead: true }
+          ]
+        } };
+        if (action === "queryFetchXml") return {
+          ok: true, provider: "FetchXML JS engine", columns: ["fullname"],
+          rows: [{ fullname: "Page two" }], rowCount: 1, moreRecords: false
+        };
+        if (action === "querySql") throw new Error("OFFSET/FETCH must not be sent to native SQL");
+        throw new Error("unexpected action " + action);
+      }
+    }
+  };
+  const host = createHost();
+  const context = {
+    window, document: { activeElement: null, createElement: () => ({ click() {} }) },
+    performance: { now: () => 1 }, Blob: class { constructor(parts) { this.parts = parts; } },
+    URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
+  };
+  vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
+  window.DevLensSqlStudioView.renderInto(host);
+  await click(host, "execute");
+  assert.deepEqual(calls.map(call => call.action), ["schemaTable", "queryFetchXml"]);
+  assert.equal(calls[1].payload.offset, 5);
+  assert.equal(calls[1].payload.limit, 5);
+  assert.match(calls[1].payload.fetchXml, /page="2" count="5"/);
+  assert.match(host.innerHTML, /dataverse-fetchxml-js-engine/);
+  assert.match(host.innerHTML, /Page two/);
+});
+
 test("single Execute does not fall back on authorization or generic provider errors", async () => {
   const calls = [];
   const window = {
