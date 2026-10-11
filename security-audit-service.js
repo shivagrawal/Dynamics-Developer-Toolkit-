@@ -10,8 +10,14 @@ function devLensSecurityAuditBridge(action, p) {
   const cache = (window.__DEVLENS_SECURITY_AUDIT_CACHE_5143 ??= {
     userRoles: new Map(), rolePrivileges: new Map(), privileges: null, tables: null
   });
+  const apiRoot = new URL("/api/data/v9.2/", base);
+  const maxPages = 100;
   async function get(path) {
-    const response = await fetch(`${base}/api/data/v9.2/${path}`, {
+    const url = new URL(String(path), apiRoot);
+    if (url.origin !== apiRoot.origin || !url.pathname.startsWith(apiRoot.pathname)) {
+      throw Error("Blocked a Dataverse request outside the current environment's Web API.");
+    }
+    const response = await fetch(url.toString(), {
       credentials: "same-origin",
       headers: { Accept: "application/json", "OData-MaxVersion": "4.0", "OData-Version": "4.0", Prefer: 'odata.include-annotations="*"' }
     });
@@ -22,26 +28,46 @@ function devLensSecurityAuditBridge(action, p) {
     }
     return response.json();
   }
-  async function all(path) {
+  async function all(path, maxRows = 10000) {
     const rows = [];
     let next = path;
+    let pages = 0;
+    const seen = new Set();
     while (next) {
-      const data = await get(next.replace(`${base}/api/data/v9.2/`, ""));
-      rows.push(...(data.value || []));
+      const pageUrl = new URL(String(next), apiRoot).toString();
+      if (seen.has(pageUrl)) throw Error("Dataverse returned a repeated paging link; retrieval stopped safely.");
+      if (pages >= maxPages) throw Error("Dataverse retrieval exceeded the 100-page safety limit.");
+      seen.add(pageUrl);
+      const data = await get(next);
+      const pageRows = Array.isArray(data.value) ? data.value : [];
+      const room = maxRows - rows.length;
+      rows.push(...pageRows.slice(0, Math.max(0, room)));
       next = data["@odata.nextLink"] || "";
+      pages++;
+      if (pageRows.length > room || (rows.length >= maxRows && next)) {
+        throw Error("Dataverse retrieval exceeded the 10,000-row safety limit; refine the query.");
+      }
     }
     return rows;
   }
   async function allBounded(path, maxRows = 10000) {
     const rows = [];
     let next = path;
+    let pages = 0;
+    const seen = new Set();
     while (next && rows.length < maxRows) {
-      const data = await get(next.replace(base + "/api/data/v9.2/", ""));
+      const pageUrl = new URL(String(next), apiRoot).toString();
+      if (seen.has(pageUrl)) throw Error("Dataverse returned a repeated paging link; retrieval stopped safely.");
+      if (pages >= maxPages) return { rows, truncated: true };
+      seen.add(pageUrl);
+      const data = await get(next);
       const pageRows = Array.isArray(data.value) ? data.value : [];
       const room = maxRows - rows.length;
-      rows.push(...pageRows.slice(0, room));
+      rows.push(...pageRows.slice(0, Math.max(0, room)));
       next = data["@odata.nextLink"] || "";
-      if (rows.length >= maxRows) return { rows, truncated: true };
+      pages++;
+      if (pageRows.length > room) return { rows, truncated: true };
+      if (rows.length >= maxRows) return { rows, truncated: Boolean(next) };
     }
     return { rows, truncated: false };
   }
