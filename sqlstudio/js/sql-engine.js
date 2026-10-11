@@ -65,6 +65,7 @@
     if (!tokens.length || tokens[0].value.toUpperCase() !== "SELECT") fail("Read-only SQL mode accepts SELECT statements only.");
     if (tokens.some(t => t.value === ";") && tokens.filter(t => t.value === ";").some(t => tokens.indexOf(t) !== tokens.length - 1)) fail("Run one SQL statement at a time.");
     let p = 0;
+    let predicateNesting = 0;
     const peek = (v) => tokens[p] && tokens[p].value.toUpperCase() === v;
     const take = () => tokens[p++];
     const expect = v => { if (!peek(v)) fail("Expected " + v + (tokens[p] ? " near '" + tokens[p].value + "'." : " at end of query.")); return take(); };
@@ -140,7 +141,6 @@
       do { groupBy.push(qualified()); if (!peek(",")) break; take(); } while (true);
     }
     if (peek("HAVING")) fail("HAVING is not supported in this engine version.");
-    let predicateNesting = 0;
     function parsePredicate() {
       const negatePredicate = node => {
         if (node.type === "and" || node.type === "or") {
