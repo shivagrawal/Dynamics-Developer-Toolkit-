@@ -1,4 +1,5 @@
 name: Query Studio Regression Tests
+# Temporary PR-triggered validation of the current feature-branch integration; do not merge this branch.
 
 on:
   push:
