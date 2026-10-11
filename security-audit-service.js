@@ -21,7 +21,7 @@ function devLensSecurityAuditBridge(action, p) {
         this.assertActive();
         let serialized;
         try { serialized = JSON.stringify(row); } catch { serialized = ""; }
-        const estimatedBytes = typeof serialized === "string" ? serialized.length * 2 : 0;
+        const estimatedBytes = typeof serialized === "string" ? serialized.length * 3 : 0;
         if (this.outputBytes + estimatedBytes > this.maxOutputBytes) { this.outputLimitHit = true; return false; }
         this.outputBytes += estimatedBytes;
         return true;
