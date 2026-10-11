@@ -55,6 +55,7 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPage
     structuredClone,
     setTimeout,
     clearTimeout,
+    AbortController,
     window: {},
     Xrm: xrm,
     fetch: async (url) => {
