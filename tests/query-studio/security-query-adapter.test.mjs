@@ -357,7 +357,7 @@ test("DISTINCT inside a string literal does not alter query result deduplication
   const bridge = createBridge({ duplicateRoles: true });
   const sql = queries.userRoles.replace("'%USD8%'", "'%DISTINCT%'");
   const result = await bridge.run(sql);
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, result.error || "Query adapter unexpectedly rejected the SQL.");
   assert.equal(result.rows.length, 2, "A non-DISTINCT SELECT must preserve duplicate rows even when a filter literal contains the word DISTINCT.");
 });
 
