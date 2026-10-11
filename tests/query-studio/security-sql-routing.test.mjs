@@ -23,7 +23,7 @@ function loadBackground() {
     },
     tabs: {}
   };
-  const context = { chrome, devLensSecurityAuditBridge: securityBridge, DevLensSqlEngine: sqlEngine, DevLensSqlPolicy: sqlPolicy, console, URL, setTimeout, clearTimeout };
+  const context = { chrome, devLensSecurityAuditBridge: securityBridge, DevLensSqlEngine: sqlEngine, DevLensSqlPolicy: sqlPolicy, console, URL, setTimeout, clearTimeout, AbortController, window: {} };
   vm.runInNewContext(source, context, { filename: "background.js" });
   return { context, calls, get listener() { return listener; }, securityBridge };
 }
