@@ -14,10 +14,10 @@ on:
   workflow_dispatch:
     inputs:
       sql_query:
-        description: "Read-only SQL query. Must use SELECT TOP N (N 1–25); only account/contact tables. Do not enter sensitive values."
+        description: "Read-only SQL query. Must use SELECT TOP N (N 1–25); only account/contact/systemuser tables. Do not enter sensitive values."
         required: true
         type: string
-        default: "SELECT TOP 5 accountid, name FROM account ORDER BY name"
+        default: "SELECT TOP 25 systemuserid, fullname FROM systemuser WHERE fullname LIKE '%dataverse%'"
 
 permissions:
   contents: read
@@ -45,5 +45,5 @@ jobs:
           DATAVERSE_TENANT_ID: ${{ secrets.DATAVERSE_TENANT_ID }}
           DATAVERSE_CLIENT_ID: ${{ secrets.DATAVERSE_CLIENT_ID }}
           DATAVERSE_CLIENT_SECRET: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
-          SQL_QUERY: ${{ inputs.sql_query || 'SELECT TOP 5 accountid, name FROM account ORDER BY name' }}
+          SQL_QUERY: ${{ inputs.sql_query || "SELECT TOP 25 systemuserid, fullname FROM systemuser WHERE fullname LIKE '%dataverse%'" }}
         run: node tests/query-studio/on-demand-query.mjs
