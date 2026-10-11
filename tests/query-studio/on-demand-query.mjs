@@ -16,9 +16,18 @@ function validateInput() {
   assert.ok(!/--|\/\*|\*\//.test(sql), "SQL comments are not allowed in this test harness.");
   assert.match(sql, /^SELECT\b/i, "Only a single SELECT query is allowed.");
   const top = sql.match(/^SELECT\s+(?:DISTINCT\s+)?TOP\s+(\d+)\b/i);
-  assert.ok(top, "Query must start with SELECT TOP N (or SELECT DISTINCT TOP N).");
-  const limit = Number(top[1]);
-  assert.ok(Number.isInteger(limit) && limit >= 1 && limit <= 25, "TOP must be between 1 and 25.");
+  const paging = sql.match(/\bOFFSET\s+(\d+)\s+ROWS\s+FETCH\s+NEXT\s+(\d+)\s+ROWS\s+ONLY\s*$/i);
+  assert.ok(top || paging, "Query must use TOP N or bounded OFFSET N ROWS FETCH NEXT N ROWS ONLY.");
+  if (top) {
+    const limit = Number(top[1]);
+    assert.ok(Number.isInteger(limit) && limit >= 1 && limit <= 25, "TOP must be between 1 and 25.");
+    assert.ok(!paging, "TOP cannot be combined with OFFSET/FETCH.");
+  } else {
+    const offset = Number(paging[1]), limit = Number(paging[2]);
+    assert.ok(Number.isInteger(offset) && offset >= 0 && offset < 25, "OFFSET must be between 0 and 24 in this live harness.");
+    assert.ok(Number.isInteger(limit) && limit >= 1 && limit <= 25 && offset + limit <= 25,
+      "FETCH NEXT must be between 1 and 25 and offset plus fetch cannot exceed 25.");
+  }
   const from = sql.match(/\bFROM\s+([a-z_][a-z0-9_]*)/i);
   assert.ok(from, "Could not identify the FROM table.");
   const entities = [...sql.matchAll(/\b(?:FROM|JOIN)\s+([a-z_][a-z0-9_]*)/gi)].map(m => m[1].toLowerCase());
@@ -93,6 +102,12 @@ try {
   // Validate the exact LIKE predicate used by this smoke test against returned values,
   // rather than treating an HTTP 200 and an array as proof that WHERE was honored.
   const checksDataverseLike = /\bfullname\s+LIKE\s+'%dataverse%'/i.test(sql);
+  const checksFullnameNotNull = /\bfullname\s+IS\s+NOT\s+NULL\b/i.test(sql);
+  if (checksFullnameNotNull) {
+    for (const row of fetchXmlResult.value) {
+      assert.notEqual(row.fullname, null, "FetchXML IS NOT NULL query returned a null fullname.");
+    }
+  }
   if (checksDataverseLike) {
     for (const row of fetchXmlResult.value) {
       assert.equal(typeof row.fullname, "string", "FetchXML LIKE query returned a row without fullname.");
@@ -109,6 +124,11 @@ try {
   assert.ok(Array.isArray(nativeResult.value), "Dataverse native SQL endpoint did not return a value array.");
   assert.ok(nativeResult.value.length <= 25, "Native SQL query returned more than 25 rows.");
 
+  if (checksFullnameNotNull) {
+    for (const row of nativeResult.value) {
+      assert.notEqual(row.fullname, null, "Native SQL IS NOT NULL query returned a null fullname.");
+    }
+  }
   if (checksDataverseLike) {
     for (const row of nativeResult.value) {
       assert.equal(typeof row.fullname, "string", "Native SQL LIKE query returned a row without fullname.");
@@ -119,7 +139,7 @@ try {
   const contextMatch = String(nativeResult["@odata.context"] || "").match(/#([A-Za-z_][A-Za-z0-9_]*)\(([^()]*)\)/);
   assert.ok(contextMatch, "Native SQL endpoint did not return verifiable projection metadata.");
   const nativeColumns = contextMatch[2].split(",").map(value => value.trim()).filter(Boolean);
-  const selectMatch = sql.match(/^SELECT\s+(?:DISTINCT\s+)?TOP\s+\d+\s+([\s\S]+?)\s+FROM\b/i);
+  const selectMatch = sql.match(/^SELECT\s+(?:DISTINCT\s+)?(?:TOP\s+\d+\s+)?([\s\S]+?)\s+FROM\b/i);
   assert.ok(selectMatch, "Could not identify the explicit native SQL projection.");
   const requestedColumns = selectMatch[1].split(",").map(value => value.trim().split(".").pop().toLowerCase());
   const nativeSet = new Set(nativeColumns.map(value => value.toLowerCase()));
