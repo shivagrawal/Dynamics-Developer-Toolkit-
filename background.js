@@ -10,7 +10,7 @@ function pageBridge(action, payload) {
 
   const queryExecution = action === "querySql" || action === "queryFetchXml" ? (() => {
     const suppliedDeadline = Number(payload?.__devlensExecution?.deadlineAt);
-    const deadlineAt = Number.isFinite(suppliedDeadline) && suppliedDeadline > Date.now()
+    const deadlineAt = Number.isFinite(suppliedDeadline) && suppliedDeadline > 0
       ? Math.min(suppliedDeadline, Date.now() + DEVLENS_QUERY_DEADLINE_MS)
       : Date.now() + DEVLENS_QUERY_DEADLINE_MS;
     const suppliedBytes = Number(payload?.__devlensExecution?.maxOutputBytes);
@@ -1778,6 +1778,22 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   const securitySql = message.action === "querySql" &&
     isSecuritySqlCandidate(message.payload?.sql) && isSupportedSecuritySqlShape(message.payload?.sql) &&
     typeof devLensSecurityAuditBridge === "function";
+  let replied = false;
+  const executionTimer = isQueryExecution ? setTimeout(() => {
+    if (replied) return;
+    replied = true;
+    reply({
+      ok: false,
+      code: "QUERY_TIMEOUT",
+      error: "Query Studio exceeded its 120-second deadline. If the active Dataverse API call cannot be cancelled, its execution slot remains occupied until that call settles."
+    });
+  }, DEVLENS_QUERY_DEADLINE_MS) : null;
+  const replyOnce = result => {
+    if (replied) return;
+    replied = true;
+    if (executionTimer) clearTimeout(executionTimer);
+    reply(result);
+  };
   chrome.scripting
     .executeScript({
       target: { tabId: sender.tab.id, allFrames: message.action !== "tool" },
@@ -1788,7 +1804,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         : [message.action, executionPayload],
     })
     .then((results) =>
-      reply(
+      replyOnce(
         results.find((item) => item.result?.ok)?.result ||
           results.find((item) => item.result?.error)?.result || {
             ok: false,
@@ -1796,8 +1812,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           },
       ),
     )
-    .catch((error) => reply({ ok: false, error: error.message }))
+    .catch((error) => replyOnce({ ok: false, error: error.message }))
     .finally(() => {
+      if (executionTimer) clearTimeout(executionTimer);
       if (isQueryExecution) devLensActiveQueryExecutions = Math.max(0, devLensActiveQueryExecutions - 1);
     });
   return true;
