@@ -343,18 +343,26 @@ test("live audit adapter expands a disposable record's actual audited attribute 
     assert.match(accountId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "Dataverse did not return the temporary account ID.");
     await bridge.request("PATCH", "accounts(" + accountId + ")", { description: "DevLens audit fixture after update" });
     const query = queries[5].replace("bb20fca4-e8a2-f111-b8db-7c1e5280e98a", accountId);
-    const result = await bridge.run(query);
+    let result = await bridge.run(query);
     assert.equal(result.ok, true, "Audit adapter failed for the temporary record: " + (result.error || "unknown error"));
-    const descriptionChange = result.rows.find(row => row.logicalname === "description" &&
+    let descriptionChange = result.rows.find(row => row.logicalname === "description" &&
       String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     if (!descriptionChange) {
-      const auditRows = await bridge.get("audits?$select=auditid&$filter=_objectid_value%20eq%20" + accountId + "&$top=5");
-      if (!(auditRows.value || []).length) {
-        t.skip("Dataverse auditing is disabled or no audit history is available for the disposable fixture.");
-        return;
+      // Audit writes can be eventually visible. Poll the record's audit collection
+      // for up to 15 seconds before classifying this as a real integration failure.
+      let auditRows = { value: [] };
+      for (let attempt = 0; attempt < 15 && !(auditRows.value || []).length; attempt++) {
+        auditRows = await bridge.get("audits?$select=auditid,createdon&$filter=_objectid_value%20eq%20" + accountId + "&$top=5");
+        if (!(auditRows.value || []).length) await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      assert.ok(descriptionChange, "Audit details were returned but the known description change was not reconstructed.");
+      assert.ok((auditRows.value || []).length,
+        "Auditing was enabled and the record was updated, but Dataverse produced no audit rows within 15 seconds.");
+      result = await bridge.run(query);
+      assert.equal(result.ok, true, "Audit adapter retry failed: " + (result.error || "unknown error"));
+      descriptionChange = result.rows.find(row => row.logicalname === "description" &&
+        String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     }
+    assert.ok(descriptionChange, "Audit detail expansion did not reconstruct the known description change.");
     assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")), "Audit details API was not called.");
     console.log("Live disposable audit fixture: PASS; audit attribute rows=" + result.rowCount);
   } finally {
