@@ -23,7 +23,7 @@ function validateInput() {
   assert.ok(from, "Could not identify the FROM table.");
   const entities = [...sql.matchAll(/\b(?:FROM|JOIN)\s+([a-z_][a-z0-9_]*)/gi)].map(m => m[1].toLowerCase());
   assert.ok(entities.length > 0 && entities.every(name => ["account", "contact", "systemuser"].includes(name)),
-    "For this initial harness, only account and contact tables are permitted.");
+    "For this initial harness, only account, contact, and systemuser tables are permitted.");
   assert.ok(baseUrl && tenantId && clientId && clientSecret, "Dataverse integration secrets are not fully configured.");
   const parsed = new URL(baseUrl);
   assert.equal(parsed.protocol, "https:", "DATAVERSE_URL must use HTTPS.");
