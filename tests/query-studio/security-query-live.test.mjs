@@ -311,14 +311,20 @@ test("live audit adapter expands a disposable record's actual audited attribute 
   if (accountMetadata.IsAuditEnabled?.Value !== true) {
     assert.notEqual(accountMetadata.IsAuditEnabled?.CanBeChanged, false,
       "Account auditing is disabled and the table metadata says the setting cannot be changed.");
-    await bridge.request("PATCH", "EntityDefinitions(LogicalName='account')", { IsAuditEnabled: { Value: true } });
+    // Dataverse metadata definitions require PUT with the full current definition,
+    // not PATCH with a partial property set.
+    const fullAccountMetadata = await bridge.get("EntityDefinitions(LogicalName='account')");
+    fullAccountMetadata.IsAuditEnabled.Value = true;
+    await bridge.request("PUT", "EntityDefinitions(LogicalName='account')", fullAccountMetadata);
   }
 
   let descriptionMetadata = await bridge.get("EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')?$select=LogicalName,IsAuditEnabled");
   if (descriptionMetadata.IsAuditEnabled?.Value !== true) {
     assert.notEqual(descriptionMetadata.IsAuditEnabled?.CanBeChanged, false,
       "Account description auditing is disabled and the attribute metadata says the setting cannot be changed.");
-    await bridge.request("PATCH", "EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')", { IsAuditEnabled: { Value: true } });
+    const fullDescriptionMetadata = await bridge.get("EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')");
+    fullDescriptionMetadata.IsAuditEnabled.Value = true;
+    await bridge.request("PUT", "EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')", fullDescriptionMetadata);
   }
 
   await bridge.request("POST", "PublishXml", {
