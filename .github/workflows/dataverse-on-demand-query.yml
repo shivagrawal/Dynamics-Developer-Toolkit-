@@ -1,5 +1,6 @@
 name: Dataverse On-demand SQL Test Harness
 
+# Verification trigger: run the bounded native SQL and FetchXML parity smoke test after Query Studio integration.
 on:
   push:
     branches:
