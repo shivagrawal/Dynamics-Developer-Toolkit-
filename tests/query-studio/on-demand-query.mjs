@@ -86,16 +86,45 @@ try {
   assert.ok(names.includes(String(compiled.entitySetName || "").toLowerCase()) ||
     Object.values(entities).some(e => e.entitySetName === compiled.entitySetName),
     "Compiled entity set does not match the allowed metadata.");
-  const result = await api(`${compiled.entitySetName}?fetchXml=${encodeURIComponent(compiled.fetchXml)}`, token);
-  assert.ok(Array.isArray(result.value), "Dataverse query did not return a value array.");
-  assert.ok(result.value.length <= 25, "Query returned more than 25 rows.");
-  const columns = result.value.length ? Object.keys(result.value[0]) : [];
+  const fetchXmlResult = await api(`${compiled.entitySetName}?fetchXml=${encodeURIComponent(compiled.fetchXml)}`, token);
+  assert.ok(Array.isArray(fetchXmlResult.value), "Dataverse FetchXML query did not return a value array.");
+  assert.ok(fetchXmlResult.value.length <= 25, "FetchXML query returned more than 25 rows.");
+
+  // Independently exercise the native Dataverse SQL endpoint used by executeSQL.
+  // This verifies that the live endpoint exposes the requested projection even if
+  // its OData context contains extra columns; values are never printed to CI logs.
+  const baseTable = names[0];
+  const nativeResult = await api(`${entities[baseTable].entitySetName}?sql=${encodeURIComponent(sql)}`, token);
+  assert.ok(Array.isArray(nativeResult.value), "Dataverse native SQL endpoint did not return a value array.");
+  assert.ok(nativeResult.value.length <= 25, "Native SQL query returned more than 25 rows.");
+  const contextMatch = String(nativeResult["@odata.context"] || "").match(/#([A-Za-z_][A-Za-z0-9_]*)\\(([^()]*)\\)/);
+  assert.ok(contextMatch, "Native SQL endpoint did not return verifiable projection metadata.");
+  const nativeColumns = contextMatch[2].split(",").map(value => value.trim()).filter(Boolean);
+  const selectMatch = sql.match(/^SELECT\\s+(?:DISTINCT\\s+)?TOP\\s+\\d+\\s+([\\s\\S]+?)\\s+FROM\\b/i);
+  assert.ok(selectMatch, "Could not identify the explicit native SQL projection.");
+  const requestedColumns = selectMatch[1].split(",").map(value => value.trim().split(".").pop().toLowerCase());
+  const nativeSet = new Set(nativeColumns.map(value => value.toLowerCase()));
+  for (const column of requestedColumns) {
+    assert.ok(nativeSet.has(column), "Native SQL metadata omitted requested column: " + column);
+  }
+  const extraNativeColumns = nativeColumns.filter(column => !requestedColumns.includes(column.toLowerCase()));
+  const nativeProjectedRows = nativeResult.value.map(row => Object.fromEntries(
+    requestedColumns.map(column => {
+      const actualKey = Object.keys(row).find(key => key.toLowerCase() === column);
+      return [column, actualKey === undefined ? null : row[actualKey]];
+    })
+  ));
+  assert.ok(nativeProjectedRows.every(row => Object.keys(row).every(key => requestedColumns.includes(key))),
+    "Native SQL projection retained an unrequested column.");
   console.log(JSON.stringify({
     status: "passed",
     entitySet: compiled.entitySetName,
-    returnedRows: result.value.length,
-    columns,
+    fetchXmlRows: fetchXmlResult.value.length,
     fetchXmlGenerated: Boolean(compiled.fetchXml),
+    nativeSqlRows: nativeResult.value.length,
+    nativeSqlMetadataColumns: nativeColumns,
+    nativeSqlExtraColumnsExcluded: extraNativeColumns,
+    requestedColumns,
     rowValuesOmitted: true,
   }, null, 2));
 } catch (error) {
