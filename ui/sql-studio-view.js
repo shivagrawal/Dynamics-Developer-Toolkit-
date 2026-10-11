@@ -477,8 +477,14 @@
     if (action === "csv") {
       const columns = state.results?.columns || [];
       const rows = state.results?.rows || [];
+      const csvCell = value => {
+        const text = value == null ? "" : (typeof value === "object" ? JSON.stringify(value) : String(value));
+        // Prevent spreadsheet formula execution while preserving the original value after opening in spreadsheet apps.
+        if (/^[\t\r\n]/.test(text) || /^[\u0000-\u0020\uFEFF]*[=+\-@]/.test(text)) return "'" + text;
+        return text;
+      };
       const csv = [columns, ...rows.map(row => columns.map(c => row[c]))]
-        .map(row => row.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
+        .map(row => row.map(v => `"${csvCell(v).replace(/"/g, '""')}"`).join(","))
         .join("\r\n");
       download("devlens-query-results.csv", csv, "text/csv;charset=utf-8");
     }
