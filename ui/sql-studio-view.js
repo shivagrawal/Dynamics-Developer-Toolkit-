@@ -138,11 +138,11 @@
           .ss-schema-column-type{font-size:11px;color:#94a3b8}.ss-schema-badges{display:flex;flex-wrap:wrap;gap:4px}.ss-schema-badge{font-size:10px;border:1px solid #475569;border-radius:999px;padding:1px 5px;color:#cbd5e1}.ss-schema-badge.warn{color:#fde68a}
           @media(max-width:760px){.ss-schema-grid{grid-template-columns:1fr}.ss-schema-list{max-height:190px}}
         </style>
-        <div class="ss-top"><div class="ss-title">Query Studio</div><span class="ss-pill">READ ONLY</span><button class="ss-btn" data-act="schema">Schema Explorer</button><button class="ss-btn" data-act="context">Detect environment</button><button class="ss-btn primary" data-act="execute" ${state.running ? "disabled" : ""}>Execute SQL</button><button class="ss-btn" data-act="executeEngine" ${state.running ? "disabled" : ""}>Execute via FetchXML (preview)</button><button class="ss-btn" data-act="clear">Clear results</button></div>
+        <div class="ss-top"><div class="ss-title">Query Studio</div><span class="ss-pill">READ ONLY</span><button class="ss-btn" data-act="schema">Schema Explorer</button><button class="ss-btn" data-act="context">Detect environment</button><button class="ss-btn primary" data-act="execute" ${state.running ? "disabled" : ""}>Execute</button><button class="ss-btn" data-act="clear">Clear results</button></div>
         <div class="ss-status">Execution: ${esc(state.status)} ${state.ctx ? " · " + esc(state.ctx.clientUrl) : ""} · ${state.results ? `${state.results.rows?.length || 0} rows · ${state.durationMs} ms` : "No results yet"}</div>
         ${schemaExplorerHtml()}
         <textarea class="ss-editor" spellcheck="false" aria-label="SQL query editor">${esc(state.sql)}</textarea>
-        <div class="ss-meta">Ordinary-table queries use native Dataverse SQL; the supported security/metadata query shapes use the JavaScript compatibility adapter. The in-house FetchXML planner supports a documented SELECT subset; unsupported SQL is rejected. All paths are read-only and run as your current Dynamics user.</div>
+        <div class="ss-meta">Ordinary-table queries use native Dataverse SQL; the supported security/audit query shapes use the dedicated read-only adapter. Native SQL is preferred; the FetchXML planner is used only after an explicit typed capability rejection. All paths are read-only and run as your current Dynamics user.</div>
         ${state.error ? `<div class="ss-status ss-error">${esc(state.error)}</div>` : ""}
         ${state.results ? `<div class="ss-meta">Query: ${esc(state.lastQuery)} · ${state.results.truncated ? "Results limited" : "Server response received"}${state.results.provider ? " · " + esc(state.results.provider) + (state.results.compatibilityMode ? " (" + esc(state.results.compatibilityMode) + ")" : "") : ""}${state.results.warning ? " · " + esc(state.results.warning) : ""}</div>` : ""}
         ${state.results ? `<div class="ss-results"><table aria-label="Query results"><caption class="ss-sr-only">Query results</caption><thead><tr>${columns.map(c=>`<th scope="col" title="${esc(c)}">${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td title="${esc(row[c])}">${esc(formatValue(row[c]))}</td>`).join("")}</tr>`).join("")}</tbody></table>${rows.length ? "" : '<div class="ss-empty">The query returned no rows.</div>'}</div>${allRows.length > pageSize ? `<div class="ss-top ss-pagination" role="navigation" aria-label="Query result pages"><span class="ss-meta" role="status" aria-live="polite">Rows ${pageStart + 1}–${Math.min(pageStart + rows.length, allRows.length)} of ${allRows.length}</span><button class="ss-btn" data-act="prevPage" ${state.pageIndex <= 0 ? "disabled" : ""}>Previous</button><span class="ss-meta">Page ${state.pageIndex + 1} of ${pageCount}</span><button class="ss-btn" data-act="nextPage" ${state.pageIndex >= pageCount - 1 ? "disabled" : ""}>Next</button></div>` : ""}<div class="ss-top"><button class="ss-btn" data-act="csv">Export CSV</button><button class="ss-btn" data-act="copy">Copy JSON</button></div>` : ""}
@@ -331,6 +331,36 @@
     if (editor) { editor.focus(); editor.setSelectionRange(caret, caret); }
   }
 
+  function safeProviderWarning(value) {
+    if (typeof value !== "string") return "";
+    return value.replace(/\\bBearer\\s+[^\\s,;]+/gi, "Bearer [redacted]")
+      .replace(/\\b(access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password)\\s*[:=]\\s*[^\\s,;]+/gi, "$1=[redacted]")
+      .replace(/https?:\\/\\/[^\\s"<>]+/gi, "[URL redacted]")
+      .replace(/[\\u0000-\\u001f\\u007f]/g, " ").replace(/\\s+/g, " ").trim().slice(0, 500);
+  }
+
+  function canonicalProviderId(value, fallback) {
+    const raw = String(value || "").trim().toLowerCase();
+    const compact = raw.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const aliases = {
+      "native-sql": "dataverse-native-sql", "dataverse-sql": "dataverse-native-sql",
+      "dataverse-sql-endpoint": "dataverse-native-sql", "sql-endpoint": "dataverse-native-sql",
+      "fetchxml": "dataverse-fetchxml-js-engine", "fetchxml-js-engine": "dataverse-fetchxml-js-engine",
+      "javascript-sql-engine": "dataverse-fetchxml-js-engine", "security-audit": "dataverse-security-query-adapter",
+      "security-audit-adapter": "dataverse-security-query-adapter"
+    };
+    const normalized = aliases[compact] || compact;
+    return /^[a-z0-9][a-z0-9._:-]{0,99}$/.test(normalized) ? normalized : fallback;
+  }
+
+  function legacyNormalizedResult(response, durationMs, fallbackProvider) {
+    const normalizer = window.DevLensSqlResultNormalizer;
+    if (!normalizer?.normalizeResult || !normalizer?.toLegacyResult) throw new Error("Query result normalization is unavailable. Reload the Dynamics tab.");
+    const source = { ...response, provider: canonicalProviderId(response.provider, fallbackProvider) };
+    if (typeof source.warning === "string") source.warning = safeProviderWarning(source.warning);
+    if (Array.isArray(source.warnings)) source.warnings = source.warnings.map(safeProviderWarning).filter(Boolean);
+    return normalizer.toLegacyResult(normalizer.normalizeResult(source, { durationMs }));
+  }
   async function execute() {
     if (state.running) return;
     if (!state.sql.trim()) { state.error = "Enter a SELECT query first."; render(); return; }
@@ -347,23 +377,22 @@
       const api = window.D365AnalyzerApi;
       if (!api?.send) throw new Error("DevLens Dataverse bridge is not available. Reload the Dynamics tab.");
       const response = await api.send("querySql", { sql: state.sql });
-      if (!response?.ok) throw new Error(response?.error || "Query failed.");
+      if (!response?.ok) {
+        if (response?.code === "PROVIDER_CAPABILITY_REJECTION") {
+          state.running = false;
+          await executeEngine();
+          return;
+        }
+        const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(response || { code: "INTERNAL" });
+        throw new Error(safeError?.message || response?.error || "Query failed.");
+      }
       state.ctx = { clientUrl: response.clientUrl, environmentId: response.environmentId, currentUser: response.currentUser };
-      const rows = response.rows || [];
-      const columns = response.columns || [];
-      state.results = {
-        columns,
-        rows: rows.map(row => Object.fromEntries(columns.map(key => [key, row[key] ?? null]))),
-        truncated: response.truncated === true || response.totalRecordCountLimitExceeded === true,
-        warning: response.warning || "",
-        provider: response.provider || "",
-        compatibilityMode: response.compatibilityMode || "",
-        totalRecordCount: response.totalRecordCount ?? null
-      };
-      state.status = "Query completed as " + (response.currentUser?.name || "current Dynamics user");
       state.durationMs = Math.round(performance.now() - started);
+      state.results = legacyNormalizedResult(response, state.durationMs, "dataverse-native-sql");
+      state.status = "Query completed as " + (response.currentUser?.name || "current Dynamics user");
     } catch (e) {
-      state.error = e.message || String(e);
+      const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(e);
+      state.error = safeError?.message || e.message || String(e);
       state.status = "Query failed";
       state.durationMs = Math.round(performance.now() - started);
     } finally {
@@ -408,7 +437,10 @@
       state.status = "Executing compiled FetchXML…";
       render();
       const response = await api.send("queryFetchXml", { tableName: plan.table, fetchXml: compiled.fetchXml, offset: plan.offset, limit: plan.fetch });
-      if (!response?.ok) throw new Error(response?.error || "Compiled FetchXML execution failed.");
+      if (!response?.ok) {
+        const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(response || { code: "INTERNAL" });
+        throw new Error(safeError?.message || response?.error || "Compiled FetchXML execution failed.");
+      }
       const sourceRows = response.rows || [];
       const projections = compiled.resultColumns || (plan.columns.some(column => column.star)
         ? metadata.entities[plan.table].columns.filter(column => column.queryable).map(column => ({label: column.logicalName, key: column.logicalName}))
@@ -429,9 +461,15 @@
         }
         return output;
       });
-      state.results = { columns, rows, truncated: response.moreRecords === true, totalRecordCount: response.rowCount ?? rows.length };
-      state.status = "JavaScript SQL engine completed (" + rows.length + " rows)" + (response.moreRecords ? " · more records available" : "");
       state.durationMs = Math.round(performance.now() - started);
+      state.results = legacyNormalizedResult({
+        ...response,
+        columns: projections.map(projection => ({ name: projection.label, label: projection.label, sourceKey: projection.label })),
+        rows,
+        provider: response.provider || "dataverse-fetchxml-js-engine",
+        truncated: response.truncated === true || response.moreRecords === true
+      }, state.durationMs, "dataverse-fetchxml-js-engine");
+      state.status = "Query completed (" + rows.length + " rows)" + (state.results.truncated ? " · results limited" : "");
     } catch (e) {
       state.error = e.message || String(e);
       state.status = "JavaScript SQL engine failed";
