@@ -95,9 +95,23 @@ try {
   assert.ok(names.includes(String(compiled.entitySetName || "").toLowerCase()) ||
     Object.values(entities).some(e => e.entitySetName === compiled.entitySetName),
     "Compiled entity set does not match the allowed metadata.");
-  const fetchXmlResult = await api(`${compiled.entitySetName}?fetchXml=${encodeURIComponent(compiled.fetchXml)}`, token);
-  assert.ok(Array.isArray(fetchXmlResult.value), "Dataverse FetchXML query did not return a value array.");
-  assert.ok(fetchXmlResult.value.length <= 25, "FetchXML query returned more than 25 rows.");
+  const pagingMatch = sql.match(/\bOFFSET\s+(\d+)\s+ROWS\s+FETCH\s+NEXT\s+(\d+)\s+ROWS\s+ONLY\s*$/i);
+  let fetchXmlRequest = compiled.fetchXml;
+  if (pagingMatch) {
+    const offset = Number(pagingMatch[1]), limit = Number(pagingMatch[2]);
+    // FetchXML has no SQL OFFSET equivalent. Fetch only the bounded prefix,
+    // then apply the requested page before comparing with native SQL results.
+    fetchXmlRequest = fetchXmlRequest.replace(/^<fetch\b/i, '<fetch top="' + (offset + limit) + '"');
+  }
+  const fetchXmlRawResult = await api(compiled.entitySetName + '?fetchXml=' + encodeURIComponent(fetchXmlRequest), token);
+  assert.ok(Array.isArray(fetchXmlRawResult.value), "Dataverse FetchXML query did not return a value array.");
+  assert.ok(fetchXmlRawResult.value.length <= 25, "FetchXML query returned more than 25 rows.");
+  const fetchXmlResult = {
+    ...fetchXmlRawResult,
+    value: pagingMatch
+      ? fetchXmlRawResult.value.slice(Number(pagingMatch[1]), Number(pagingMatch[1]) + Number(pagingMatch[2]))
+      : fetchXmlRawResult.value,
+  };
 
   // Validate the exact LIKE predicate used by this smoke test against returned values,
   // rather than treating an HTTP 200 and an array as proof that WHERE was honored.
