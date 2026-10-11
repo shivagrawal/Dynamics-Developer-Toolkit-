@@ -103,6 +103,8 @@ function requireConfiguration() {
   assert.deepEqual(missing, [], "Missing GitHub Actions secrets: " + missing.join(", "));
   const parsed = new URL(baseUrl);
   assert.equal(parsed.protocol, "https:", "Dataverse URL must use HTTPS.");
+  assert.equal(parsed.origin, "https://org81dcff87.crm8.dynamics.com",
+    "DATAVERSE_URL must target the explicitly designated personal development/test environment.");
 }
 
 async function acquireToken() {
