@@ -59,7 +59,16 @@ async function click(host, action) {
 }
 
 test("Query Studio paginates large result sets without losing exportable results or metadata", async () => {
-  const rows = Array.from({ length: 250 }, (_, index) => ({ id: index + 1, name: "Row " + (index + 1) }));
+  const rows = Array.from({ length: 250 }, (_, index) => ({
+    id: index + 1,
+    name: ([
+      "=1+1",
+      "\t=2+2",
+      "+cmd|' /C calc'!A0",
+      "-2+3",
+      "@SUM(A1:A2)"
+    ])[index] ?? "Row " + (index + 1)
+  }));
   const window = {
     D365AnalyzerApi: {
       send: async action => {
@@ -128,4 +137,9 @@ test("Query Studio paginates large result sets without losing exportable results
   await click(host, "csv");
   assert.equal(downloadedContent.split("\r\n").length, 251, "CSV export must include all 250 rows, not only the current page.");
   assert.match(downloadedContent, /Row 250/);
+  assert.match(downloadedContent, /"'=1\+1"/, "Formula-like values starting with equals must be neutralized.");
+  assert.match(downloadedContent, /"'\t=2\+2"/, "Tab-prefixed formula-like values must be neutralized.");
+  assert.match(downloadedContent, /"'+cmd\|' \/C calc'!A0"/, "Formula-like values starting with plus must be neutralized.");
+  assert.match(downloadedContent, /"'-2\+3"/, "Formula-like values starting with minus must be neutralized.");
+  assert.match(downloadedContent, /"'@SUM\(A1:A2\)"/, "Formula-like values starting with at-sign must be neutralized.");
 });
