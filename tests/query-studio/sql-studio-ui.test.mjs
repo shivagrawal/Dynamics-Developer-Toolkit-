@@ -244,3 +244,33 @@ test("single Execute never falls back for timeout, transport, throttling, metada
     assert.doesNotMatch(host.innerHTML, /untrusted provider detail/);
   }
 });
+
+
+test("typed capability responses never reroute named security/audit queries", async () => {
+  const calls = [];
+  const window = {
+    DevLensSqlResultNormalizer: resultNormalizer,
+    D365AnalyzerApi: {
+      send: async action => {
+        calls.push(action);
+        return { ok: false, code: "PROVIDER_CAPABILITY_REJECTION", error: "typed capability" };
+      }
+    }
+  };
+  const host = createHost();
+  const context = {
+    window, document: { activeElement: null, createElement: () => ({ click() {} }) },
+    performance: { now: () => 1 }, Blob: class {},
+    URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
+  };
+  vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
+  window.DevLensSqlStudioView.renderInto(host);
+  const editor = host.querySelector("textarea");
+  editor.value = "SELECT name FROM audit";
+  editor.dispatchEvent?.({ type: "input", target: editor });
+  // The UI fallback guard is deliberately conservative; the background remains
+  // authoritative for deciding whether this is one of the six approved shapes.
+  await click(host, "execute");
+  assert.deepEqual(calls, ["querySql"]);
+  assert.match(host.innerHTML, /Query uses syntax|could not be parsed|not supported/i);
+});
