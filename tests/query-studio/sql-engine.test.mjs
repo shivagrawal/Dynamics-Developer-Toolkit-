@@ -81,10 +81,10 @@ test("supports unary NOT with De Morgan semantics and inverse comparison operato
  assert.match(simple.fetchXml,/<condition attribute="statecode" operator="ne" value="1"\/>/);
 
  const grouped=engine.compileSql("SELECT fullname FROM contact WHERE NOT (statecode = 0 OR fullname LIKE 'A%')",metadata);
- assert.match(grouped.fetchXml,/<filter type="and"><condition attribute="statecode" operator="ne" value="0"\/><condition attribute="fullname" operator="not-like" value="A%"\/></filter>/);
+ assert.ok(grouped.fetchXml.includes('<filter type="and"><condition attribute="statecode" operator="ne" value="0"/><condition attribute="fullname" operator="not-like" value="A%"/></filter>'));
 
  const nested=engine.compileSql("SELECT fullname FROM contact WHERE NOT (statecode > 1 AND statecode <= 3)",metadata);
- assert.match(nested.fetchXml,/<filter type="or"><condition attribute="statecode" operator="le" value="1"\/><condition attribute="statecode" operator="gt" value="3"\/></filter>/);
+ assert.ok(nested.fetchXml.includes('<filter type="or"><condition attribute="statecode" operator="le" value="1"/><condition attribute="statecode" operator="gt" value="3"/></filter>'));
 });
  
 test("adds stable paging order for DISTINCT base projections",()=>{
