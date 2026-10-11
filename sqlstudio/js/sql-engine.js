@@ -234,8 +234,12 @@
     if(node.type==="between") return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-between":"between")+'"'+entity+'><value>'+escapeXml(valueXml(node.lower))+'</value><value>'+escapeXml(valueXml(node.upper))+'</value></condition>';
     if(node.type==="like") {
       const pattern=node.value;
-      const value=pattern.replace(/\\%/g,"%").replace(/\\_/g,"_");
-      return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-like":"like")+'"'+entity+' value="'+escapeXml(value)+'"/>';
+      // Backslash escaping differs between SQL Server LIKE and FetchXML. Reject
+      // ambiguous patterns rather than silently turning a literal wildcard into one.
+      if (/\\\\[%_]/.test(pattern)) {
+        fail("LIKE escape sequences for '%' and '_' are not supported; the pattern would change meaning.");
+      }
+      return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-like":"like")+'"'+entity+' value="'+escapeXml(pattern)+'"/>';
     }
     if(node.value.type==="null") fail("Use IS NULL or IS NOT NULL instead of comparing with NULL.");
     return '<condition attribute="'+escapeXml(field.name)+'" operator="'+node.operator+'"'+entity+' value="'+escapeXml(valueXml(node.value))+'"/>';
