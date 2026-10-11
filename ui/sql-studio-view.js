@@ -356,8 +356,8 @@
   function isSecurityAuditQuery(sql) {
     // Conservative UI-side fallback guard only. The authoritative exact-shape
     // recognition and policy checks remain in background.js.
-    return /\\b(?:systemuserroles|roleprivileges|privilegeobjecttypecodes|audit)\\b/i.test(String(sql || "")) ||
-      /\\bFROM\\s+privilege\\b/i.test(String(sql || ""));
+    return /\b(?:systemuserroles|roleprivileges|privilegeobjecttypecodes|audit)\b/i.test(String(sql || "")) ||
+      /\bFROM\s+privilege\b/i.test(String(sql || ""));
   }
 
   function legacyNormalizedResult(response, durationMs, fallbackProvider) {
