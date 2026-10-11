@@ -48,7 +48,10 @@ jobs:
           DATAVERSE_CLIENT_ID: ${{ secrets.DATAVERSE_CLIENT_ID }}
           DATAVERSE_CLIENT_SECRET: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
           SQL_QUERY: ${{ inputs.sql_query || 'SELECT TOP 5 c.contactid, c.fullname FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid ORDER BY c.contactid' }}
-        run: node tests/query-studio/on-demand-query.mjs
+        run: |
+          node --check tests/query-studio/live-semantic-matrix.mjs
+          node tests/query-studio/on-demand-query.mjs
+          node tests/query-studio/live-semantic-matrix.mjs
 
       - name: Publish live SQL smoke-test checkpoint
         if: always()
