@@ -6,7 +6,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const sqlEnginePath = path.resolve(here, "../../sqlstudio/js/sql-engine.js");
+const sqlPolicyPath = path.resolve(here, "../../sqlstudio/js/sql-policy.js");
 const backgroundPath = path.resolve(here, "../../background.js");
+const sqlEngineSource = fs.readFileSync(sqlEnginePath, "utf8");
+const sqlPolicySource = fs.readFileSync(sqlPolicyPath, "utf8");
 const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
 function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPages, metadataError, fetchXmlResponse } = {}) {
@@ -82,7 +86,13 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPage
       tabs: { query: async () => [], sendMessage: () => {} },
     },
   };
-  vm.runInNewContext(backgroundSource, sandbox, { filename: "background.js" });
+  // Mirror background-entry.js production load order: engine, shared policy, then dispatcher.
+  // Loading only background.js makes every policy-protected action fail closed and masks
+  // the behavior this harness intends to exercise.
+  const context = vm.createContext(sandbox);
+  vm.runInContext(sqlEngineSource, context, { filename: "sqlstudio/js/sql-engine.js" });
+  vm.runInContext(sqlPolicySource, context, { filename: "sqlstudio/js/sql-policy.js" });
+  vm.runInContext(backgroundSource, context, { filename: "background.js" });
 
   async function runAction(action, payload) {
     assert.equal(typeof messageListener, "function", "background message listener was registered");
