@@ -246,6 +246,40 @@ test("single Execute routes OFFSET/FETCH directly through bounded FetchXML", asy
   assert.match(host.innerHTML, /Page two/);
 });
 
+test("OFFSET/FETCH routing never bypasses named security/audit queries", async () => {
+  const calls = [];
+  const window = {
+    DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlEngine: {
+      plan: () => ({ hasOffset: true, table: "systemuserroles", joins: [], columns: [{ column: "systemuserid" }], offset: 0, fetch: 5, alias: "sur" })
+    },
+    D365AnalyzerApi: {
+      send: async action => {
+        calls.push(action);
+        if (action === "querySql") return {
+          ok: false, code: "UNSUPPORTED_SECURITY_SQL_SHAPE",
+          error: "This security/audit SQL query does not match a supported read-only query shape."
+        };
+        throw new Error("security/audit OFFSET/FETCH must not call " + action);
+      }
+    }
+  };
+  const host = createHost();
+  const context = {
+    window, document: { activeElement: null, createElement: () => ({ click() {} }) },
+    performance: { now: () => 1 }, Blob: class { constructor(parts) { this.parts = parts; } },
+    URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
+  };
+  vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
+  window.DevLensSqlStudioView.renderInto(host);
+  const editor = host.querySelector("textarea");
+  editor.value = "SELECT systemuserid FROM systemuserroles ORDER BY systemuserid OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY";
+  editor.onInput({ target: editor });
+  await click(host, "execute");
+  assert.deepEqual(calls, ["querySql"]);
+  assert.doesNotMatch(host.innerHTML, /FetchXML compatibility route/);
+});
+
 test("single Execute does not fall back on authorization or generic provider errors", async () => {
   const calls = [];
   const window = {
