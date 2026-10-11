@@ -92,7 +92,7 @@ try {
 
   // Validate the exact LIKE predicate used by this smoke test against returned values,
   // rather than treating an HTTP 200 and an array as proof that WHERE was honored.
-  const checksDataverseLike = /\\bfullname\\s+LIKE\\s+'%dataverse%'/i.test(sql);
+  const checksDataverseLike = /\bfullname\s+LIKE\s+'%dataverse%'/i.test(sql);
   if (checksDataverseLike) {
     for (const row of fetchXmlResult.value) {
       assert.equal(typeof row.fullname, "string", "FetchXML LIKE query returned a row without fullname.");
