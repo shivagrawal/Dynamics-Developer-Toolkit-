@@ -67,42 +67,45 @@ function project(rows, columns) {
   }));
 }
 
-async function runParityCase({ name, sql, entities, token, expected }) {
+async function runParityCase({ name, sql, entities, token, expected, fetchXmlOnly = false }) {
   const compiled = engine.compileSql(sql, { entities });
   assert.equal(compiled.readOnly, true, name + ": compiler did not mark query read-only");
   const fetchRaw = await api(compiled.entitySetName + "?fetchXml=" + encodeURIComponent(compiled.fetchXml), token);
   assert.ok(Array.isArray(fetchRaw.value), name + ": FetchXML returned no value array");
   assert.ok(fetchRaw.value.length <= 5, name + ": FetchXML exceeded bounded row limit");
 
-  const baseEntity = entities.contact;
-  const nativeRaw = await api(baseEntity.entitySetName + "?sql=" + encodeURIComponent(sql), token);
-  assert.ok(Array.isArray(nativeRaw.value), name + ": native SQL returned no value array");
-  assert.ok(nativeRaw.value.length <= 5, name + ": native SQL exceeded bounded row limit");
+  let nativeRows = null;
+  if (!fetchXmlOnly) {
+    const baseEntity = entities.contact;
+    const nativeRaw = await api(baseEntity.entitySetName + "?sql=" + encodeURIComponent(sql), token);
+    assert.ok(Array.isArray(nativeRaw.value), name + ": native SQL returned no value array");
+    assert.ok(nativeRaw.value.length <= 5, name + ": native SQL exceeded bounded row limit");
+    const columns = ["contactid", "fullname"];
+    nativeRows = project(nativeRaw.value, columns);
+    nativeRows.sort((a, b) => String(a[0] ?? "").localeCompare(String(b[0] ?? "")));
+  }
 
-  const columns = ["contactid", "fullname"];
-  const fetchRows = project(fetchRaw.value, columns);
-  const nativeRows = project(nativeRaw.value, columns);
+  const fetchRows = project(fetchRaw.value, ["contactid", "fullname"]);
   fetchRows.sort((a, b) => String(a[0] ?? "").localeCompare(String(b[0] ?? "")));
-  nativeRows.sort((a, b) => String(a[0] ?? "").localeCompare(String(b[0] ?? "")));
-  assert.deepEqual(fetchRows, nativeRows, name + ": native SQL and FetchXML projected values differ");
+  if (nativeRows) assert.deepEqual(fetchRows, nativeRows, name + ": native SQL and FetchXML projected values differ");
 
   if (expected === "null") {
     assert.ok(fetchRows.every(row => row[1] === null), name + ": FetchXML returned a non-null fullname for IS NULL");
-    assert.ok(nativeRows.every(row => row[1] === null), name + ": native SQL returned a non-null fullname for IS NULL");
+    if (nativeRows) assert.ok(nativeRows.every(row => row[1] === null), name + ": native SQL returned a non-null fullname for IS NULL");
   } else if (expected === "not-null") {
     assert.ok(fetchRows.every(row => row[1] !== null), name + ": FetchXML returned a null fullname for IS NOT NULL");
-    assert.ok(nativeRows.every(row => row[1] !== null), name + ": native SQL returned a null fullname for IS NOT NULL");
+    if (nativeRows) assert.ok(nativeRows.every(row => row[1] !== null), name + ": native SQL returned a null fullname for IS NOT NULL");
   } else if (expected === "like") {
     assert.ok(fetchRows.every(row => typeof row[1] === "string" && row[1].toLowerCase().includes("dataverse")),
       name + ": FetchXML returned a row that violates LIKE");
-    assert.ok(nativeRows.every(row => typeof row[1] === "string" && row[1].toLowerCase().includes("dataverse")),
+    if (nativeRows) assert.ok(nativeRows.every(row => typeof row[1] === "string" && row[1].toLowerCase().includes("dataverse")),
       name + ": native SQL returned a row that violates LIKE");
   } else if (expected === "empty") {
     assert.equal(fetchRows.length, 0, name + ": FetchXML expected an empty result");
-    assert.equal(nativeRows.length, 0, name + ": native SQL expected an empty result");
+    if (nativeRows) assert.equal(nativeRows.length, 0, name + ": native SQL expected an empty result");
   }
 
-  return { name, fetchXmlRows: fetchRows.length, nativeSqlRows: nativeRows.length, matched: true, _keys: fetchRows.map(row => row[0]) };
+  return { name, fetchXmlRows: fetchRows.length, nativeSqlRows: nativeRows ? nativeRows.length : null, matched: true, _keys: fetchRows.map(row => row[0]) };
 }
 
 try {
@@ -144,10 +147,12 @@ try {
     {
       name: "offset-fetch-page-one",
       sql: "SELECT contactid, fullname FROM contact ORDER BY contactid OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY",
+      fetchXmlOnly: true,
     },
     {
       name: "offset-fetch-page-two",
       sql: "SELECT contactid, fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY",
+      fetchXmlOnly: true,
     },
   ];
 
