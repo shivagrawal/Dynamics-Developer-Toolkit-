@@ -4,6 +4,9 @@ import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
 const source = await readFile(new URL("../../background.js", import.meta.url), "utf8");
+const require = (await import("node:module")).createRequire(import.meta.url);
+const sqlEngine = require("../../sqlstudio/js/sql-engine.js");
+const sqlPolicy = require("../../sqlstudio/js/sql-policy.js");
 
 function loadBackground() {
   let listener;
@@ -20,7 +23,7 @@ function loadBackground() {
     },
     tabs: {}
   };
-  const context = { chrome, devLensSecurityAuditBridge: securityBridge, console, URL, setTimeout, clearTimeout };
+  const context = { chrome, devLensSecurityAuditBridge: securityBridge, DevLensSqlEngine: sqlEngine, DevLensSqlPolicy: sqlPolicy, console, URL, setTimeout, clearTimeout };
   vm.runInNewContext(source, context, { filename: "background.js" });
   return { context, calls, get listener() { return listener; }, securityBridge };
 }
@@ -66,4 +69,26 @@ test("security SQL is dispatched to the security bridge while ordinary SQL keeps
   await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: "SELECT TOP 5 accountid, name FROM account" } });
   assert.equal(calls[1].func, context.pageBridge);
   assert.equal(calls[1].args[0], "querySql");
+});
+
+test("shared policy rejects unsafe SQL before any injected bridge or provider is called", async () => {
+  const { listener, calls } = loadBackground();
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  for (const sql of [
+    "DELETE FROM contact",
+    "SELECT fullname FROM contact; SELECT name FROM account",
+    "SELECT fullname FROM contact WHERE fullname = 'unterminated"
+  ]) {
+    const result = await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql } });
+    assert.equal(result.ok, false, sql);
+    assert.equal(calls.length, 0, sql);
+  }
+});
+
+test("shared policy rejects invalid FetchXML before any injected bridge or provider is called", async () => {
+  const { listener, calls } = loadBackground();
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const result = await dispatch({ type: "DEVLENS_ACTION", action: "queryFetchXml", payload: { fetchXml: "<fetch><entity name=\"account\" /></fetch>", tableName: "contact" } });
+  assert.equal(result.ok, false);
+  assert.equal(calls.length, 0);
 });
