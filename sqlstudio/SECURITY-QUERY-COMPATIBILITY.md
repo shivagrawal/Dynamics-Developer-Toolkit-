@@ -8,6 +8,13 @@ The normal Query Studio path in `background.js` validates read-only SQL and uses
 
 The generic compiler in `sqlstudio/js/sql-engine.js` remains a bounded SQL subset. Its WHERE grammar supports unary `NOT` by inverting comparisons and applying De Morgan's law; ambiguous `LIKE` backslash escapes before `%` or `_` are rejected instead of silently changing the pattern. It does not generically compile SQL Server `CASE`, `ISNULL(MAX(CASE...))`, or `CROSS APPLY OPENJSON` to FetchXML. Instead, the adapter implements the six supplied query shapes with explicit data retrieval and JavaScript projection/aggregation. Unrecognized security SQL shapes fail closed rather than being silently sent to the ordinary-table SQL endpoint.
 
+## Latest ordinary-query live verification
+
+- [Dataverse On-demand SQL Test Harness](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38122313654) on `feature/sql4cds-query-studio`: passed. A bounded Contact-to-Account `LEFT JOIN` returned 5 rows from both FetchXML and the native SQL endpoint, with the projected `contactid` and `fullname` values matching in deterministic `ORDER BY contactid` order.
+- [Query Studio Regression Tests](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38122313653): passed, 111 tests, 0 failures, 0 skipped.
+- [Dataverse On-demand SQL Test Harness](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38122242039): passed an `accountnumber IS NULL` query against both paths; each returned 3 rows and the projected values matched. The harness normalizes omitted null-valued JSON properties to SQL NULL only after verifying the requested column exists in projection metadata.
+- [Dataverse On-demand SQL Test Harness](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38122079569): passed nonzero-offset parity by retrieving a bounded `TOP` prefix and slicing the requested page. This does **not** establish that the native SQL endpoint itself honors `OFFSET/FETCH`; the harness deliberately avoids assuming that behavior.
+
 ## Compatibility matrix
 
 | Query | Purpose | Current state | Implementation and validation |
