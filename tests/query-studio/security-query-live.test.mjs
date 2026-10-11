@@ -297,12 +297,40 @@ test("live roles-by-privilege query returns roles for a standard account privile
 test("live audit adapter expands a disposable record's actual audited attribute change", async t => {
   const unique = "DevLens SQL Studio audit integration " + new Date().toISOString() + " " + Math.random().toString(36).slice(2, 8);
   let accountId = "";
-  const organization = await bridge.get("organizations?$select=isauditenabled&$top=1");
-  const accountMetadata = await bridge.get("EntityDefinitions(LogicalName='account')?$select=LogicalName,IsAuditEnabled");
-  if (organization.value?.[0]?.isauditenabled !== true || accountMetadata.IsAuditEnabled?.Value !== true) {
-    t.skip("Organization-level or account-level auditing is disabled; skipping the write-based audit fixture without changing environment settings.");
-    return;
+  // This is the explicitly designated personal development/test environment.
+  // Enable only the settings required to verify audit reconstruction; leave auditing
+  // enabled afterward so subsequent live runs can exercise the same capability.
+  const organization = await bridge.get("organizations?$select=organizationid,isauditenabled&$top=1");
+  const org = organization.value?.[0];
+  assert.ok(org?.organizationid, "Dataverse did not return the organization ID.");
+  if (org.isauditenabled !== true) {
+    await bridge.request("PATCH", "organizations(" + org.organizationid + ")", { isauditenabled: true });
   }
+
+  let accountMetadata = await bridge.get("EntityDefinitions(LogicalName='account')?$select=LogicalName,IsAuditEnabled");
+  if (accountMetadata.IsAuditEnabled?.Value !== true) {
+    assert.notEqual(accountMetadata.IsAuditEnabled?.CanBeChanged, false,
+      "Account auditing is disabled and the table metadata says the setting cannot be changed.");
+    await bridge.request("PATCH", "EntityDefinitions(LogicalName='account')", { IsAuditEnabled: { Value: true } });
+  }
+
+  let descriptionMetadata = await bridge.get("EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')?$select=LogicalName,IsAuditEnabled");
+  if (descriptionMetadata.IsAuditEnabled?.Value !== true) {
+    assert.notEqual(descriptionMetadata.IsAuditEnabled?.CanBeChanged, false,
+      "Account description auditing is disabled and the attribute metadata says the setting cannot be changed.");
+    await bridge.request("PATCH", "EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')", { IsAuditEnabled: { Value: true } });
+  }
+
+  await bridge.request("POST", "PublishXml", {
+    ParameterXml: "<importexportxml><entities><entity>account</entity></entities></importexportxml>"
+  });
+
+  const verifiedOrganization = await bridge.get("organizations?$select=isauditenabled&$top=1");
+  accountMetadata = await bridge.get("EntityDefinitions(LogicalName='account')?$select=LogicalName,IsAuditEnabled");
+  descriptionMetadata = await bridge.get("EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')?$select=LogicalName,IsAuditEnabled");
+  assert.equal(verifiedOrganization.value?.[0]?.isauditenabled, true, "Organization auditing did not enable successfully.");
+  assert.equal(accountMetadata.IsAuditEnabled?.Value, true, "Account auditing did not enable successfully.");
+  assert.equal(descriptionMetadata.IsAuditEnabled?.Value, true, "Account description auditing did not enable successfully.");
   try {
     const created = await bridge.request("POST", "accounts", { name: unique, description: "DevLens audit fixture before update" });
     accountId = String(created.accountid || "").replace(/[{}]/g, "");
