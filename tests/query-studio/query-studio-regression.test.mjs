@@ -307,7 +307,7 @@ test("multiple SQL statements are rejected", async () => {
   const harness = createHarness({ response: { value: [] } });
   const { result, requestedUrl } = await harness.runQuery("SELECT fullname FROM contact; SELECT name FROM account");
   assert.equal(result.ok, false);
-  assert.match(result.error, /one (?:SELECT )?statement at a time/i);
+  assert.match(result.error, /one (?:(?:SELECT|SQL) )?statement at a time/i);
   assert.equal(requestedUrl, undefined);
 });
 
