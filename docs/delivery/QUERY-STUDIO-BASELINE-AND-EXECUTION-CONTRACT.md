@@ -51,10 +51,10 @@ The current offline suite covers:
 
 ### Live environment evidence — do not conflate with offline CI
 
-- The latest offline workflow does not call Dataverse.
-- Earlier live native SQL smoke and general Dataverse integration checks passed on an earlier feature-branch commit; those results are not evidence for every later change.
-- The most recent recorded security/audit live run failed with an endpoint connection timeout (`ETIMEDOUT`). This is an infrastructure failure, not a semantic pass or proof of a SQL defect.
-- Retry live security/audit only after connectivity preflight, with bounded retry for transient connection failures. Keep actual assertion failures red.
+- The offline regression workflow does not call Dataverse. Current result: [run 38156100708](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156100708), 189 passed, 0 failed, 0 skipped on `e0b505f80ed5b9d71fd425219f2084e9cfa4a413`.
+- The bounded live semantic matrix passed on that same SHA: [run 38156100763](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156100763). This verifies only the listed cases, not all SQL compatibility.
+- Security/audit and general Dataverse integration passed on `f77e015fcc57d9ee2ce3a37f26c9177f21adb62c` ([security/audit](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156018818), [environment integration](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156018839)); later changes were confined to tests and semantic-matrix evidence.
+- A previous security/audit run timed out with `ETIMEDOUT`; that remains a historical infrastructure failure, not a semantic pass or proof of a SQL defect.
 - Audit integration can modify persistent audit configuration. Run only against the designated personal development/test environment; never production/shared environments without explicit approval.
 
 ## 2. Current capability inventory
@@ -69,7 +69,7 @@ The current offline suite covers:
 | Read-only bounds and fail-closed parsing | Present in multiple layers | One shared policy gate before every provider |
 | Unified automatic execution coordinator | Not complete | Introduce agreed request/decision/result/error contracts |
 | Advanced SQL compatibility | Partial/not supported for several constructs | Add features one by one with fixtures and live evidence |
-| Full live semantic matrix | Incomplete | Capability-specific Dataverse tests and honest infrastructure classification |
+| Bounded live semantic matrix | Listed cases passed on `e0b505f`; broader compatibility remains incomplete | Add more capability-specific fixtures and keep infrastructure failures distinct |
 
 ## 3. Proposed architecture
 
