@@ -1,6 +1,6 @@
 # Query Studio Baseline and Execution Contract
 
-**Status:** baseline recorded; execution contract proposed for review, not yet implemented.  
+**Status:** baseline recorded; architectural direction approved on 2026-10-11; implementation is in progress. Detailed AST/provider/normalizer decisions and current-commit verification remain open.  
 **Integration branch:** `feature/sql4cds-query-studio`  
 **Product boundary:** independent, read-only browser-based Dataverse SQL workspace. SQL4CDS and XrmToolBox are not runtime dependencies.
 
@@ -166,16 +166,18 @@ Do not assign simultaneous edits to the same file. A dependent stream may build 
 - **Gate D — semantic correctness:** null, alias, joins, duplicate cardinality, ordering and paging fixtures; live evidence for features marked live-tested.
 - **Gate E — release:** all offline Query Studio tests pass; syntax/manifest checks pass; live results are current and clearly classified; `main` remains untouched.
 
-## 7. Immediate next tasks
+## 7. Current coordination priorities
 
-1. Complete baseline test inventory and link it to issue #2.
-2. Review and approve this contract under issue #3.
-3. Only then allocate implementation threads for coordinator, policy, provider adapters and QA.
+1. The baseline inventory and architecture review are committed; the Engineering Lead has approved the high-level architecture and strict capability-only fallback.
+2. Complete the safety audit and obtain fresh regression evidence for the already-committed policy gate. The historical 111/0/0 run is not current-branch evidence.
+3. Finalize the exact canonical AST/policy/provider-outcome interfaces, duplicate-column key strategy, and unknown-versus-zero count semantics in the relevant owned workstreams before freezing their APIs.
+4. Implement the normalizer and execution coordinator within the file ownership boundaries in `QUERY-STUDIO-PARALLEL-THREAD-OPERATIONS.md`; reconcile each commit before the next shared-branch write.
+5. Run full offline regression and bounded live checks against the exact integrated commit; record infrastructure-blocked checks separately.
 
 
 ## 1.1 Offline test inventory
 
-The current workflow explicitly runs these seven test files:
+The current workflow explicitly runs these eight test files:
 
 | Test file | Primary responsibility | Coverage boundary / next improvement |
 |---|---|---|
@@ -185,6 +187,7 @@ The current workflow explicitly runs these seven test files:
 | `tests/query-studio/security-query-corpus.test.mjs` | Golden corpus for six named security/audit SQL shapes and their semantics | Expand only when adapter behavior is implemented and validated; reject unimplemented semantic variants |
 | `tests/query-studio/security-query-adapter.test.mjs` | Specialized adapter projection/condition/ordering validation and bounded audit behavior | Add shared policy-gate integration assertions and normalized adapter output tests |
 | `tests/query-studio/security-sql-routing.test.mjs` | Ensures named security SQL uses the specialized bridge while ordinary SQL remains on native route | Migrate assertions to the coordinator/provider decision contract when it exists |
+| `tests/query-studio/sql-policy.test.mjs` | Shared fail-closed policy and resource-limit checks; verify dispatch-boundary zero-call behavior, all six named shapes, AST traversal, and FetchXML validation at the true trust boundary |
 | `tests/query-studio/sql-studio-ui.test.mjs` | UI behavior including result pagination/export and metadata retention | Add one-Execute-action, provider diagnostics, truncation and normalized error tests |
 
 Workflow-level checks also run `node --check` for the background bridge, security/audit service, UI, front-end parser, SQL engine and live-query harness, and parse `manifest.json`.
@@ -206,7 +209,7 @@ The approved architectural decisions are:
 4. **Canonical result/error contract with a compatibility adapter.** Ordered column descriptors are authoritative; duplicate labels must not overwrite values; aliases and SQL NULL semantics are preserved; empty results retain metadata; truncation is distinct from UI pagination; unknown count is distinct from exact zero. Existing string-column, paging, export and legacy warning consumers are preserved through an adapter during migration.
 5. **Preserve specialized security/audit routes.** Keep the six named query-shape routes and their adapter-specific validations and bounds. The shared policy gate is mandatory and additive; it does not replace specialized checks or Dataverse authorization.
 
-Implementation remains gated on agreement of the canonical AST/parse-once interface, typed decision and provider outcome shapes, precise hard limits/deadline behavior, duplicate-column key strategy, count semantics, and dispatch ownership. The specialist reports are linked from [issue #3](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/3) and [issue #5](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/5).
+The high-level architecture is approved, but these implementation details are not silently treated as accepted: canonical AST/parse-once interface, typed decision and provider outcome shapes, precise enforced limits versus proposed deadline/concurrency/memory controls, duplicate-column key strategy, count semantics, and dispatch ownership. Resolve them in the owning workstream/issue before freezing dependent APIs. The specialist reports are linked from [issue #3](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/3) and [issue #5](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/issues/5).
 
 ### 2.1 Proposed canonical decision and provider outcome
 
@@ -291,13 +294,12 @@ The coordinator owns the shared contract and dispatch integration. SQL Engine ow
 
 ## 4. Next implementation sequence
 
-1. Validate the proposed limits against current code paths and agree the canonical AST, decision, provider outcome, deadline and cancellation interfaces.
-2. Implement the shared pure policy module and zero-provider-call tests.
-3. Integrate the mandatory gate in the coordinator before every provider/specialized adapter dispatch.
-4. Migrate provider capability outcomes and strict fallback classification.
-5. Add canonical result/error normalization and the legacy UI adapter.
-6. Consolidate the UI to one automatic Execute action after routing/normalization contract tests pass.
-7. Run the complete offline regression workflow and bounded live checks in the designated development/test environment; record the exact tested commit and distinguish infrastructure failures from semantic results.
+1. **Finish safety verification:** audit the committed policy gate, all six named security/audit shapes, actual FetchXML entry points, parser limit traversal, and zero-provider-call assertions. Record current-commit CI evidence when available; do not treat missing status data as a pass.
+2. **Freeze remaining interface details:** document the trusted parsed-AST handoff, typed policy decision/provider capability outcome, exact error-to-fallback classification, duplicate-column key strategy, and count/truncation semantics. Keep proposed numeric deadline/concurrency/memory controls separate from enforced limits.
+3. **Implement the pure result/error normalizer:** use the assigned new module and isolated contract tests; preserve duplicate values, alias casing, SQL NULL, empty-result columns, explicit truncation, and unknown versus exact-zero counts. Do not integrate it into provider call sites until its API is committed.
+4. **Implement the execution coordinator and one Execute action:** route deterministically through the shared policy gate, preserve all six named security/audit routes, and allow fallback only for typed capability rejection when an equivalent route is proven. Use a local contract fixture if the normalizer is not yet committed; do not create a competing normalizer.
+5. **Integrate and verify:** connect the committed normalizer through the legacy UI adapter, test every provider path and no-fallback failure class, then run the complete offline workflow and bounded live checks against the exact integrated commit.
+6. **Record release evidence:** link workflow URLs and tested SHAs; distinguish semantic failures from network/auth/service infrastructure blocks; update the capability matrix. Keep `main` untouched.
 
 `main` remains protected and is not a target for this work. No implementation step is complete until its code/tests and commit evidence exist.
 
