@@ -1,6 +1,34 @@
 "use strict";
 function devLensSecurityAuditBridge(action, p) {
   "use strict";
+  const queryExecution = action === "sqlQuery" ? (() => {
+    const deadlineAt = Math.min(Number(p?.__devlensExecution?.deadlineAt) || Date.now() + 120000, Date.now() + 120000);
+    const suppliedBytes = Number(p?.__devlensExecution?.maxOutputBytes);
+    const maxOutputBytes = Number.isInteger(suppliedBytes) && suppliedBytes > 0 ? Math.min(suppliedBytes, 64 * 1024 * 1024) : 64 * 1024 * 1024;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
+    return {
+      deadlineAt, controller, timer, maxOutputBytes, outputBytes: 0, outputLimitHit: false,
+      assertActive() {
+        if (controller.signal.aborted || Date.now() >= deadlineAt) {
+          controller.abort();
+          const error = Error("Query execution exceeded the 120-second deadline.");
+          error.code = "QUERY_TIMEOUT";
+          throw error;
+        }
+      },
+      reserveRow(row) {
+        this.assertActive();
+        let serialized;
+        try { serialized = JSON.stringify(row); } catch { serialized = ""; }
+        const estimatedBytes = typeof serialized === "string" ? serialized.length * 2 : 0;
+        if (this.outputBytes + estimatedBytes > this.maxOutputBytes) { this.outputLimitHit = true; return false; }
+        this.outputBytes += estimatedBytes;
+        return true;
+      },
+      finish() { clearTimeout(timer); }
+    };
+  })() : null;
   const S = v => v == null ? "" : String(v);
   const G = v => S(v).replace(/[{}]/g, "");
   const X = v => S(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&apos;");
@@ -13,14 +41,17 @@ function devLensSecurityAuditBridge(action, p) {
   const apiRoot = new URL("/api/data/v9.2/", base);
   const maxPages = 100;
   async function get(path) {
+    queryExecution?.assertActive();
     const url = new URL(String(path), apiRoot);
     if (url.origin !== apiRoot.origin || !url.pathname.startsWith(apiRoot.pathname)) {
       throw Error("Blocked a Dataverse request outside the current environment's Web API.");
     }
     const response = await fetch(url.toString(), {
       credentials: "same-origin",
-      headers: { Accept: "application/json", "OData-MaxVersion": "4.0", "OData-Version": "4.0", Prefer: 'odata.include-annotations="*"' }
+      headers: { Accept: "application/json", "OData-MaxVersion": "4.0", "OData-Version": "4.0", Prefer: 'odata.include-annotations="*"' },
+      ...(queryExecution ? { signal: queryExecution.controller.signal } : {})
     });
+    queryExecution?.assertActive();
     if (!response.ok) {
       let message = "";
       try { message = (await response.json())?.error?.message || ""; } catch { }
@@ -34,6 +65,7 @@ function devLensSecurityAuditBridge(action, p) {
     let pages = 0;
     const seen = new Set();
     while (next) {
+      queryExecution?.assertActive();
       const pageUrl = new URL(String(next), apiRoot).toString();
       if (seen.has(pageUrl)) throw Error("Dataverse returned a repeated paging link; retrieval stopped safely.");
       if (pages >= maxPages) throw Error("Dataverse retrieval exceeded the 100-page safety limit.");
@@ -41,7 +73,10 @@ function devLensSecurityAuditBridge(action, p) {
       const data = await get(next);
       const pageRows = Array.isArray(data.value) ? data.value : [];
       const room = maxRows - rows.length;
-      rows.push(...pageRows.slice(0, Math.max(0, room)));
+      for (const row of pageRows.slice(0, Math.max(0, room))) {
+        if (queryExecution && !queryExecution.reserveRow(row)) { const error = Error("Query result exceeded the 64 MiB estimated output-buffer limit."); error.code = "QUERY_OUTPUT_LIMIT"; throw error; }
+        rows.push(row);
+      }
       next = data["@odata.nextLink"] || "";
       pages++;
       if (pageRows.length > room || (rows.length >= maxRows && next)) {
@@ -56,6 +91,7 @@ function devLensSecurityAuditBridge(action, p) {
     let pages = 0;
     const seen = new Set();
     while (next && rows.length < maxRows) {
+      queryExecution?.assertActive();
       const pageUrl = new URL(String(next), apiRoot).toString();
       if (seen.has(pageUrl)) throw Error("Dataverse returned a repeated paging link; retrieval stopped safely.");
       if (pages >= maxPages) return { rows, truncated: true };
@@ -63,10 +99,13 @@ function devLensSecurityAuditBridge(action, p) {
       const data = await get(next);
       const pageRows = Array.isArray(data.value) ? data.value : [];
       const room = maxRows - rows.length;
-      rows.push(...pageRows.slice(0, Math.max(0, room)));
+      for (const row of pageRows.slice(0, Math.max(0, room))) {
+        if (queryExecution && !queryExecution.reserveRow(row)) break;
+        rows.push(row);
+      }
       next = data["@odata.nextLink"] || "";
       pages++;
-      if (pageRows.length > room) return { rows, truncated: true };
+      if (pageRows.length > room || queryExecution?.outputLimitHit) return { rows, truncated: true };
       // At an exact safety cap, completeness cannot be established even when the server omits a next link.
       if (rows.length >= maxRows) return { rows, truncated: true };
     }
@@ -894,6 +933,7 @@ function devLensSecurityAuditBridge(action, p) {
       else if (kind === "record-audit") sqlSort(rows, [["createdon", "desc"]]);
     }
     const globalContext = Xrm.Utility.getGlobalContext();
+    queryExecution?.assertActive();
     return {
       ok: true,
       provider: "dataverse-security-query-adapter",
@@ -920,7 +960,11 @@ function devLensSecurityAuditBridge(action, p) {
     if (action === "recordSearch") return { ok: true, data: await recordSearch(p.table, p.field, p.value, p.mode) };
     if (action === "audit") return { ok: true, data: await audit(p.table, p.recordId) };
     throw Error("Unsupported action");
-  })().catch(error => ({ ok: false, error: error.message || S(error) }));
+  })().catch(error => ({
+    ok: false,
+    ...(queryExecution?.controller.signal.aborted || error?.code === "QUERY_TIMEOUT" ? { code: "QUERY_TIMEOUT" } : error?.code === "QUERY_OUTPUT_LIMIT" ? { code: "QUERY_OUTPUT_LIMIT" } : {}),
+    error: queryExecution?.controller.signal.aborted ? "Query execution exceeded the 120-second deadline." : error.message || S(error)
+  })).finally(() => queryExecution?.finish());
 }
 async function environmentInfo(tab) {
   try {
