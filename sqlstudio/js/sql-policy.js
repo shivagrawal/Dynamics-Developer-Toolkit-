@@ -29,21 +29,57 @@
     return { ok: false, code, error: message, route: null, plan: null };
   }
 
+  const COMPARISON_OPERATORS = new Set(["eq", "ne", "gt", "ge", "lt", "le"]);
+  const LITERAL_TYPES = new Set(["string", "number", "boolean"]);
+
+  function validLiteral(value) {
+    return !!value && typeof value === "object" &&
+      (LITERAL_TYPES.has(value.type) || (value.type === "null" && value.value === null));
+  }
+
+  function validPredicateLeaf(node) {
+    if (!node.field || typeof node.field !== "object" ||
+        typeof node.field.column !== "string" || !node.field.column.trim()) return false;
+    switch (node.type) {
+      case "compare":
+        return COMPARISON_OPERATORS.has(node.operator) && validLiteral(node.value) && node.value.type !== "null";
+      case "null":
+        return typeof node.not === "boolean";
+      case "in":
+        return typeof node.not === "boolean" && Array.isArray(node.values) &&
+          node.values.every(value => validLiteral(value) && value.type !== "null");
+      case "between":
+        return typeof node.not === "boolean" && validLiteral(node.lower) &&
+          validLiteral(node.upper) && node.lower.type !== "null" && node.upper.type !== "null";
+      case "like":
+        return typeof node.not === "boolean" && typeof node.value === "string";
+      default:
+        return false;
+    }
+  }
+
   function predicateStats(root) {
-    if (!root) return { depth: 0, nodes: 0 };
+    if (!root) return { depth: 0, nodes: 0, valid: true };
     const stack = [{ node: root, depth: 1 }];
-    let depth = 0, nodes = 0;
+    let depth = 0, nodes = 0, valid = true;
     while (stack.length) {
       const current = stack.pop();
-      if (!current.node || typeof current.node !== "object") continue;
+      const node = current.node;
+      if (!node || typeof node !== "object" || Array.isArray(node)) {
+        valid = false;
+        continue;
+      }
       nodes++;
       depth = Math.max(depth, current.depth);
-      if (current.node.type === "and" || current.node.type === "or") {
-        stack.push({ node: current.node.left, depth: current.depth + 1 });
-        stack.push({ node: current.node.right, depth: current.depth + 1 });
+      if (node.type === "and" || node.type === "or") {
+        if (!node.left || !node.right) valid = false;
+        stack.push({ node: node.left, depth: current.depth + 1 });
+        stack.push({ node: node.right, depth: current.depth + 1 });
+      } else if (!validPredicateLeaf(node)) {
+        valid = false;
       }
     }
-    return { depth, nodes };
+    return { depth, nodes, valid };
   }
 
   function validatePlan(plan) {
@@ -52,6 +88,9 @@
       return denied("QUERY_LIMIT_EXCEEDED", "Query exceeds the maximum of " + LIMITS.joins + " joins.");
     }
     const stats = predicateStats(plan.where);
+    if (!stats.valid) {
+      return denied("READ_ONLY_POLICY", "The parsed predicate is malformed or contains unsupported nodes.");
+    }
     if (stats.depth > LIMITS.astDepth) {
       return denied("QUERY_LIMIT_EXCEEDED", "Predicate nesting exceeds the maximum depth of " + LIMITS.astDepth + ".");
     }
