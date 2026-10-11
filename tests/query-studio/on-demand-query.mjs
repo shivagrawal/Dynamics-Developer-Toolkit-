@@ -116,12 +116,22 @@ try {
   // Validate the exact LIKE predicate used by this smoke test against returned values,
   // rather than treating an HTTP 200 and an array as proof that WHERE was honored.
   const checksDataverseLike = /\bfullname\s+LIKE\s+'%dataverse%'/i.test(sql);
-  const checksFullnameNotNull = /\bfullname\s+IS\s+NOT\s+NULL\b/i.test(sql);
-  if (checksFullnameNotNull) {
-    for (const row of fetchXmlResult.value) {
-      assert.notEqual(row.fullname, null, "FetchXML IS NOT NULL query returned a null fullname.");
+  const nullPredicates = [...sql.matchAll(/\b([a-z_][a-z0-9_.]*)\s+IS\s+(NOT\s+)?NULL\b/gi)]
+    .map(match => ({ column: match[1].split(".").pop().toLowerCase(), not: Boolean(match[2]) }));
+  const validateNullPredicates = (rows, source) => {
+    for (const predicate of nullPredicates) {
+      for (const row of rows) {
+        const key = Object.keys(row).find(candidate => candidate.toLowerCase() === predicate.column);
+        const value = key === undefined ? null : row[key];
+        if (predicate.not) {
+          assert.ok(value !== null && value !== undefined, source + " IS NOT NULL predicate returned a null " + predicate.column + ".");
+        } else {
+          assert.ok(value === null || value === undefined, source + " IS NULL predicate returned a non-null " + predicate.column + ".");
+        }
+      }
     }
-  }
+  };
+  validateNullPredicates(fetchXmlResult.value, "FetchXML");
   if (checksDataverseLike) {
     for (const row of fetchXmlResult.value) {
       assert.equal(typeof row.fullname, "string", "FetchXML LIKE query returned a row without fullname.");
@@ -145,11 +155,7 @@ try {
   assert.ok(Array.isArray(nativeResult.value), "Dataverse native SQL endpoint did not return a value array.");
   assert.ok(nativeResult.value.length <= 25, "Native SQL query returned more than 25 rows.");
 
-  if (checksFullnameNotNull) {
-    for (const row of nativeResult.value) {
-      assert.notEqual(row.fullname, null, "Native SQL IS NOT NULL query returned a null fullname.");
-    }
-  }
+  validateNullPredicates(nativeResult.value, "Native SQL");
   if (checksDataverseLike) {
     for (const row of nativeResult.value) {
       assert.equal(typeof row.fullname, "string", "Native SQL LIKE query returned a row without fullname.");
@@ -171,8 +177,9 @@ try {
   const nativeProjectedRows = nativeResult.value.map(row => Object.fromEntries(
     requestedColumns.map(column => {
       const actualKey = Object.keys(row).find(key => key.toLowerCase() === column);
-      assert.notEqual(actualKey, undefined, "Native SQL row omitted requested column: " + column);
-      return [column, row[actualKey]];
+      // Dataverse may omit null-valued properties in JSON. Metadata above verifies
+      // that the column is projected; a missing row property is normalized as SQL NULL.
+      return [column, actualKey === undefined ? null : row[actualKey] === undefined ? null : row[actualKey]];
     })
   ));
   assert.ok(nativeProjectedRows.every(row => Object.keys(row).every(key => requestedColumns.includes(key))),
@@ -193,8 +200,8 @@ try {
       const normalized = {};
       for (const column of requestedColumns) {
         const actualKey = Object.keys(row).find(key => key.toLowerCase() === column);
-        assert.notEqual(actualKey, undefined, "A query path omitted a requested projected column.");
-        normalized[column] = row[actualKey] === undefined ? null : row[actualKey];
+        // Missing JSON properties are treated as NULL only after projection metadata was verified.
+        normalized[column] = actualKey === undefined || row[actualKey] === undefined ? null : row[actualKey];
       }
       return JSON.stringify(normalized);
     });
