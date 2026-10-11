@@ -34,6 +34,7 @@ The adapter currently implements the six documented shapes in SECURITY-QUERY-COM
 - Exact result projection expressions, aliases, DISTINCT state, required joins, WHERE predicates, and ORDER BY clauses are validated before any Dataverse request, preventing unsupported query variants from producing misleading output. String literals cannot satisfy structural checks.
 - Ordinary-table SQL follows only same-origin Dataverse paging links, caps results at 10,000 rows/100 pages, and warns if more results may remain.
 - Security metadata retrieval applies the same-origin check to every Dataverse API URL, detects repeated paging links, caps pages/rows, and fails rather than silently returning partial catalog data.
+- The security SQL compatibility adapter validates the exact number of JOIN/APPLY clauses and rejects comma-separated FROM sources, so unmodeled relationships cannot silently change SQL result cardinality.
 - CSV export neutralizes formula-like values (including `=`, `+`, `-`, `@`, and leading control characters) before producing spreadsheet-openable CSV.
 - User-role/user-privilege retrieval is bounded at 5,000 rows; entity/role privilege retrieval is bounded at 10,000 rows; audit retrieval is bounded at 1,000 audit records and 10,000 expanded changed-attribute rows.
 - Audit detail requests use a concurrency limit of four to avoid an unbounded request burst.
