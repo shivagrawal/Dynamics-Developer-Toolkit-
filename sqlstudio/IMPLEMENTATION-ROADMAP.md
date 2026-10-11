@@ -14,7 +14,7 @@ Compatibility should be measured against a versioned SQL feature matrix. We must
 
 | Capability | Current state | Remaining gap / exact resolution |
 |---|---|---|
-| Browser Query Studio UI | Implemented: SQL editor, Execute SQL, status/errors, results grid, paging through returned rows, CSV and JSON export | Make provider selection automatic and expose consistent diagnostics; remove the separate user-facing engine-preview choice |
+| Browser Query Studio UI | Implemented: one Execute action, SQL editor, status/errors, results grid, result paging, CSV and JSON export | Complete capability-first coordinator and uniform diagnostics; OFFSET/FETCH now routes to bounded FetchXML because live evidence showed native SQL ignored FETCH NEXT bounds |
 | Schema Explorer | Implemented: discover tables, search display/logical names, inspect columns/types/primary fields, insert selected logical names and generate SELECT | Add relationship/navigation metadata and autocomplete; cache metadata per environment with invalidation and permission-safe errors |
 | Native Dataverse SQL provider | Implemented for Microsoft's native endpoint SQL subset; uses current Dynamics page context; follows bounded same-origin paging links and validates projections | Do not treat it as the product engine. Route only statements whose semantics and syntax fit this provider; normalize all response/error shapes |
 | In-house SQL parser/compiler | Implemented as sqlstudio/js/sql-engine.js; parses a bounded SELECT grammar and compiles to FetchXML; metadata validation and XML escaping exist | It is not a complete SQL engine. Extend the AST/planner and add missing constructs listed below; add semantic tests before enabling a feature |
@@ -24,7 +24,7 @@ Compatibility should be measured against a versioned SQL feature matrix. We must
 | Read-only safeguards | UI and background checks, SELECT-only custom parser, FetchXML input validation, query/row/page caps, same-origin paging, audit limits, CSV formula neutralization | Put every provider behind one shared parsed-AST policy gate. Test bypass attempts including comments, quoted semicolons, multiple statements, CTE-prefixed writes, malformed syntax, and unsupported constructs |
 | Result semantics | Projection verification, null-capable columns, alias normalization, lookup backing-field mapping, explicit truncation indicators exist in some paths | Establish one typed result contract: ordered column descriptors, rows, nulls, duration, provider, warnings, row limits, paging state and normalized errors |
 | Automated tests | Node regression suite, syntax/manifest checks, live environment integration, native SQL smoke harness, security/audit live tests exist | One CI entry point must run all offline Query Studio suites. Keep live tests as a separate gated job with clear infrastructure-vs-semantic failure classification |
-| Live validation | Latest regression run passed; ordinary SQL smoke test passed; general Dataverse integration passed. Latest security/audit live workflow failed on endpoint connection timeout (ETIMEDOUT), so live security/audit is not verified by that run | Retry with bounded backoff and connectivity preflight; rerun the live suite when endpoint connectivity is restored. Never report an infrastructure timeout as a successful semantic test |
+| Live validation | Offline regression: 190/190 on `af432855b49872d91e3f73c94c8b6e6cc6a4c0a8` ([run 38156403515](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156403515)). Live semantic matrix passed on code SHA `25ee4dc97215565d6a9c5c44c0a89648c7a8eef7` ([run 38156387008](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156387008)); security/audit and environment integration passed on `f77e015fcc57d9ee2ce3a37f26c9177f21adb62c` ([security](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156018818), [environment](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38156018839)) | Rerun security/audit if its implementation changes; keep exact-SHA evidence. Shared runtime deadline/cancellation/concurrency/output-buffer enforcement remains unverified |
 | SQL4CDS local agent | Experimental scaffold only; authentication provider returns AUTH_PROVIDER_REQUIRED and it is not used for query execution | Keep optional/non-required. Do not make it part of normal execution or require users to install SQL4CDS, XrmToolBox, or a .NET runtime |
 
 ## 3. Target architecture
@@ -62,7 +62,7 @@ Query Studio UI -> shared SQL tokenizer/parser -> AST validation and read-only p
 **Deliverables**
 - Add a shared query execution coordinator that accepts SQL and returns the standard result contract.
 - Route based on parsed AST/provider capability. Keep the native endpoint as a provider, not as the complete engine.
-- Remove the separate “Execute JS engine (preview)” user choice once automatic routing passes tests.
+- Keep one user-facing Execute action. Verified OFFSET/FETCH capability routing bypasses native SQL and uses bounded FetchXML; the full parse-once capability coordinator is still outstanding.
 - Preserve provider diagnostics internally and show a useful, concise explanation in the UI.
 - Normalize aliases, columns, NULL values, errors, truncation and duration across all paths.
 
@@ -150,7 +150,7 @@ Implement features in dependency order, with parser, planner/compiler, offline f
 
 ## 6. Completion dashboard
 
-The product is **not yet at the independent SQL4CDS-class replacement milestone**. It has a useful foundation: UI, schema explorer, native SQL provider, bounded in-house SQL-to-FetchXML compiler, named security/audit adapters, safety limits, and regression/live-test infrastructure. The largest remaining work is a shared execution coordinator, semantic hardening, and broad SQL syntax/plan support.
+The product is **not yet at the independent SQL4CDS-class replacement milestone**. It has a useful foundation: one Execute UI, schema explorer, native SQL provider, bounded in-house SQL-to-FetchXML compiler, named security/audit adapters, safety limits, and regression/live-test infrastructure. Live evidence identified and fixed two semantic gaps: native SQL did not honor the OFFSET/FETCH bound in the tested endpoint, and joined projections needed to be emitted inside their FetchXML link entities. The largest remaining work is a shared parse-once execution coordinator, verified runtime limits, semantic hardening, and broad SQL syntax/plan support.
 
 Track progress by acceptance gates rather than a guessed percentage. A feature is done only when implementation, offline tests, and required live tests are all complete. The exact percentage should be calculated after the baseline inventory is mapped to the feature matrix, not estimated from the number of UI features.
 
