@@ -450,7 +450,15 @@
     };
     const links = joinNodes.filter(node => node.parentAlias === plan.alias.toLowerCase()).map(renderJoin).join("");
     const whereXml = !filters ? "" : (plan.where.type === "and" || plan.where.type === "or" ? filters : '<filter type="and">'+filters+'</filter>');
-    const xml='<fetch'+(plan.aggregateQuery?' aggregate="true"':'')+(plan.top?' top="'+plan.top+'"':'')+(plan.distinct?' distinct="true"':'')+'><entity name="'+escapeXml(base.logicalName)+'">'+attrs.join("")+orders+whereXml+links+'</entity></fetch>';
+    // FetchXML paging is page/count based, unlike SQL's arbitrary row offset.
+    // Map only exact page boundaries and reject requests that would silently change
+    // SQL semantics or return an unbounded page.
+    if (plan.hasOffset) {
+      if (plan.fetch == null) fail("OFFSET requires FETCH NEXT for bounded FetchXML paging.");
+      if (plan.offset % plan.fetch !== 0) fail("OFFSET must be a multiple of FETCH NEXT for FetchXML paging; this offset cannot be represented exactly.");
+    }
+    const paging = plan.hasOffset ? ' page="'+String(plan.offset / plan.fetch + 1)+'" count="'+String(plan.fetch)+'"' : "";
+    const xml='<fetch'+(plan.aggregateQuery?' aggregate="true"':'')+(plan.top?' top="'+plan.top+'"':'')+(plan.distinct?' distinct="true"':'')+paging+'><entity name="'+escapeXml(base.logicalName)+'">'+attrs.join("")+orders+whereXml+links+'</entity></fetch>';
     return {fetchXml:xml,plan,entitySetName:base.entitySetName,primaryIdAttribute:base.primaryIdAttribute,resultColumns,readOnly:true};
   }
 
