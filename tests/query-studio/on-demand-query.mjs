@@ -90,6 +90,17 @@ try {
   assert.ok(Array.isArray(fetchXmlResult.value), "Dataverse FetchXML query did not return a value array.");
   assert.ok(fetchXmlResult.value.length <= 25, "FetchXML query returned more than 25 rows.");
 
+  // Validate the exact LIKE predicate used by this smoke test against returned values,
+  // rather than treating an HTTP 200 and an array as proof that WHERE was honored.
+  const checksDataverseLike = /\\bfullname\\s+LIKE\\s+'%dataverse%'/i.test(sql);
+  if (checksDataverseLike) {
+    for (const row of fetchXmlResult.value) {
+      assert.equal(typeof row.fullname, "string", "FetchXML LIKE query returned a row without fullname.");
+      assert.ok(row.fullname.toLowerCase().includes("dataverse"),
+        "FetchXML returned a row that violates fullname LIKE '%dataverse%'.");
+    }
+  }
+
   // Independently exercise the native Dataverse SQL endpoint used by executeSQL.
   // This verifies that the live endpoint exposes the requested projection even if
   // its OData context contains extra columns; values are never printed to CI logs.
@@ -97,6 +108,14 @@ try {
   const nativeResult = await api(`${entities[baseTable].entitySetName}?sql=${encodeURIComponent(sql)}`, token);
   assert.ok(Array.isArray(nativeResult.value), "Dataverse native SQL endpoint did not return a value array.");
   assert.ok(nativeResult.value.length <= 25, "Native SQL query returned more than 25 rows.");
+
+  if (checksDataverseLike) {
+    for (const row of nativeResult.value) {
+      assert.equal(typeof row.fullname, "string", "Native SQL LIKE query returned a row without fullname.");
+      assert.ok(row.fullname.toLowerCase().includes("dataverse"),
+        "Native SQL endpoint returned a row that violates fullname LIKE '%dataverse%'.");
+    }
+  }
   const contextMatch = String(nativeResult["@odata.context"] || "").match(/#([A-Za-z_][A-Za-z0-9_]*)\(([^()]*)\)/);
   assert.ok(contextMatch, "Native SQL endpoint did not return verifiable projection metadata.");
   const nativeColumns = contextMatch[2].split(",").map(value => value.trim()).filter(Boolean);
