@@ -76,6 +76,17 @@ test("compiles NOT IN, BETWEEN, NOT BETWEEN and preserves AND/OR precedence",()=
  assert.match(grouped.fetchXml,/<filter type="or"><condition attribute="statecode" operator="eq" value="0"\/><filter type="and"><condition attribute="statecode" operator="eq" value="1"\/><condition attribute="fullname" operator="like" value="A%"\/><\/filter><\/filter>/);
 });
 
+test("supports unary NOT with De Morgan semantics and inverse comparison operators",()=>{
+ const simple=engine.compileSql("SELECT fullname FROM contact WHERE NOT statecode = 1",metadata);
+ assert.match(simple.fetchXml,/<condition attribute="statecode" operator="ne" value="1"\\/>/);
+
+ const grouped=engine.compileSql("SELECT fullname FROM contact WHERE NOT (statecode = 0 OR fullname LIKE 'A%')",metadata);
+ assert.match(grouped.fetchXml,/<filter type="and"><condition attribute="statecode" operator="ne" value="0"\\/><condition attribute="fullname" operator="not-like" value="A%"\\/></filter>/);
+
+ const nested=engine.compileSql("SELECT fullname FROM contact WHERE NOT (statecode > 1 AND statecode <= 3)",metadata);
+ assert.match(nested.fetchXml,/<filter type="or"><condition attribute="statecode" operator="le" value="1"\\/><condition attribute="statecode" operator="gt" value="3"\\/></filter>/);
+});
+ 
 test("adds stable paging order for DISTINCT base projections",()=>{
  const q=engine.compileSql("SELECT DISTINCT fullname, statecode FROM contact ORDER BY fullname",metadata);
  assert.match(q.fetchXml,/<fetch distinct="true">/);

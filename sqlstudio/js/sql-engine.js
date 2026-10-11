@@ -126,7 +126,25 @@
     }
     if (peek("HAVING")) fail("HAVING is not supported in this engine version.");
     function parsePredicate() {
+      const negatePredicate = node => {
+        if (node.type === "and" || node.type === "or") {
+          return {
+            type: node.type === "and" ? "or" : "and",
+            left: negatePredicate(node.left),
+            right: negatePredicate(node.right)
+          };
+        }
+        if (node.type === "null" || node.type === "in" || node.type === "between" || node.type === "like") {
+          return { ...node, not: !node.not };
+        }
+        if (node.type === "compare") {
+          const inverse = { eq: "ne", ne: "eq", gt: "le", ge: "lt", lt: "ge", le: "gt" };
+          return { ...node, operator: inverse[node.operator] };
+        }
+        fail("NOT cannot be applied to this predicate.");
+      };
       const parseAtom=()=>{
+        if (peek("NOT")) { take(); return negatePredicate(parseAtom()); }
         if (peek("(")) { take(); const node=parseOr(); expect(")"); return node; }
         const field=qualified();
         if (peek("IS")) { take(); const not=!!(peek("NOT")&&take()); expect("NULL"); return {type:"null",field,not}; }
