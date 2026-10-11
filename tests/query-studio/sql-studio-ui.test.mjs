@@ -14,7 +14,7 @@ function createHost() {
     value: "",
     selectionStart: 0,
     selectionEnd: 0,
-    addEventListener() {},
+    addEventListener(type, handler) { if (type === "input") this.onInput = handler; },
     getAttribute() { return null; },
     focus() {},
     setSelectionRange() {}
@@ -267,10 +267,10 @@ test("typed capability responses never reroute named security/audit queries", as
   window.DevLensSqlStudioView.renderInto(host);
   const editor = host.querySelector("textarea");
   editor.value = "SELECT name FROM audit";
-  editor.dispatchEvent?.({ type: "input", target: editor });
+  editor.onInput?.({ target: editor });
   // The UI fallback guard is deliberately conservative; the background remains
   // authoritative for deciding whether this is one of the six approved shapes.
   await click(host, "execute");
   assert.deepEqual(calls, ["querySql"]);
-  assert.match(host.innerHTML, /Query uses syntax|could not be parsed|not supported/i);
+  assert.match(host.innerHTML, /could not complete the request/i);
 });
