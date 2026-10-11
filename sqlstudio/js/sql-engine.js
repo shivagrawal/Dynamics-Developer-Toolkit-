@@ -407,7 +407,8 @@
         node.children.map(renderJoin).join("")+'</link-entity>';
     };
     const links = joinNodes.filter(node => node.parentAlias === plan.alias.toLowerCase()).map(renderJoin).join("");
-    const xml='<fetch'+(plan.aggregateQuery?' aggregate="true"':'')+(plan.top?' top="'+plan.top+'"':'')+(plan.distinct?' distinct="true"':'')+'><entity name="'+escapeXml(base.logicalName)+'">'+attrs.join("")+orders+filters+links+'</entity></fetch>';
+    const whereXml = !filters ? "" : (plan.where.type === "and" || plan.where.type === "or" ? filters : '<filter type="and">'+filters+'</filter>');
+    const xml='<fetch'+(plan.aggregateQuery?' aggregate="true"':'')+(plan.top?' top="'+plan.top+'"':'')+(plan.distinct?' distinct="true"':'')+'><entity name="'+escapeXml(base.logicalName)+'">'+attrs.join("")+orders+whereXml+links+'</entity></fetch>';
     return {fetchXml:xml,plan,entitySetName:base.entitySetName,primaryIdAttribute:base.primaryIdAttribute,resultColumns,readOnly:true};
   }
 
