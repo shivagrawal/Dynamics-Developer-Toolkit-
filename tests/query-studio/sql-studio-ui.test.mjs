@@ -217,3 +217,30 @@ test("single Execute does not fall back on authorization or generic provider err
   assert.deepEqual(calls, ["querySql"]);
   assert.match(host.innerHTML, /permission to run this query/i);
 });
+
+
+test("single Execute never falls back for timeout, transport, throttling, metadata, or data failures", async () => {
+  for (const code of ["TIMEOUT", "TRANSPORT", "THROTTLED", "METADATA", "DATAVERSE", "INTERNAL"]) {
+    const calls = [];
+    const window = {
+      DevLensSqlResultNormalizer: resultNormalizer,
+      D365AnalyzerApi: {
+        send: async action => {
+          calls.push(action);
+          return { ok: false, code, error: "untrusted provider detail" };
+        }
+      }
+    };
+    const host = createHost();
+    const context = {
+      window, document: { activeElement: null, createElement: () => ({ click() {} }) },
+      performance: { now: () => 1 }, Blob: class {},
+      URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
+    };
+    vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
+    window.DevLensSqlStudioView.renderInto(host);
+    await click(host, "execute");
+    assert.deepEqual(calls, ["querySql"], code + " must not trigger provider fallback");
+    assert.doesNotMatch(host.innerHTML, /untrusted provider detail/);
+  }
+});
