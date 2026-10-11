@@ -27,7 +27,7 @@ test("accepts bracketed identifiers and ignores SQL comments safely",()=>{
  const q=engine.compileSql("/* start */ SELECT [fullname] FROM [contact] -- table\nWHERE [statecode] = 1",metadata);
  assert.match(q.fetchXml,/<entity name="contact">/);
  assert.match(q.fetchXml,/<attribute name="fullname"\/>/);
- assert.match(q.fetchXml,/operator="eq"><value>1<\/value>/);
+ assert.match(q.fetchXml,/operator="eq" value="1"\/>/);
 });
 
 test("compiles basic SELECT with TOP, projection, filter and sort",()=>{
@@ -35,7 +35,7 @@ test("compiles basic SELECT with TOP, projection, filter and sort",()=>{
  assert.equal(q.entitySetName,"contacts");
  assert.match(q.fetchXml,/<fetch top="25">/);
  assert.match(q.fetchXml,/<attribute name="fullname"\/>/);
- assert.match(q.fetchXml,/<condition attribute="statecode" operator="eq"><value>0<\/value><\/condition>/);
+ assert.match(q.fetchXml,/<condition attribute="statecode" operator="eq" value="0"\/>/);
  assert.match(q.fetchXml,/<order attribute="createdon" descending="true"\/>/);
  assert.equal(q.readOnly,true);
 });
@@ -47,7 +47,7 @@ test("nests a simple LIKE condition inside a FetchXML filter for TOP queries",()
   ]}}
  });
  assert.match(q.fetchXml,/<fetch top="100"><entity name="systemuser">/);
- assert.match(q.fetchXml,/<filter type="and"><condition attribute="fullname" operator="like"><value>%dataverse%<\/value><\/condition><\/filter>/);
+ assert.match(q.fetchXml,/<filter type="and"><condition attribute="fullname" operator="like" value="%dataverse%"\/><\/filter>/);
  assert.doesNotMatch(q.fetchXml,/<entity[^>]*>\s*<condition/);
 });
 
@@ -73,7 +73,7 @@ test("compiles NOT IN, BETWEEN, NOT BETWEEN and preserves AND/OR precedence",()=
  assert.match(notBetween.fetchXml,/<condition attribute="statecode" operator="not-between"><value>1<\/value><value>3<\/value><\/condition>/);
 
  const grouped=engine.compileSql("SELECT fullname FROM contact WHERE statecode = 0 OR statecode = 1 AND fullname LIKE 'A%'",metadata);
- assert.match(grouped.fetchXml,/<filter type="or"><condition attribute="statecode" operator="eq"><value>0<\/value><\/condition><filter type="and"><condition attribute="statecode" operator="eq"><value>1<\/value><\/condition><condition attribute="fullname" operator="like"><value>A%<\/value><\/condition><\/filter><\/filter>/);
+ assert.match(grouped.fetchXml,/<filter type="or"><condition attribute="statecode" operator="eq" value="0"\/><filter type="and"><condition attribute="statecode" operator="eq" value="1"\/><condition attribute="fullname" operator="like" value="A%"\/><\/filter><\/filter>/);
 });
 
 test("adds stable paging order for DISTINCT base projections",()=>{

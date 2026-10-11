@@ -217,10 +217,10 @@
     if(node.type==="like") {
       const pattern=node.value;
       const value=pattern.replace(/\\%/g,"%").replace(/\\_/g,"_");
-      return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-like":"like")+'"'+entity+'><value>'+escapeXml(value)+'</value></condition>';
+      return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-like":"like")+'"'+entity+' value="'+escapeXml(value)+'"/>';
     }
     if(node.value.type==="null") fail("Use IS NULL or IS NOT NULL instead of comparing with NULL.");
-    return '<condition attribute="'+escapeXml(field.name)+'" operator="'+node.operator+'"'+entity+'><value>'+escapeXml(valueXml(node.value))+'</value></condition>';
+    return '<condition attribute="'+escapeXml(field.name)+'" operator="'+node.operator+'"'+entity+' value="'+escapeXml(valueXml(node.value))+'"/>';
   }
   function compile(plan, metadata) {
     metadata=metadata||{};
