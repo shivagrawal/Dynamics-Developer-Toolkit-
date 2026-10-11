@@ -1,4 +1,5 @@
 name: Query Studio Regression Tests
+# Temporary PR-triggered validation of the current integrated coordinator changes; do not merge.
 
 on:
   push:
