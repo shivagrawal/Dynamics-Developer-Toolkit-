@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   live-security-queries:
-    name: Validate security SQL against Dataverse
+    name: Validate security SQL and audit integration against Dataverse
     runs-on: ubuntu-latest
     environment: dataverse-test
     timeout-minutes: 15
@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Execute read-only security query integration tests
+      - name: Execute live security query tests (includes a disposable audit fixture)
         env:
           DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
           DATAVERSE_TENANT_ID: ${{ secrets.DATAVERSE_TENANT_ID }}
