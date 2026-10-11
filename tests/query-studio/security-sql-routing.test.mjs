@@ -182,7 +182,70 @@ test("unsupported security/audit near-matches fail closed before every provider 
   }
 });
 
-test("security table names only in literals or comments retain ordinary SQL routing", async () => {
+test("query dispatch passes a fixed deadline and output-buffer policy to every SQL provider", async () => {
+  const { listener, calls, context, securityBridge } = loadBackground();
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const ordinary = await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: "SELECT TOP 5 accountid, name FROM account" } });
+  assert.equal(ordinary.ok, true);
+  const envelope = calls[0].args[1].__devlensExecution;
+  assert.equal(envelope.maxOutputBytes, 64 * 1024 * 1024);
+  assert.ok(envelope.deadlineAt > Date.now());
+  assert.ok(envelope.deadlineAt <= Date.now() + 120000);
+
+  const securitySql = supportedSecurityDispatchQueries[0].sql;
+  await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: securitySql } });
+  assert.equal(calls[1].func, securityBridge);
+  assert.equal(calls[1].args[1].__devlensExecution.maxOutputBytes, 64 * 1024 * 1024);
+  assert.ok(calls[1].args[1].__devlensExecution.deadlineAt > Date.now());
+  assert.equal(context.DEVLENS_QUERY_MAX_CONCURRENT, undefined, "runtime policy stays private to the background module");
+});
+
+test("the background rejects a fifth concurrent Query Studio execution and releases slots", async () => {
+  const { listener, calls, context } = loadBackground();
+  const pending = [];
+  context.chrome.scripting.executeScript = options => {
+    calls.push(options);
+    return new Promise(resolve => pending.push(resolve));
+  };
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const query = { type: "DEVLENS_ACTION", action: "querySql", payload: { sql: "SELECT TOP 1 accountid FROM account" } };
+  const running = Array.from({ length: 4 }, () => dispatch(query));
+  assert.equal(calls.length, 4);
+  const rejected = await dispatch(query);
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.code, "QUERY_CONCURRENCY_LIMIT");
+  assert.equal(calls.length, 4, "the rejected query must not reach the provider");
+  for (const resolve of pending) resolve([{ result: { ok: true, rows: [], columns: [] } }]);
+  const completed = await Promise.all(running);
+  assert.equal(completed.every(result => result.ok), true);
+  const next = await dispatch(query);
+  assert.equal(next.ok, true, "a completed execution releases its concurrency slot");
+  assert.equal(calls.length, 5);
+});
+
+test("FetchXML result accumulation stops at the configured output-byte cap and marks truncation", async () => {
+  const { context } = loadBackground();
+  context.AbortController = AbortController;
+  context.Xrm = {
+    WebApi: {
+      retrieveMultipleRecords: async () => ({
+        entities: [{ fullname: "row one" }, { fullname: "row two" }],
+        nextLink: null
+      })
+    }
+  };
+  const result = await context.pageBridge("queryFetchXml", {
+    fetchXml: '<fetch><entity name="contact" /></fetch>',
+    tableName: "contact",
+    __devlensExecution: { deadlineAt: Date.now() + 10000, maxOutputBytes: 1 }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 0);
+  assert.equal(result.truncated, true);
+  assert.equal(result.moreRecords, true);
+});
+
+test("security table names only in literals or comments retain ordinary SQL routing", async () =>
   const ordinaryQueries = [
     "SELECT name FROM account WHERE name = 'roleprivileges'",
     "SELECT name FROM account -- FROM systemuserroles",
