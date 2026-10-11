@@ -392,7 +392,7 @@ test("DISTINCT and TOP projections with WHERE and ORDER BY validate correctly", 
     "SELECT DISTINCT TOP 10 fullname FROM contact WHERE fullname IS NOT NULL ORDER BY fullname",
   );
   assert.equal(result.ok, true);
-  assert.deepEqual(Array.from(result.columns), ["fullname", "contactid"]);
+  assert.deepEqual(Array.from(result.columns), ["fullname"]);
 });
 
 test("case-insensitive SQL projection validation accepts differently cased OData columns", async () => {

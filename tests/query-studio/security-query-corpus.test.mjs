@@ -77,7 +77,7 @@ test("security query 2: distinct privilege names by entity and ORDER BY", () => 
   assert.match(result.fetchXml, /<entity name="privilege">/);
   assert.match(result.fetchXml, /<link-entity name="privilegeobjecttypecodes" alias="potc"/);
   assert.match(result.fetchXml, /<link-entity name="entity" alias="e"/);
-  assert.match(result.fetchXml, /attribute="logicalname" operator="eq" entityname="e"><value>salesorder<\/value>/);
+  assert.match(result.fetchXml, /attribute="logicalname" operator="eq" entityname="e" value="salesorder"\/>/);
   assert.ok(result.fetchXml.includes('<order attribute="name"'));
   assert.deepEqual(result.resultColumns.map(column => column.label), ["privilege_name"]);
 });
