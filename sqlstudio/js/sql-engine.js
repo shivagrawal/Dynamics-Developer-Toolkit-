@@ -85,10 +85,14 @@
         if (peek("*")) { take(); star = true; } else field = qualified();
         expect(")");
         if (distinctAggregate && (aggregate !== "COUNT" || star)) fail("DISTINCT is supported only for COUNT(column).");
-        let as = null; if (peek("AS")) { take(); as = identifier(); }
+        let as = null;
+        if (peek("AS")) { take(); as = identifier(); }
+        else if (tokens[p]?.type === "identifier") as = identifier();
         columns.push({aggregate,star,distinctAggregate,tableAlias:field?.tableAlias||null,column:field?.column||null,alias:as});
       } else {
-        const field=qualified(); let as=null; if (peek("AS")) { take(); as=identifier(); }
+        const field=qualified(); let as=null;
+        if (peek("AS")) { take(); as=identifier(); }
+        else if (tokens[p]?.type === "identifier") as=identifier();
         columns.push({tableAlias:field.tableAlias,column:field.column,alias:as});
       }
       if (!peek(",")) break; take();

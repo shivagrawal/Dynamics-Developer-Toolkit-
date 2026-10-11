@@ -178,6 +178,16 @@ test("parses OFFSET/FETCH and enforces bounded deterministic paging",()=>{
  assert.throws(()=>engine.plan("SELECT fullname FROM contact ORDER BY fullname OFFSET 9999 ROWS FETCH NEXT 2 ROWS ONLY"),/10,000-row safety cap/);
 });
 
+test("supports implicit SQL output aliases for columns and aggregates",()=>{
+ const columnAlias=engine.compileSql("SELECT c.fullname ContactName FROM contact c",metadata);
+ assert.ok(columnAlias.fetchXml.includes('<attribute name="fullname" alias="ContactName"/>'));
+ assert.deepEqual(columnAlias.resultColumns.map(column=>column.label),["ContactName"]);
+
+ const aggregateAlias=engine.compileSql("SELECT COUNT(*) contact_count FROM contact",metadata);
+ assert.ok(aggregateAlias.fetchXml.includes('alias="contact_count"'));
+ assert.deepEqual(aggregateAlias.resultColumns.map(column=>column.label),["contact_count"]);
+});
+
 test("supports SQL output aliases without confusing them with table aliases",()=>{
  const q=engine.compileSql("SELECT c.fullname AS ContactName FROM contact AS c",metadata);
  assert.ok(q.fetchXml.includes('<attribute name="fullname" alias="ContactName"/>'));
