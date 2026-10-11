@@ -199,3 +199,56 @@ test("security table names only in literals or comments retain ordinary SQL rout
     assert.notEqual(calls[0].func, securityBridge, sql);
   }
 });
+
+
+test("dispatcher does not retry or switch bridges after provider failures", async t => {
+  const failures = [
+    { name: "authentication", code: "AUTHENTICATION" },
+    { name: "authorization", code: "AUTHORIZATION" },
+    { name: "timeout", code: "TIMEOUT" },
+    { name: "transport", code: "TRANSPORT" },
+    { name: "throttling", code: "THROTTLED" },
+    { name: "Dataverse data", code: "DATAVERSE" }
+  ];
+  const routes = [
+    {
+      name: "specialized security bridge",
+      sql: supportedSecurityDispatchQueries[0].sql,
+      expectedBridge: "security"
+    },
+    {
+      name: "native SQL bridge",
+      sql: "SELECT TOP 5 accountid, name FROM account",
+      expectedBridge: "native"
+    }
+  ];
+
+  for (const route of routes) {
+    for (const failure of failures) {
+      await t.test(`${route.name} preserves ${failure.name} failures without fallback`, async () => {
+        const { listener, calls, context, securityBridge } = loadBackground();
+        context.chrome.scripting.executeScript = options => {
+          calls.push(options);
+          return Promise.resolve([{
+            result: {
+              ok: false,
+              code: failure.code,
+              error: `Simulated ${failure.code} failure`
+            }
+          }]);
+        };
+        const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+        const result = await dispatch({
+          type: "DEVLENS_ACTION",
+          action: "querySql",
+          payload: { sql: route.sql }
+        });
+
+        assert.equal(result.ok, false);
+        assert.equal(result.code, failure.code);
+        assert.equal(calls.length, 1, "a provider failure must not trigger a second dispatch");
+        assert.equal(calls[0].func, route.expectedBridge === "security" ? securityBridge : context.pageBridge);
+      });
+    }
+  }
+});
