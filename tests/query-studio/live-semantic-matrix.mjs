@@ -102,7 +102,7 @@ async function runParityCase({ name, sql, entities, token, expected }) {
     assert.equal(nativeRows.length, 0, name + ": native SQL expected an empty result");
   }
 
-  return { name, fetchXmlRows: fetchRows.length, nativeSqlRows: nativeRows.length, matched: true };
+  return { name, fetchXmlRows: fetchRows.length, nativeSqlRows: nativeRows.length, matched: true, _keys: fetchRows.map(row => row[0]) };
 }
 
 try {
@@ -141,12 +141,43 @@ try {
       name: "left-join-cardinality",
       sql: "SELECT TOP 5 c.contactid, c.fullname FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid ORDER BY c.contactid",
     },
+    {
+      name: "offset-fetch-page-one",
+      sql: "SELECT contactid, fullname FROM contact ORDER BY contactid OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY",
+    },
+    {
+      name: "offset-fetch-page-two",
+      sql: "SELECT contactid, fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY",
+    },
   ];
 
   const results = [];
+  const pageKeys = {};
   for (const item of cases) {
-    results.push(await runParityCase({ ...item, entities, token }));
+    const result = await runParityCase({ ...item, entities, token });
+    if (item.name === "offset-fetch-page-one" || item.name === "offset-fetch-page-two") {
+      pageKeys[item.name] = result._keys;
+    }
+    const { _keys, ...summary } = result;
+    results.push(summary);
   }
+
+  assert.ok(pageKeys["offset-fetch-page-one"].length > 0,
+    "paging: page one must return at least one contact in the configured test environment");
+  const firstPageKeys = new Set(pageKeys["offset-fetch-page-one"].map(key => String(key).toLowerCase()));
+  assert.ok(pageKeys["offset-fetch-page-two"].every(key => !firstPageKeys.has(String(key).toLowerCase())),
+    "paging: page one and page two contain overlapping contact primary keys");
+  assert.equal(new Set(pageKeys["offset-fetch-page-one"].map(key => String(key).toLowerCase())).size,
+    pageKeys["offset-fetch-page-one"].length, "paging: page one contains duplicate contact primary keys");
+  assert.equal(new Set(pageKeys["offset-fetch-page-two"].map(key => String(key).toLowerCase())).size,
+    pageKeys["offset-fetch-page-two"].length, "paging: page two contains duplicate contact primary keys");
+  results.push({
+    name: "offset-fetch-page-boundaries",
+    pageOneRows: pageKeys["offset-fetch-page-one"].length,
+    pageTwoRows: pageKeys["offset-fetch-page-two"].length,
+    overlap: 0,
+    matched: true,
+  });
 
   // Aggregate validation is bounded server-side: it returns one aggregate row,
   // not the underlying contact set. The exact count is deliberately not logged.
