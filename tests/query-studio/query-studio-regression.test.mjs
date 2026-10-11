@@ -246,8 +246,9 @@ test("Dataverse annotation properties are omitted from result columns and rows",
   });
   const { result } = await harness.runQuery("SELECT fullname FROM contact");
   assert.equal(result.ok, true);
-  assert.deepEqual(Array.from(result.columns), ["fullname", "contactid"]);
+  assert.deepEqual(Array.from(result.columns), ["fullname"]);
   assert.equal(Object.keys(result.rows[0]).some((key) => key.includes("@")), false);
+  assert.deepEqual(Object.keys(result.rows[0]), ["fullname"]);
 });
 
 test("projection mismatch fails closed instead of returning misleading results", async () => {
