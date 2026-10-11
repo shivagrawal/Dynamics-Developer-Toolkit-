@@ -187,14 +187,16 @@ try {
   // Explicitly test LEFT JOIN null extension: a contact with no parent account
   // must retain its row while the joined account primary key is null. Values stay
   // in memory and are never written to logs or workflow summaries.
-  const unmatchedSql = "SELECT TOP 5 c.contactid, a.accountid FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid WHERE c.parentcustomerid IS NULL ORDER BY c.contactid";
+  // Join two different entity primary IDs so this test creates an unmatched relationship
+  // without requiring pre-existing unparented contacts or mutating the environment.
+  const unmatchedSql = "SELECT TOP 5 c.contactid, a.accountid FROM contact c LEFT JOIN account a ON c.contactid = a.accountid ORDER BY c.contactid";
   const unmatchedCompiled = engine.compileSql(unmatchedSql, { entities });
   assert.equal(unmatchedCompiled.readOnly, true, "left-join-null-extension: compiler did not mark query read-only");
   const unmatchedFetch = await api(unmatchedCompiled.entitySetName + "?fetchXml=" + encodeURIComponent(unmatchedCompiled.fetchXml), token);
   const unmatchedNative = await api(entities.contact.entitySetName + "?sql=" + encodeURIComponent(unmatchedSql), token);
   assert.ok(Array.isArray(unmatchedFetch.value), "left-join-null-extension: FetchXML returned no value array");
   assert.ok(Array.isArray(unmatchedNative.value), "left-join-null-extension: native SQL returned no value array");
-  assert.ok(unmatchedFetch.value.length > 0, "left-join-null-extension: no unparented contacts exist in the configured test environment");
+  assert.ok(unmatchedFetch.value.length > 0, "left-join-null-extension: the bounded contact query returned no rows");
   assert.ok(unmatchedFetch.value.length <= 5 && unmatchedNative.value.length <= 5,
     "left-join-null-extension: result exceeded the five-row bound");
   const joinedAccountId = row => {
