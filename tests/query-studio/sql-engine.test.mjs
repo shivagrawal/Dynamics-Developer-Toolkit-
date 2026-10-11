@@ -183,10 +183,12 @@ test("supports ORDER BY on joined entity aliases",()=>{
  assert.match(q.fetchXml,/<order attribute="name" entityname="a" descending="true"\/>/);
 });
 
-test("compiles chained joins as nested FetchXML link entities",()=>{
+test("compiles chained joins and projects columns inside their link entities",()=>{
  const q=engine.compileSql("SELECT c.fullname, a.name, o.name AS OpportunityName FROM contact c LEFT JOIN account a ON c.parentcustomerid = a.accountid INNER JOIN opportunity o ON a.accountid = o.parentaccountid",metadata);
  assert.ok(q.fetchXml.indexOf('<link-entity name="account"') < q.fetchXml.indexOf('<link-entity name="opportunity"'));
- assert.ok(q.fetchXml.includes('<attribute name="name" alias="OpportunityName"/>'));
+ assert.match(q.fetchXml,/<link-entity name="account" alias="a"[^>]*><attribute name="name" alias="a_name"\/>/);
+ assert.match(q.fetchXml,/<link-entity name="opportunity" alias="o"[^>]*><attribute name="name" alias="OpportunityName"\/>/);
+ assert.deepEqual(q.resultColumns.map(column=>column.key),["fullname","a_name","OpportunityName"]);
 });
 
 test("validates WHERE columns and preserves boolean filter grouping",()=>{
