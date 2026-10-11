@@ -92,6 +92,12 @@ test("supports unary NOT with De Morgan semantics and inverse comparison operato
 
  const nested=engine.compileSql("SELECT fullname FROM contact WHERE NOT (statecode > 1 AND statecode <= 3)",metadata);
  assert.ok(nested.fetchXml.includes('<filter type="or"><condition attribute="statecode" operator="le" value="1"/><condition attribute="statecode" operator="gt" value="3"/></filter>'));
+
+ const nullAndIn=engine.compileSql("SELECT fullname FROM contact WHERE NOT (statecode IS NULL OR statecode IN (0, 1))",metadata);
+ assert.ok(nullAndIn.fetchXml.includes('<filter type="and"><condition attribute="statecode" operator="not-null"/><condition attribute="statecode" operator="not-in"><value>0</value><value>1</value></condition></filter>'));
+
+ const notBetween=engine.compileSql("SELECT fullname FROM contact WHERE NOT statecode BETWEEN 1 AND 3",metadata);
+ assert.ok(notBetween.fetchXml.includes('<condition attribute="statecode" operator="not-between"><value>1</value><value>3</value></condition>'));
 });
  
 test("adds stable paging order for DISTINCT base projections",()=>{
