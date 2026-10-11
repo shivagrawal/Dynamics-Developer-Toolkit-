@@ -282,6 +282,36 @@ test("native SQL provider receives an AbortSignal and reports output-cap truncat
   assert.equal(result.rows.length, 0);
 });
 
+test("native SQL deadline aborts an in-flight Dataverse fetch and returns a typed timeout", async () => {
+  const { context } = loadBackground();
+  context.window = {};
+  context.AbortController = AbortController;
+  context.Xrm = {
+    Utility: {
+      getGlobalContext: () => ({
+        getClientUrl: () => "https://example.crm.dynamics.com",
+        organizationSettings: {},
+        userSettings: {}
+      }),
+      getEntityMetadata: async () => ({ EntitySetName: "accounts" })
+    }
+  };
+  context.fetch = async (_url, options) => new Promise((resolve, reject) => {
+    options.signal.addEventListener("abort", () => {
+      const error = new Error("The operation was aborted.");
+      error.name = "AbortError";
+      reject(error);
+    }, { once: true });
+  });
+  const result = await context.pageBridge("querySql", {
+    sql: "SELECT * FROM account",
+    __devlensExecution: { deadlineAt: Date.now() + 40, maxOutputBytes: 1024 }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "QUERY_TIMEOUT");
+  assert.match(result.error, /120-second deadline/);
+});
+
 test("security table names only in literals or comments retain ordinary SQL routing", async () => {
   const ordinaryQueries = [
     "SELECT name FROM account WHERE name = 'roleprivileges'",
