@@ -203,12 +203,15 @@ test("supports WHERE conditions against explicitly joined entities",()=>{
 });
 
 test("parses OFFSET/FETCH and enforces bounded deterministic paging",()=>{
- const p=engine.plan("SELECT fullname FROM contact ORDER BY fullname OFFSET 10 ROWS FETCH NEXT 25 ROWS ONLY");
+ const p=engine.plan("SELECT fullname FROM contact ORDER BY fullname OFFSET 10 ROWS FETCH NEXT 5 ROWS ONLY");
  assert.equal(p.offset,10);
- assert.equal(p.fetch,25);
+ assert.equal(p.fetch,5);
  const q=engine.compile(p,metadata);
+ assert.match(q.fetchXml,/<fetch page="3" count="5">/);
  assert.doesNotMatch(q.fetchXml,/<fetch top=/);
  assert.match(q.fetchXml,/<order attribute="fullname"/);
+ assert.throws(()=>engine.compile(engine.plan("SELECT fullname FROM contact ORDER BY fullname OFFSET 10 ROWS"),metadata),/requires FETCH NEXT/);
+ assert.throws(()=>engine.compile(engine.plan("SELECT fullname FROM contact ORDER BY fullname OFFSET 10 ROWS FETCH NEXT 6 ROWS ONLY"),metadata),/multiple of FETCH NEXT/);
  assert.throws(()=>engine.plan("SELECT fullname FROM contact OFFSET 10 ROWS"),/requires ORDER BY/);
  assert.throws(()=>engine.plan("SELECT TOP 10 fullname FROM contact ORDER BY fullname OFFSET 0 ROWS"),/TOP cannot be combined/);
  assert.throws(()=>engine.plan("SELECT fullname FROM contact ORDER BY fullname OFFSET 9999 ROWS FETCH NEXT 2 ROWS ONLY"),/10,000-row safety cap/);
