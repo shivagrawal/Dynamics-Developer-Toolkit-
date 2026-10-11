@@ -3,7 +3,7 @@
  *
  * This is an original JS implementation. It deliberately supports a bounded,
  * explicit subset and rejects unsupported SQL instead of silently changing meaning.
- * SQL4CDS reference behavior: https://github.com/MarkMpn/Sql4Cds (MIT).
+ * Compatibility is implemented and tested in DevLens; no external SQL engine is required at runtime.
  */
 (function (root, factory) {
   const api = factory();

@@ -1,41 +1,79 @@
-# DevLens SQL Studio (SQL4CDS integration)
+# DevLens Query Studio
 
-This folder contains the local companion contract for the DevLens Query Studio feature.
+## Product goal
 
-## Architecture
+DevLens Query Studio is an independent, browser-based SQL workspace for Dataverse developers. A developer should be able to open a Dynamics environment, explore its schema, write SQL, run queries, inspect results, and export data without installing or depending on SQL4CDS, XrmToolBox, or a separate query application.
 
-- The Chrome extension provides the editor, environment context, query status and results grid.
-- The localhost companion hosts the published `MarkMpn.Sql4Cds.Engine` NuGet package and owns SQL parsing, planning, Dataverse paging and execution.
-- The initial mode is read-only. The companion must parse statements and allow SELECT only before calling the engine. Do not rely on UI controls as a security boundary.
-- The companion must bind to loopback only, validate browser requests using a pairing token, cap query size and execution duration, and never expose its API to LAN interfaces. Origin checks alone are not authentication.
-- No Dataverse secrets are stored in the extension. The engine currently connects through a Dataverse SDK `IOrganizationService`/`ServiceClient`; browser session-token reuse is not provided by the SQL4CDS connection constructor. A runnable integration requires a supported interactive local sign-in or separately validated token bridge.
+The goal is broad, dependable SQL compatibility built into DevLens itself. The native Dataverse SQL endpoint is a useful execution provider for the subset it supports, not the definition of the product's SQL capability. DevLens owns its SQL parser, query planner, Dataverse execution adapters, result semantics, diagnostics, and compatibility test suite.
 
-## Engine
+## Current architecture
 
-SQL4CDS MIT engine: https://github.com/MarkMpn/Sql4Cds
-NuGet: https://www.nuget.org/packages/MarkMpn.Sql4Cds.Engine/
+- The browser extension hosts the editor, environment context, Schema Explorer, status, results grid, and export actions.
+- The native Dataverse SQL endpoint handles supported read-only queries using the current Dynamics page's authenticated context.
+- The in-house JavaScript SQL planner/compiler translates its supported SQL subset to FetchXML and executes it through the current Dynamics user's Web API context.
+- A dedicated compatibility adapter handles explicitly supported security and audit query shapes where the general Dataverse SQL endpoint cannot provide the required data. It must fail closed on unrecognized shapes.
+- The .NET local-agent project is an experimental, non-required integration scaffold. It is not part of the product's required install or execution path. Do not make Query Studio depend on an external SQL4CDS package or require users to install another application to use its core features.
 
-Keep the package license / notice available in distributions. Review telemetry behavior before packaging: the engine initializes Application Insights, and detailed error telemetry can include SQL text when explicitly enabled. Detailed error telemetry must remain disabled and the companion must not log query values by default.
+## Product principles
 
-## Current preview behavior
+1. **Independent by default:** core query execution must work without SQL4CDS or XrmToolBox installed.
+2. **SQL compatibility is explicit:** maintain a documented feature matrix and add syntax only with parser tests, semantic tests, and live Dataverse verification.
+3. **No silent semantic changes:** reject unsupported constructs with actionable diagnostics instead of returning results that merely look plausible.
+4. **Read-only first:** permit one SELECT statement only. Writes, multiple statements, and unsupported statements must fail closed.
+5. **Dataverse-aware:** support logical names, lookups, polymorphic relationships, option sets, metadata, permissions, paging, and audit/security surfaces where the platform permits.
+6. **Respect the signed-in user:** requests must use the active user's Dataverse authorization. Never embed an admin credential or ask users to paste secrets into the editor.
+7. **Safe and bounded:** enforce query, row, page, concurrency, and duration limits; keep bearer tokens, row values, and audit payloads out of logs.
+8. **Evidence before claims:** distinguish tested support, partial support, unsupported syntax, and platform restrictions.
 
-The extension currently executes supported read-only SQL through the native Dataverse Web API SQL endpoint from the Dynamics page context. It does not use the local SQL4CDS companion for query execution yet.
+## Current capabilities
 
-- SQL editor, execution status, result grid, CSV / JSON export
-- Schema Explorer backed by Dataverse metadata APIs
-- Search tables by display or logical name
-- Inspect table columns, logical names, display names, types, read availability, required level, and primary key / primary name
-- Select columns, insert their logical names into the editor, or generate an explicit `SELECT TOP 100 ... FROM table` query
-- Lightweight table-column metadata request to avoid loading the full metadata/relationship/choice graph for each table
-- SQL result projection validation for simple single-table SELECT queries. Query Studio stops results when response metadata does not match requested columns and uses the server projection so columns that are null across all returned rows can still appear
-- The native SQL endpoint remains read-only and supports only Microsoft's documented SQL subset. It does not support `SELECT *` or every SQL Server / SQL4CDS construct.
+- SQL editor, execution status, result grid, CSV and JSON export.
+- Schema Explorer backed by Dataverse metadata APIs, including table search and column details.
+- Native Dataverse SQL execution for the server-supported SQL subset.
+- An original JavaScript SQL-to-FetchXML planner supporting a bounded SELECT subset, including projections, aliases, DISTINCT, TOP, WHERE predicates, equality joins, ORDER BY, paging, and basic aggregates within documented limits.
+- Explicit security/audit compatibility handlers for known query shapes.
+- Regression tests plus controlled live checks against a designated development/test environment.
 
-## Remaining SQL4CDS integration work
+The in-house JavaScript planner is currently a bounded implementation, not yet a drop-in SQL Server or SQL4CDS-equivalent engine. Do not describe the whole product as fully SQL-compatible until the relevant feature has passed semantic and live tests.
 
-- Implement supported authentication for the local companion
-- Connect the companion to the SQL4CDS engine and serialize results
-- Add cancellation, paging, safe request pairing and execution limits
-- Test in a disposable Dataverse environment
-- Build a conservative SQL-to-FetchXML translator for constructs where translation preserves semantics
+## Compatibility roadmap
 
-The companion remains an integration scaffold, not an executable SQL4CDS runner until it is authenticated and end-to-end tested.
+### Phase 1 — Make the existing experience dependable
+- Unify provider selection behind one execution interface so the user does not need to understand separate engines.
+- Keep native SQL execution as a provider for its supported subset.
+- Improve parser diagnostics, result-column stability, paging correctness, cancellation, and error normalization.
+- Publish a versioned compatibility matrix with test evidence.
+
+### Phase 2 — Expand the independent SQL planner
+- Add SQL syntax incrementally: richer expressions and functions, CASE, HAVING, subqueries/CTEs, UNION, and more join/aggregate combinations.
+- Implement a clear logical query plan and Dataverse-aware type/value handling rather than growing ad-hoc string rewrites.
+- For constructs that cannot be translated faithfully to FetchXML, use bounded local execution over authorized Web API data only when the semantics and row limits are safe. Never download unbounded tables to simulate SQL.
+- Define semantics for NULL, lookup comparisons, option sets, date/time, string collation, and aggregate values, and test them explicitly.
+
+### Phase 3 — Developer-grade workflow
+- Add autocomplete and schema-aware validation, saved snippets/history, explain/diagnostic output, query cancellation, and execution metrics.
+- Show which provider ran a query and why, without requiring manual engine selection.
+- Add repeatable fixture tests and live test cases for each advertised compatibility feature.
+
+### Phase 4 — Compatibility hardening
+- Compare outputs against a trusted reference only during development/testing, never as a runtime dependency.
+- Test empty results, null-only columns, aliases, duplicate rows, paging boundaries, permission failures, service-protection responses, and large-result safeguards.
+- Keep unsupported/platform-inaccessible features clearly identified.
+
+## Security and resource limits
+
+- Only one read-only SELECT statement is accepted by execution providers.
+- Dataverse authorization is the final access boundary; client-side UI checks are not authorization.
+- Follow only same-origin Dataverse paging links, detect loops, and cap rows/pages.
+- Escape values in FetchXML and validate table/column identifiers against metadata.
+- CSV export neutralizes formula-like values before producing spreadsheet-openable CSV.
+- CI logs may report pass/fail, counts, and non-sensitive projection metadata, but must not log credentials, record values, names, audit values, or privilege assignments.
+
+## Verification
+
+- **Offline regression:** parser/compiler, provider routing, SQL shape validation, result projection, escaping, paging, and error handling.
+- **Live ordinary SQL:** test the native Dataverse SQL endpoint separately.
+- **Live compatibility tests:** validate each in-house planner feature against a designated personal development/test environment.
+- **Safety tests:** verify writes and multiple statements are rejected before any data request.
+
+The experimental local agent may be useful as a development comparison harness, but it must remain optional and must never become a prerequisite for the independent browser product.
