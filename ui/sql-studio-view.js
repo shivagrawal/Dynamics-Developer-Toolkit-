@@ -372,6 +372,20 @@
   async function execute() {
     if (state.running) return;
     if (!state.sql.trim()) { state.error = "Enter a SELECT query first."; render(); return; }
+    // The live Dataverse SQL endpoint currently returns rows beyond FETCH NEXT
+    // for OFFSET/FETCH queries. Route this syntax to the bounded FetchXML
+    // executor, which implements page/count semantics, rather than trusting the
+    // endpoint to enforce a bound it has been observed to ignore.
+    let parsedPlan = null;
+    try {
+      if (window.DevLensSqlEngine?.plan) parsedPlan = window.DevLensSqlEngine.plan(state.sql);
+    } catch (_) {
+      // The authoritative background SQL policy returns the parser diagnostic.
+    }
+    if (parsedPlan?.hasOffset) {
+      await executeEngine(parsedPlan);
+      return;
+    }
     state.running = true;
     state.error = "";
     state.results = null;
@@ -409,7 +423,7 @@
     }
   }
 
-  async function executeEngine() {
+  async function executeEngine(precomputedPlan = null) {
     if (state.running) return;
     if (!window.DevLensSqlEngine) { state.error = "JavaScript SQL engine did not load. Reload the Dynamics tab."; render(); return; }
     state.running = true;
@@ -423,7 +437,7 @@
     try {
       const api = window.D365AnalyzerApi;
       if (!api?.send) throw new Error("DevLens Dataverse bridge is not available. Reload the Dynamics tab.");
-      const plan = window.DevLensSqlEngine.plan(state.sql);
+      const plan = precomputedPlan || window.DevLensSqlEngine.plan(state.sql);
       const names = [...new Set([plan.table, ...plan.joins.map(j => j.table)])];
       const metadata = { entities: {} };
       for (const logicalName of names) {
