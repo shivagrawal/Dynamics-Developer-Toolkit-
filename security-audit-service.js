@@ -577,6 +577,54 @@ function devLensSecurityAuditBridge(action, p) {
       if (!pattern.test(structure)) throw Error("Unsupported SQL structure for " + shape + ": expected " + description + ".");
     }
   }
+  function assertSqlJoinStructure(sql, expectedJoins, expectedApplies, shape) {
+    const fromMatch = /\bFROM\b/i.exec(sql);
+    if (!fromMatch) throw Error("Unsupported SQL structure for " + shape + ": FROM clause is required.");
+    let quote = "", depth = 0, end = sql.length;
+    for (let i = fromMatch.index + fromMatch[0].length; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'") { quote = ch; continue; }
+      if (ch === "(") { depth++; continue; }
+      if (ch === ")") { depth--; continue; }
+      if (depth === 0 && /^(?:WHERE|GROUP\s+BY|ORDER\s+BY|HAVING)\b/i.test(sql.slice(i)) &&
+          (i === 0 || /\s/.test(sql[i - 1]))) { end = i; break; }
+    }
+    const clause = sql.slice(fromMatch.index + fromMatch[0].length, end);
+    quote = "";
+    depth = 0;
+    let joins = 0, applies = 0, commas = 0;
+    for (let i = 0; i < clause.length; i++) {
+      const ch = clause[i], next = clause[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'") { quote = ch; continue; }
+      if (ch === "(") { depth++; continue; }
+      if (ch === ")") { depth--; continue; }
+      if (depth !== 0) continue;
+      if (ch === ",") { commas++; continue; }
+      if (/[A-Za-z_]/.test(ch)) {
+        const match = /^[A-Za-z_][A-Za-z0-9_]*/.exec(clause.slice(i));
+        const word = match[0].toUpperCase();
+        if (word === "JOIN") joins++;
+        if (word === "APPLY") applies++;
+        i += match[0].length - 1;
+      }
+    }
+    if (joins !== expectedJoins || applies !== expectedApplies || commas !== 0) {
+      throw Error("Unsupported SQL relationship structure for " + shape +
+        ". Expected " + expectedJoins + " JOIN(s), " + expectedApplies +
+        " APPLY clause(s), and no comma joins; found " + joins + " JOIN(s), " +
+        applies + " APPLY clause(s), and " + commas + " comma join(s).");
+    }
+  }
   function roleAccessProjectionExpressions() {
     const depthCase = "CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END";
     const aggregate = (condition, alias) => "ISNULL(MAX(CASE WHEN " + condition + " THEN " + depthCase + " END), 'None') AS " + alias;
@@ -685,6 +733,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bSUR\.roleid\s*=\s*R\.roleid\b/i, "the role relationship"],
         [/\bR\.businessunitid\s*=\s*BU\.businessunitid\b/i, "the role business-unit relationship"]
       ]);
+      assertSqlJoinStructure(query, 3, 0, kind);
       assertSqlWhereStructure(query, "SU.FULLNAMELIKE?", kind);
       assertSqlOrderBy(query, "", kind);
       const term = sqlLikeTerm(query, /\bSU\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
@@ -701,6 +750,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bJOIN\s+entity\s+e\s+ON\s+e\.objecttypecode\s*=\s*potc\.objecttypecode\b/i, "the entity mapping relationship"],
         [/\be\.logicalname\s*=/i, "the entity logical-name equality filter"]
       ]);
+      assertSqlJoinStructure(query, 2, 0, kind);
       assertSqlWhereStructure(query, "E.LOGICALNAME=?", kind);
       assertSqlOrderBy(query, "P.NAME", kind);
       const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
@@ -731,6 +781,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bsu\.fullname\s+LIKE\b/i, "the user fullname LIKE filter"],
         [/\be\.logicalname\s*=/i, "the entity logical-name equality filter"]
       ]);
+      assertSqlJoinStructure(query, 8, 0, kind);
       assertSqlWhereStructure(query, "SU.FULLNAMELIKE?ANDE.LOGICALNAME=?", kind);
       assertSqlOrderBy(query, "SU.FULLNAME,UR.NAME,P.NAME", kind);
       const term = sqlLikeTerm(query, /\bsu\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
@@ -754,6 +805,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bJOIN\s+businessunit\s+bu\s+ON\s+bu\.businessunitid\s*=\s*r\.businessunitid\b/i, "the role business-unit relationship"],
         [/\bp\.name\s*=/i, "the privilege-name equality filter"]
       ]);
+      assertSqlJoinStructure(query, 3, 0, kind);
       assertSqlWhereStructure(query, "P.NAME=?", kind);
       assertSqlOrderBy(query, "R.NAME,BU.NAME", kind);
       const privilegeName = sqlLiteral(query, /\bp\.name\s*=\s*'((?:''|[^'])*)'/i);
@@ -773,6 +825,7 @@ function devLensSecurityAuditBridge(action, p) {
         [/\bGROUP\s+BY\s+e\.logicalname\b/i, "GROUP BY e.logicalname"],
         [/\br\.name\s*=/i, "the role-name equality filter"]
       ]);
+      assertSqlJoinStructure(query, 4, 0, kind);
       assertSqlWhereStructure(query, "R.NAME=?", kind);
       assertSqlOrderBy(query, "E.LOGICALNAME", kind);
       const roleName = sqlLiteral(query, /\br\.name\s*=\s*'((?:''|[^'])*)'/i);
@@ -820,6 +873,7 @@ function devLensSecurityAuditBridge(action, p) {
       if (jsonPath !== "$.changedAttributes") throw Error("Audit query must expand the $.changedAttributes JSON path.");
       const validJsonColumns = /\bWITH\s*\(\s*logicalname\s+NVARCHAR\s*\(\s*100\s*\)\s*'\$\.logicalName'\s*,\s*oldvalue\s+NVARCHAR\s*\(\s*MAX\s*\)\s*'\$\.oldValue'\s*,\s*newvalue\s+NVARCHAR\s*\(\s*MAX\s*\)\s*'\$\.newValue'\s*\)\s*ca\b/i.test(query);
       if (!validJsonColumns) throw Error("Audit query must map logicalName, oldValue, and newValue from changedAttributes.");
+      assertSqlJoinStructure(query, 1, 1, kind);
       assertSqlWhereStructure(query, "A.OBJECTID=?", kind);
       assertSqlOrderBy(query, "A.CREATEDONDESC", kind);
       const id = sqlLiteral(query, /\ba\.objectid\s*=\s*'((?:''|[^'])*)'/i);
