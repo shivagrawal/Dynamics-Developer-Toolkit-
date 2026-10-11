@@ -36,6 +36,7 @@ jobs:
           node --check sqlstudio/js/sql-policy.js
           node --check sqlstudio/js/sql-result-normalizer.js
           node --check tests/query-studio/on-demand-query.mjs
+          node --check tests/query-studio/live-semantic-matrix.mjs
           node -e "JSON.parse(require('node:fs').readFileSync('manifest.json', 'utf8'))"
 
       - name: Run Query Studio regression suite
