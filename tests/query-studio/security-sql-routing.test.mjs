@@ -62,10 +62,11 @@ test("security SQL is dispatched to the security bridge while ordinary SQL keeps
   const dispatch = message => new Promise(resolve => {
     listener(message, { tab: { id: 123 } }, resolve);
   });
-  await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: securityQueries[0] } });
+  const supportedSecuritySql = "SELECT SU.fullname, SU.systemuserid, R.name AS role_name, BU.name AS role_businessunit FROM SystemUserRoles SUR INNER JOIN SystemUser SU ON SUR.systemuserid = SU.systemuserid INNER JOIN Role R ON SUR.roleid = R.roleid INNER JOIN BusinessUnit BU ON R.businessunitid = BU.businessunitid WHERE SU.fullname LIKE '%USD8%'";
+  await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: supportedSecuritySql } });
   assert.equal(calls[0].func, securityBridge);
   assert.equal(calls[0].args[0], "sqlQuery");
-  assert.equal(calls[0].args[1].sql, securityQueries[0]);
+  assert.equal(calls[0].args[1].sql, supportedSecuritySql);
   await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: "SELECT TOP 5 accountid, name FROM account" } });
   assert.equal(calls[1].func, context.pageBridge);
   assert.equal(calls[1].args[0], "querySql");
@@ -89,6 +90,14 @@ test("shared policy rejects invalid FetchXML before any injected bridge or provi
   const { listener, calls } = loadBackground();
   const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
   const result = await dispatch({ type: "DEVLENS_ACTION", action: "queryFetchXml", payload: { fetchXml: "<fetch><entity name=\"account\" /></fetch>", tableName: "contact" } });
+  assert.equal(result.ok, false);
+  assert.equal(calls.length, 0);
+});
+
+test("security near-matches are rejected before the specialized adapter is invoked", async () => {
+  const { listener, calls } = loadBackground();
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const result = await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: "SELECT name FROM roleprivileges" } });
   assert.equal(result.ok, false);
   assert.equal(calls.length, 0);
 });
