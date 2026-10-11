@@ -236,7 +236,7 @@
       const pattern=node.value;
       // Backslash escaping differs between SQL Server LIKE and FetchXML. Reject
       // ambiguous patterns rather than silently turning a literal wildcard into one.
-      if (/\\\\[%_]/.test(pattern)) {
+      if (/\\[%_]/.test(pattern)) {
         fail("LIKE escape sequences for '%' and '_' are not supported; the pattern would change meaning.");
       }
       return '<condition attribute="'+escapeXml(field.name)+'" operator="'+(node.not?"not-like":"like")+'"'+entity+' value="'+escapeXml(pattern)+'"/>';

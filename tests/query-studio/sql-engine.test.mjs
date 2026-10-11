@@ -65,8 +65,8 @@ test("escapes string literals and translates null, IN, LIKE and boolean filters"
 test("preserves supported LIKE wildcards and rejects ambiguous backslash escapes",()=>{
  const q=engine.compileSql("SELECT fullname FROM contact WHERE fullname LIKE 'A_B%'",metadata);
  assert.match(q.fetchXml,/operator="like" value="A_B%"/);
- assert.throws(()=>engine.compileSql("SELECT fullname FROM contact WHERE fullname LIKE 'A\\\\%B'",metadata),/LIKE escape sequences/);
- assert.throws(()=>engine.compileSql("SELECT fullname FROM contact WHERE fullname LIKE 'A\\\\_B'",metadata),/LIKE escape sequences/);
+ assert.throws(()=>engine.compileSql("SELECT fullname FROM contact WHERE fullname LIKE 'A\\%B'",metadata),/LIKE escape sequences/);
+ assert.throws(()=>engine.compileSql("SELECT fullname FROM contact WHERE fullname LIKE 'A\\_B'",metadata),/LIKE escape sequences/);
 });
 
 test("compiles NOT IN, BETWEEN, NOT BETWEEN and preserves AND/OR precedence",()=>{
