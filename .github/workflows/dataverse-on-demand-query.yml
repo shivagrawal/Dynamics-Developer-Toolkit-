@@ -14,10 +14,10 @@ on:
   workflow_dispatch:
     inputs:
       sql_query:
-        description: "Read-only SQL query. Must use SELECT TOP N (N 1–25); only account/contact/systemuser tables. Do not enter sensitive values."
+        description: "Read-only SQL query. Must use SELECT TOP N (N 1–25) or bounded OFFSET/FETCH (offset + fetch ≤25); only account/contact/systemuser tables. Do not enter sensitive values."
         required: true
         type: string
-        default: "SELECT TOP 25 systemuserid, fullname FROM systemuser WHERE fullname LIKE '%dataverse%' ORDER BY systemuserid"
+        default: "SELECT systemuserid, fullname FROM systemuser WHERE fullname IS NOT NULL AND fullname LIKE '%dataverse%' ORDER BY systemuserid OFFSET 0 ROWS FETCH NEXT 25 ROWS ONLY"
 
 permissions:
   contents: read
