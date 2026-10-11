@@ -2,6 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const resultNormalizer = require("../../sqlstudio/js/sql-result-normalizer.js");
 
 const source = await readFile(new URL("../../ui/sql-studio-view.js", import.meta.url), "utf8");
 
@@ -70,6 +74,7 @@ test("Query Studio paginates large result sets without losing exportable results
     ])[index] ?? "Row " + (index + 1)
   }));
   const window = {
+    DevLensSqlResultNormalizer: resultNormalizer,
     D365AnalyzerApi: {
       send: async action => {
         assert.equal(action, "querySql");
@@ -142,4 +147,73 @@ test("Query Studio paginates large result sets without losing exportable results
   assert.ok(downloadedContent.includes(`"'+cmd|' /C calc'!A0"`), "Formula-like values starting with plus must be neutralized.");
   assert.match(downloadedContent, /"'-2\+3"/, "Formula-like values starting with minus must be neutralized.");
   assert.match(downloadedContent, /"'@SUM\(A1:A2\)"/, "Formula-like values starting with at-sign must be neutralized.");
+});
+
+
+test("single Execute uses native SQL first and only falls back on typed capability rejection", async () => {
+  const calls = [];
+  const window = {
+    DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlEngine: {
+      plan: () => ({ table: "contact", joins: [], columns: [{ column: "fullname" }], offset: 0, fetch: null, alias: "c" }),
+      compile: () => ({
+        fetchXml: '<fetch><entity name="contact"><attribute name="fullname"/></entity></fetch>',
+        resultColumns: [{ label: "fullname", key: "fullname" }]
+      })
+    },
+    D365AnalyzerApi: {
+      send: async (action) => {
+        calls.push(action);
+        if (action === "querySql") return { ok: false, code: "PROVIDER_CAPABILITY_REJECTION", error: "typed capability" };
+        if (action === "schemaTable") return { ok: true, data: {
+          logicalName: "contact", entitySetName: "contacts", primaryIdAttribute: "contactid",
+          columns: [{ logicalName: "fullname", attributeType: "string", validForRead: true }]
+        } };
+        if (action === "queryFetchXml") return {
+          ok: true, provider: "FetchXML JS engine", columns: ["fullname"],
+          rows: [{ fullname: "Ada" }], rowCount: 1, moreRecords: false,
+          warning: "token=secret-value; see https://example.invalid/path?access_token=secret"
+        };
+        throw new Error("unexpected action " + action);
+      }
+    }
+  };
+  const host = createHost();
+  const context = {
+    window, document: { activeElement: null, createElement: () => ({ click() {} }) },
+    performance: { now: () => 1 }, Blob: class { constructor(parts) { this.parts = parts; } },
+    URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
+  };
+  vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
+  window.DevLensSqlStudioView.renderInto(host);
+  assert.match(host.innerHTML, />Execute<\/button>/);
+  assert.doesNotMatch(host.innerHTML, /Execute via FetchXML/);
+  await click(host, "execute");
+  assert.deepEqual(calls, ["querySql", "schemaTable", "queryFetchXml"]);
+  assert.match(host.innerHTML, /dataverse-fetchxml-js-engine/);
+  assert.match(host.innerHTML, /token=\[redacted\]/);
+  assert.doesNotMatch(host.innerHTML, /secret-value|access_token=secret|example\.invalid/);
+});
+
+test("single Execute does not fall back on authorization or generic provider errors", async () => {
+  const calls = [];
+  const window = {
+    DevLensSqlResultNormalizer: resultNormalizer,
+    D365AnalyzerApi: {
+      send: async action => {
+        calls.push(action);
+        return { ok: false, code: "AUTHORIZATION", error: "Permission denied" };
+      }
+    }
+  };
+  const host = createHost();
+  const context = {
+    window, document: { activeElement: null, createElement: () => ({ click() {} }) },
+    performance: { now: () => 1 }, Blob: class {}, URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
+  };
+  vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
+  window.DevLensSqlStudioView.renderInto(host);
+  await click(host, "execute");
+  assert.deepEqual(calls, ["querySql"]);
+  assert.match(host.innerHTML, /permission to run this query/i);
 });
