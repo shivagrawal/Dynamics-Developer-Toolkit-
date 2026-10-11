@@ -352,30 +352,23 @@ test("live audit adapter expands a disposable record's actual audited attribute 
     const query = queries[5].replace("bb20fca4-e8a2-f111-b8db-7c1e5280e98a", accountId);
     let result = await bridge.run(query);
     assert.equal(result.ok, true, "Audit adapter failed for the temporary record: " + (result.error || "unknown error"));
-    console.log("Live audit fixture summary: " + JSON.stringify({
-      rowCount: result.rowCount,
-      eventTypes: [...new Set(result.rows.map(row => row.Event))],
-      attributeNames: [...new Set(result.rows.map(row => row.logicalname))].slice(0, 30),
-      auditListCalls: bridge.calls.filter(path => path.includes("/audits?")).length,
-      fixtureAuditListCalls: bridge.calls.filter(path => path.includes("/audits?") && path.toLowerCase().includes(accountId.toLowerCase())).length,
-      descriptionRows: result.rows.filter(row => row.logicalname === "description").map(row => ({
-        event: row.Event, oldPresent: row.oldvalue != null, newPresent: row.newvalue != null,
-        oldType: typeof row.oldvalue, newType: typeof row.newvalue,
-        oldLength: String(row.oldvalue ?? "").length, newLength: String(row.newvalue ?? "").length
-      }))
-    }));
     let descriptionChange = result.rows.find(row => row.logicalname === "description" &&
       String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     if (!descriptionChange) {
       // Audit writes can be eventually visible. Poll the record's audit collection
       // for up to 15 seconds before classifying this as a real integration failure.
       let auditRows = { value: [] };
-      for (let attempt = 0; attempt < 15 && !(auditRows.value || []).length; attempt++) {
-        auditRows = await bridge.get("audits?$select=auditid,createdon&$filter=_objectid_value%20eq%20" + accountId + "&$top=5");
-        if (!(auditRows.value || []).length) await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait specifically for the UPDATE event; the CREATE audit row can become
+      // visible before the field-level change has propagated through Dataverse.
+      for (let attempt = 0; attempt < 30 &&
+        !(auditRows.value || []).some(row => Number(row.operation) === 2); attempt++) {
+        auditRows = await bridge.get("audits?$select=auditid,createdon,operation&$filter=_objectid_value%20eq%20" + accountId + "&$orderby=createdon%20desc&$top=10");
+        if (!(auditRows.value || []).some(row => Number(row.operation) === 2)) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
-      assert.ok((auditRows.value || []).length,
-        "Auditing was enabled and the record was updated, but Dataverse produced no audit rows within 15 seconds.");
+      assert.ok((auditRows.value || []).some(row => Number(row.operation) === 2),
+        "Auditing was enabled and the record was updated, but Dataverse produced no UPDATE audit row within 30 seconds.");
       result = await bridge.run(query);
       assert.equal(result.ok, true, "Audit adapter retry failed: " + (result.error || "unknown error"));
       descriptionChange = result.rows.find(row => row.logicalname === "description" &&
