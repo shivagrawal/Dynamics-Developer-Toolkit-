@@ -134,7 +134,14 @@ try {
   // This verifies that the live endpoint exposes the requested projection even if
   // its OData context contains extra columns; values are never printed to CI logs.
   const baseTable = names[0];
-  const nativeResult = await api(`${entities[baseTable].entitySetName}?sql=${encodeURIComponent(sql)}`, token);
+  // The Dataverse native SQL endpoint may ignore OFFSET/FETCH. For parity testing,
+  // translate the bounded page into a TOP prefix and apply the page locally; do not
+  // mistake endpoint acceptance for proof that it honored OFFSET/FETCH.
+  const nativeSqlForParity = pagingMatch
+    ? sql.replace(/\s+OFFSET\s+\d+\s+ROWS\s+FETCH\s+NEXT\s+\d+\s+ROWS\s+ONLY\s*$/i, "")
+        .replace(/^SELECT\s+/i, "SELECT TOP " + (Number(pagingMatch[1]) + Number(pagingMatch[2])) + " ")
+    : sql;
+  const nativeResult = await api(entities[baseTable].entitySetName + '?sql=' + encodeURIComponent(nativeSqlForParity), token);
   assert.ok(Array.isArray(nativeResult.value), "Dataverse native SQL endpoint did not return a value array.");
   assert.ok(nativeResult.value.length <= 25, "Native SQL query returned more than 25 rows.");
 
@@ -177,21 +184,24 @@ try {
   const hasOrderBy = /\bORDER\s+BY\b/i.test(sql);
   const simpleParityQuery = !/\bJOIN\b|\bGROUP\s+BY\b|\bCOUNT\s*\(|\bSUM\s*\(|\bAVG\s*\(|\bMIN\s*\(|\bMAX\s*\(/i.test(sql) &&
     !/\bAS\b/i.test(selectMatch[1]) && requestedColumns.every(column => /^[a-z_][a-z0-9_]*$/i.test(column));
+  const nativePageRows = pagingMatch
+    ? nativeResult.value.slice(Number(pagingMatch[1]), Number(pagingMatch[1]) + Number(pagingMatch[2]))
+    : nativeResult.value;
   let resultParity = "not-applicable";
   if (simpleParityQuery) {
     const normalizeRows = rows => rows.map(row => {
       const normalized = {};
       for (const column of requestedColumns) {
         const actualKey = Object.keys(row).find(key => key.toLowerCase() === column);
-        assert.notEqual(actualKey, undefined, "A query path omitted projected column: " + column);
+        assert.notEqual(actualKey, undefined, "A query path omitted a requested projected column.");
         normalized[column] = row[actualKey] === undefined ? null : row[actualKey];
       }
       return JSON.stringify(normalized);
     });
     const fetchRows = normalizeRows(fetchXmlResult.value);
-    const nativeRows = normalizeRows(nativeResult.value);
+    const nativeRows = normalizeRows(nativePageRows);
     if (!hasOrderBy) { fetchRows.sort(); nativeRows.sort(); }
-    assert.deepEqual(fetchRows, nativeRows,
+    assert.ok(JSON.stringify(fetchRows) === JSON.stringify(nativeRows),
       "Native SQL and FetchXML returned different projected row values for the same simple SELECT.");
     resultParity = "matched";
   }
@@ -201,6 +211,8 @@ try {
     fetchXmlRows: fetchXmlResult.value.length,
     fetchXmlGenerated: Boolean(compiled.fetchXml),
     nativeSqlRows: nativeResult.value.length,
+    nativeSqlPageRows: nativePageRows.length,
+    nativePagingStrategy: pagingMatch ? "TOP prefix plus bounded client-side slice" : "not-needed",
     nativeSqlMetadataColumns: nativeColumns,
     nativeSqlExtraColumnsExcluded: extraNativeColumns,
     requestedColumns,
