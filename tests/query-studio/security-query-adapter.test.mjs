@@ -408,10 +408,11 @@ test("security adapter rejects unsupported extra JOIN clauses instead of ignorin
     "INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid",
     "INNER JOIN BusinessUnit AS BU ON R.businessunitid = BU.businessunitid INNER JOIN contact c ON c.contactid = SU.systemuserid"
   );
-  const result = await createBridge().run(sql);
+  const bridge = createBridge();
+  const result = await bridge.run(sql);
   assert.equal(result.ok, false);
   assert.match(result.error, /expected 3 JOIN\(s\)/i);
-  assert.equal(createBridge().calls.length, 0, "Unsupported join shapes must be rejected before Dataverse requests.");
+  assert.equal(bridge.calls.length, 0, "Unsupported join shapes must be rejected before Dataverse requests.");
 });
 
 test("security adapter rejects comma-separated FROM sources", async () => {
