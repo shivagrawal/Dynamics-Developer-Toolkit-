@@ -16,7 +16,7 @@ function pageBridge(action, payload) {
     const suppliedBytes = Number(payload?.__devlensExecution?.maxOutputBytes);
     const maxOutputBytes = Number.isInteger(suppliedBytes) && suppliedBytes > 0
       ? Math.min(suppliedBytes, 64 * 1024 * 1024)
-      : DEVLENS_QUERY_MAX_OUTPUT_BYTES;
+      : 64 * 1024 * 1024;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
     return {
