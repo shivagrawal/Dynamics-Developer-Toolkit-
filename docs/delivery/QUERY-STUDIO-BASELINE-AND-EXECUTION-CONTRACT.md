@@ -4,6 +4,30 @@
 **Integration branch:** `feature/sql4cds-query-studio`  
 **Product boundary:** independent, read-only browser-based Dataverse SQL workspace. SQL4CDS and XrmToolBox are not runtime dependencies.
 
+## Current integration checkpoint — 2026-10-11
+
+This section supersedes older workflow counts below when describing the current integrated branch. Historical evidence remains historical.
+
+- Feature branch checkpoint: `2729fca5bbf6e71814437e2cca39ca75fac6f072`.
+- Offline regression: [run 38149849727](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38149849727), exact checkpoint SHA, **187 passed, 0 failed, 0 skipped**.
+- Live security/audit: [run 38149849692](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38149849692), exact checkpoint SHA, **12 passed, 0 failed, 1 skipped**. The skip is the salesorder metadata case unavailable in this environment. The disposable audit fixture exercised RetrieveAuditDetails and removed its temporary account in cleanup.
+- Live native SQL / FetchXML smoke: [run 38149720136](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38149720136), predecessor code-equivalent SHA `31efca73ec4465988ee06378af0338519fec9805`; bounded contact/account LEFT JOIN returned matching five-row results on both paths. This is not a full semantic matrix and is not an exact-HEAD run.
+- Protected `main` remains at `ac139117a2651e94fbdf368c5ae50ad0590821da`; no merge is authorized by this checkpoint.
+- **Persistent environment side effect:** the live audit test enables organization auditing, account-table auditing, and account-description auditing where needed, and intentionally leaves them enabled. Do not automatically revert these settings without an explicit environment decision.
+
+### Current release status
+
+The offline gate and live security/audit gate are green for the recorded checkpoint. Release acceptance is **not yet complete**: broader live NULL/join-cardinality/ordering/paging/aggregate/empty-result verification remains incomplete; shared deadline/cancellation/concurrency/buffer controls are not proven enforced; and a final integrated-commit verification is still required after remaining changes.
+
+### Contract reconciliation rules
+
+- Canonical provider identifiers remain `native-sql`, `fetchxml`, and `security-audit`. Existing legacy provider labels may be accepted at an adapter boundary for compatibility, but must be mapped to these canonical identifiers before they are represented as canonical results. Do not change current callers without a compatibility test.
+- Ordered column descriptors and exact labels are canonical. Duplicate labels may remain identical in descriptors; each column must have a distinct stable row key. The legacy UI adapter may disambiguate display keys, but must not mutate canonical labels or lose values.
+- A total count is present only when a provider explicitly supplies a valid non-negative integer. Unknown count is omitted; exact zero is retained. Returned row count must not be used as a count substitute.
+- `truncated` means the provider stopped before the requested result was complete. UI pagination alone is not truncation. Any provider cap that prevents completeness must be surfaced as truncation.
+- Fallback eligibility is a coordinator decision, never inferred from retryability or a generic error category/message. Only an explicit typed capability rejection may be considered, and only when the alternate plan is independently proven equivalent. Auth, authorization, metadata permission, timeout, transport, throttling, data, cancellation and internal errors never trigger fallback.
+- Proposed runtime controls (including 120-second deadline, four concurrent top-level executions, and 64 MiB estimated output buffer) remain **unverified until enforced and tested at the authoritative coordinator boundary**. Do not document them as implemented limits before then.
+
 ## 1. Baseline evidence
 
 ### Offline regression
