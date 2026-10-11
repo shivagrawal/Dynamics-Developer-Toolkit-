@@ -101,3 +101,48 @@ test("security near-matches are rejected before the specialized adapter is invok
   assert.equal(result.ok, false);
   assert.equal(calls.length, 0);
 });
+
+
+const supportedSecurityDispatchQueries = [
+  {
+    name: "user roles",
+    sql: "SELECT SU.fullname, SU.systemuserid, R.name AS role_name, BU.name AS role_businessunit FROM SystemUserRoles SUR INNER JOIN SystemUser SU ON SUR.systemuserid = SU.systemuserid INNER JOIN Role R ON SUR.roleid = R.roleid INNER JOIN BusinessUnit BU ON R.businessunitid = BU.businessunitid WHERE SU.fullname LIKE '%USD8%'"
+  },
+  {
+    name: "privileges by entity",
+    sql: "SELECT DISTINCT P.name AS privilege_name FROM privilege P INNER JOIN privilegeobjecttypecodes POTC ON POTC.privilegeid = P.privilegeid INNER JOIN entity E ON E.objecttypecode = POTC.objecttypecode WHERE E.logicalname = 'account'"
+  },
+  {
+    name: "user privilege depth",
+    sql: "SELECT SU.fullname, E.logicalname, CASE RP.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child Business Units' WHEN 8 THEN 'Organization' ELSE 'Unknown' END AS depth FROM systemuser SU INNER JOIN systemuserroles SUR ON SUR.systemuserid = SU.systemuserid INNER JOIN roleprivileges RP ON RP.roleid = SUR.roleid INNER JOIN privilegeobjecttypecodes POTC ON POTC.privilegeid = RP.privilegeid INNER JOIN entity E ON E.objecttypecode = POTC.objecttypecode WHERE SU.fullname LIKE '%Alex%' AND E.logicalname = 'account'"
+  },
+  {
+    name: "role by privilege",
+    sql: "SELECT R.name FROM role R INNER JOIN roleprivileges RP ON RP.roleid = R.roleid INNER JOIN privilege P ON P.privilegeid = RP.privilegeid WHERE P.name = 'prvReadAccount'"
+  },
+  {
+    name: "role entity privileges",
+    sql: "SELECT E.logicalname FROM role R INNER JOIN roleprivileges RP ON RP.roleid = R.roleid INNER JOIN privilegeobjecttypecodes POTC ON POTC.privilegeid = RP.privilegeid INNER JOIN entity E ON E.objecttypecode = POTC.objecttypecode WHERE R.name = 'Basic User' GROUP BY E.logicalname"
+  },
+  {
+    name: "audit changed attributes",
+    sql: "SELECT A.auditid, CA.logicalname, U.fullname FROM audit A CROSS APPLY OPENJSON(A.changedata, '$.changedAttributes') CA LEFT JOIN systemuser U ON A.userid = U.systemuserid WHERE A.objectid = '33333333-3333-4333-8333-333333333333'"
+  }
+];
+
+test("each canonical supported security shape is policy-accepted and dispatched exactly once to the security bridge", async t => {
+  for (const sample of supportedSecurityDispatchQueries) {
+    await t.test(sample.name, async () => {
+      const { listener, calls, context, securityBridge } = loadBackground();
+      assert.equal(context.isSecuritySqlCandidate(sample.sql), true, sample.sql);
+      assert.equal(context.isSupportedSecuritySqlShape(sample.sql), true, sample.sql);
+      const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+      const result = await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: sample.sql } });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].func, securityBridge);
+      assert.equal(calls[0].args[0], "sqlQuery");
+      assert.equal(calls[0].args[1].sql, sample.sql);
+    });
+  }
+});
