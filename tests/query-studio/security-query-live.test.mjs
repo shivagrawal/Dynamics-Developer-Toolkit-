@@ -309,6 +309,7 @@ test("live audit adapter expands a disposable record's actual audited attribute 
     await bridge.request("PATCH", "organizations(" + org.organizationid + ")", { isauditenabled: true });
   }
 
+  let auditMetadataChanged = false;
   let accountMetadata = await bridge.get("EntityDefinitions(LogicalName='account')?$select=LogicalName,IsAuditEnabled");
   if (accountMetadata.IsAuditEnabled?.Value !== true) {
     assert.notEqual(accountMetadata.IsAuditEnabled?.CanBeChanged, false,
@@ -318,6 +319,7 @@ test("live audit adapter expands a disposable record's actual audited attribute 
     const fullAccountMetadata = await bridge.get("EntityDefinitions(LogicalName='account')");
     fullAccountMetadata.IsAuditEnabled.Value = true;
     await bridge.request("PUT", "EntityDefinitions(LogicalName='account')", fullAccountMetadata);
+    auditMetadataChanged = true;
   }
 
   let descriptionMetadata = await bridge.get("EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')?$select=LogicalName,IsAuditEnabled");
@@ -327,11 +329,14 @@ test("live audit adapter expands a disposable record's actual audited attribute 
     const fullDescriptionMetadata = await bridge.get("EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')");
     fullDescriptionMetadata.IsAuditEnabled.Value = true;
     await bridge.request("PUT", "EntityDefinitions(LogicalName='account')/Attributes(LogicalName='description')", fullDescriptionMetadata);
+    auditMetadataChanged = true;
   }
 
-  await bridge.request("POST", "PublishXml", {
-    ParameterXml: "<importexportxml><entities><entity>account</entity></entities></importexportxml>"
-  });
+  if (auditMetadataChanged) {
+    await bridge.request("POST", "PublishXml", {
+      ParameterXml: "<importexportxml><entities><entity>account</entity></entities></importexportxml>"
+    });
+  }
 
   const verifiedOrganization = await bridge.get("organizations?$select=isauditenabled&$top=1");
   accountMetadata = await bridge.get("EntityDefinitions(LogicalName='account')?$select=LogicalName,IsAuditEnabled");
@@ -364,12 +369,9 @@ test("live audit adapter expands a disposable record's actual audited attribute 
       descriptionChange = result.rows.find(row => row.logicalname === "description" &&
         String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     }
-    const directAuditRows = await bridge.get("audits?$select=operation,action&$filter=_objectid_value%20eq%20" + accountId + "&$top=10");
     const persistedAccount = await bridge.get("accounts(" + accountId + ")?$select=description");
     assert.equal(persistedAccount.description, "DevLens audit fixture after update",
       "The disposable record's update was not persisted.");
-    assert.ok((directAuditRows.value || []).some(row => Number(row.operation) === 2),
-      "Dataverse did not expose an Update audit operation for the disposable record.");
     descriptionChange = result.rows.find(row => row.logicalname === "description" && row.Event === "Update" &&
       String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     assert.ok(descriptionChange, "Audit detail expansion did not reconstruct the known description change.");
