@@ -1636,6 +1636,21 @@ function isSecuritySqlCandidate(sql) {
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "DEVLENS_ACTION") return;
+  if (message.action === "querySql") {
+    const specializedSecurity = isSecuritySqlCandidate(message.payload?.sql) && typeof devLensSecurityAuditBridge === "function";
+    const decision = globalThis.DevLensSqlPolicy?.evaluate(message.payload?.sql, globalThis.DevLensSqlEngine, { specializedSecurity });
+    if (!decision?.ok) {
+      reply({ ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only SQL policy is unavailable; execution was stopped." });
+      return;
+    }
+  }
+  if (message.action === "queryFetchXml") {
+    const decision = globalThis.DevLensSqlPolicy?.validateFetchXml(message.payload?.fetchXml, message.payload?.tableName);
+    if (!decision?.ok) {
+      reply({ ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only query policy is unavailable; execution was stopped." });
+      return;
+    }
+  }
   const securitySql = message.action === "querySql" &&
     isSecuritySqlCandidate(message.payload?.sql) &&
     typeof devLensSecurityAuditBridge === "function";
