@@ -40,6 +40,17 @@ test("compiles basic SELECT with TOP, projection, filter and sort",()=>{
  assert.equal(q.readOnly,true);
 });
 
+test("nests a simple LIKE condition inside a FetchXML filter for TOP queries",()=>{
+ const q=engine.compileSql("SELECT TOP 100 systemuserid, fullname FROM systemuser WHERE fullname LIKE '%dataverse%'",{
+  entities:{systemuser:{logicalName:"systemuser",entitySetName:"systemusers",primaryIdAttribute:"systemuserid",columns:[
+   {logicalName:"systemuserid",queryable:true},{logicalName:"fullname",queryable:true,attributeType:"String"}
+  ]}}
+ });
+ assert.match(q.fetchXml,/<fetch top="100"><entity name="systemuser">/);
+ assert.match(q.fetchXml,/<filter type="and"><condition attribute="fullname" operator="like"><value>%dataverse%<\/value><\/condition><\/filter>/);
+ assert.doesNotMatch(q.fetchXml,/<entity[^>]*>\s*<condition/);
+});
+
 test("escapes string literals and translates null, IN, LIKE and boolean filters",()=>{
  const q=engine.compileSql("SELECT fullname FROM contact WHERE fullname = 'O''Brien & Sons' AND statecode IS NOT NULL",metadata);
  assert.match(q.fetchXml,/O&apos;Brien &amp; Sons/);
