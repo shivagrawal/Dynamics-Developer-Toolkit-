@@ -334,7 +334,7 @@
   function safeProviderWarning(value) {
     if (typeof value !== "string") return "";
     return value.replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [redacted]")
-      .replace(/\b(access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+      .replace(/\b(access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|token|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
       .replace(/https?:\/\/[^\s"<>]+/gi, "[URL redacted]")
       .replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 500);
   }
