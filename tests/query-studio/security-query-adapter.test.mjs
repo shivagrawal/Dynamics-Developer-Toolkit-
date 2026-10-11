@@ -76,7 +76,7 @@ function createBridge(options = {}) {
     URL, fetch: mockFetch, window: {},
     Xrm: { Utility: { getGlobalContext: () => ({ getClientUrl: () => BASE, organizationSettings: {} }) } },
     chrome: { runtime: { onMessage: { addListener: () => {} } }, tabs: {}, scripting: {} },
-    console, setTimeout, clearTimeout
+    console, setTimeout, clearTimeout, AbortController
   };
   vm.runInNewContext(source, context, { filename: "security-audit-service.js" });
   return {
