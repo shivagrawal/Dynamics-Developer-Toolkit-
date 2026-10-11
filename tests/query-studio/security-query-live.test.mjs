@@ -375,8 +375,11 @@ test("live audit adapter expands a disposable record's actual audited attribute 
     descriptionChange = result.rows.find(row => row.logicalname === "description" && row.Event === "Update" &&
       String(row.oldvalue).includes("before update") && String(row.newvalue).includes("after update"));
     assert.ok(descriptionChange, "Audit detail expansion did not reconstruct the known description change.");
+    assert.ok(Number.isFinite(Date.parse(descriptionChange.createdon)), "Audit reconstruction omitted a valid event timestamp.");
+    assert.ok(String(descriptionChange.ChangedBy || "").trim(), "Audit reconstruction omitted the formatted changed-by user.");
+    assert.equal(descriptionChange.Event, "Update", "The field-level audit event type did not match the update operation.");
     assert.ok(bridge.calls.some(path => path.includes("RetrieveAuditDetails")), "Audit details API was not called.");
-    console.log("Live disposable audit fixture: PASS; audit attribute rows=" + result.rowCount);
+    console.log("Live disposable audit fixture: PASS; timestamp, actor, operation, and old/new values verified; audit attribute rows=" + result.rowCount);
   } finally {
     if (accountId) await bridge.request("DELETE", "accounts(" + accountId + ")");
   }
