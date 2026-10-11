@@ -462,6 +462,16 @@ test("audit attribute row cap bounds expanded details and reports truncation", a
   assert.match(result.warning, /may be incomplete/);
 });
 
+test("audit detail calls use the documented bound-function URL syntax", async () => {
+  const bridge = createBridge();
+  const result = await bridge.run(queries.audit);
+  assert.equal(result.ok, true, result.error || "Audit query failed.");
+  const detailCalls = bridge.calls.filter(path => path.includes("RetrieveAuditDetails"));
+  assert.ok(detailCalls.length > 0, "Expected the audit adapter to retrieve audit details.");
+  assert.ok(detailCalls.every(path => path.endsWith("RetrieveAuditDetails()")),
+    "RetrieveAuditDetails must be invoked as an OData function with parentheses.");
+});
+
 test("audit detail expansion uses bounded concurrency and preserves all changed attributes", async () => {
   const bridge = createBridge({ bulkAudits: 9, auditDelayMs: 10 });
   const result = await bridge.run(queries.audit);
