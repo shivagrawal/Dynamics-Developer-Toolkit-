@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readFile } from "node:fs/promises";
+import vm from "node:vm";
 const require = createRequire(import.meta.url);
 const engine = require("../../sqlstudio/js/sql-engine.js");
 const policy = require("../../sqlstudio/js/sql-policy.js");
@@ -100,6 +102,64 @@ test("FetchXML policy validates document structure and root entity, not regex ne
   }
   assert.equal(policy.validateFetchXml("<fetch><entity name='contact' alias='A&amp;B'><attribute name='fullname' /></entity></fetch>", "contact").ok, true);
   assert.equal(policy.validateFetchXml("  <fetch><entity name='contact' /></fetch>  ", "contact").ok, true);
+});
+
+
+test("background execution boundary fails closed before dispatch when policy is unavailable", async () => {
+  const backgroundSource = await readFile(new URL("../../background.js", import.meta.url), "utf8");
+  let listener;
+  const providerCalls = [];
+  const chrome = {
+    runtime: { onMessage: { addListener: fn => { listener = fn; } } },
+    commands: { onCommand: { addListener: () => {} } },
+    scripting: {
+      executeScript: options => {
+        providerCalls.push(options);
+        return Promise.resolve([{ result: { ok: true, rows: [], columns: [] } }]);
+      }
+    },
+    tabs: {}
+  };
+  const context = { chrome, DevLensSqlEngine: engine, console, URL, setTimeout, clearTimeout };
+  vm.runInNewContext(backgroundSource, context, { filename: "background.js" });
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const sql = await dispatch({ type: "DEVLENS_ACTION", action: "querySql", payload: { sql: "SELECT fullname FROM contact" } });
+  const fetchXml = await dispatch({ type: "DEVLENS_ACTION", action: "queryFetchXml", payload: { fetchXml: "<fetch><entity name='contact' /></fetch>", tableName: "contact" } });
+  assert.equal(sql.ok, false);
+  assert.equal(sql.code, "POLICY_UNAVAILABLE");
+  assert.equal(fetchXml.ok, false);
+  assert.equal(fetchXml.code, "POLICY_UNAVAILABLE");
+  assert.equal(providerCalls.length, 0);
+});
+
+test("structurally malformed FetchXML is rejected at the background boundary before dispatch", async () => {
+  const backgroundSource = await readFile(new URL("../../background.js", import.meta.url), "utf8");
+  let listener;
+  const providerCalls = [];
+  const chrome = {
+    runtime: { onMessage: { addListener: fn => { listener = fn; } } },
+    commands: { onCommand: { addListener: () => {} } },
+    scripting: {
+      executeScript: options => {
+        providerCalls.push(options);
+        return Promise.resolve([{ result: { ok: true, rows: [], columns: [] } }]);
+      }
+    },
+    tabs: {}
+  };
+  const context = { chrome, DevLensSqlEngine: engine, DevLensSqlPolicy: policy, console, URL, setTimeout, clearTimeout };
+  vm.runInNewContext(backgroundSource, context, { filename: "background.js" });
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  for (const fetchXml of [
+    "prefix<fetch><entity name='contact' /></fetch>",
+    "<fetch><entity name='contact&broken;' /></fetch>",
+    "<fetch><entity name='contact' /></fetch>suffix"
+  ]) {
+    const result = await dispatch({ type: "DEVLENS_ACTION", action: "queryFetchXml", payload: { fetchXml, tableName: "contact" } });
+    assert.equal(result.ok, false, fetchXml);
+    assert.equal(result.code, "READ_ONLY_POLICY", fetchXml);
+    assert.equal(providerCalls.length, 0, fetchXml);
+  }
 });
 
 test("unexpected parser failure fails closed with no plan", () => {
