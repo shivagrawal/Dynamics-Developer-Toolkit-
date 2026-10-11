@@ -139,7 +139,7 @@ test("Query Studio paginates large result sets without losing exportable results
   assert.match(downloadedContent, /Row 250/);
   assert.match(downloadedContent, /"'=1\+1"/, "Formula-like values starting with equals must be neutralized.");
   assert.match(downloadedContent, /"'\t=2\+2"/, "Tab-prefixed formula-like values must be neutralized.");
-  assert.match(downloadedContent, /"'+cmd\|' \/C calc'!A0"/, "Formula-like values starting with plus must be neutralized.");
+  assert.ok(downloadedContent.includes(`"'+cmd|' /C calc'!A0"`), "Formula-like values starting with plus must be neutralized.");
   assert.match(downloadedContent, /"'-2\+3"/, "Formula-like values starting with minus must be neutralized.");
   assert.match(downloadedContent, /"'@SUM\(A1:A2\)"/, "Formula-like values starting with at-sign must be neutralized.");
 });
