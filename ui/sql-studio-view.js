@@ -479,7 +479,7 @@
       const rows = state.results?.rows || [];
       const csvCell = value => {
         const text = value == null ? "" : (typeof value === "object" ? JSON.stringify(value) : String(value));
-        // Prevent spreadsheet formula execution while preserving the original value after opening in spreadsheet apps.
+        // Treat untrusted query output as text so spreadsheet applications cannot execute formulas.
         if (/^[\t\r\n]/.test(text) || /^[\u0000-\u0020\uFEFF]*[=+\-@]/.test(text)) return "'" + text;
         return text;
       };
