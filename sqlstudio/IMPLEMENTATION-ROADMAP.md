@@ -1,8 +1,21 @@
 # Query Studio Independent SQL Engine — Implementation Roadmap
 
-**Status date:** 2026-10-11  
+**Status date:** 2026-10-12  
 **Target branch:** feature/sql4cds-query-studio  
 **Product contract:** DevLens Query Studio is an independent browser-based Dataverse SQL workspace. SQL4CDS and XrmToolBox are not runtime dependencies.
+
+## Current coordinator work slice — 2026-10-12
+
+The shared policy decision now returns `route: "fetchxml"` for parsed OFFSET/FETCH plans and `route: "native-sql"` for the ordinary parsed SELECT subset. The UI consumes that route and reuses the returned plan for compilation rather than separately calling `plan()` just to choose the route. The background still re-runs the gate at its trust boundary, which is intentional defense-in-depth; therefore this is **not** a claim that SQL is parsed exactly once end-to-end.
+
+Acceptance evidence required before calling this slice done:
+- [ ] Query Studio regression workflow passes on the exact PR head, including policy and UI routing tests.
+- [ ] No policy rejection, parser failure, or non-capability provider error can trigger alternate-provider execution.
+- [ ] Named security/audit query shapes remain on the specialized adapter and cannot be routed through generic FetchXML.
+- [ ] Fresh live OFFSET/FETCH verification confirms page bounds and no overlap on the current integrated code.
+- [ ] Contract and issue handoffs link exact tested commit SHAs and workflow URLs.
+
+Remaining coordinator work: unify provider selection, normalized success/error outcomes, diagnostics, and compatibility adaptation behind a coordinator boundary; do not claim full parse-once execution until the trust-boundary interface has a reviewed design that does not trust caller-supplied AST data.
 
 ## 1. Milestone definition
 
@@ -14,7 +27,7 @@ Compatibility should be measured against a versioned SQL feature matrix. We must
 
 | Capability | Current state | Remaining gap / exact resolution |
 |---|---|---|
-| Browser Query Studio UI | Implemented: one Execute action, SQL editor, status/errors, results grid, result paging, CSV and JSON export | Complete the parse-once capability-first coordinator and uniform diagnostics; the current boundary now enforces deadline/concurrency/output bounds, with the documented non-cancellable FetchXML API limitation; OFFSET/FETCH routes to bounded FetchXML because live evidence showed native SQL ignored FETCH NEXT bounds |
+| Browser Query Studio UI | Implemented: one Execute action, SQL editor, status/errors, results grid, result paging, CSV and JSON export | Shared policy now selects the bounded FetchXML route for parsed OFFSET/FETCH before native SQL dispatch, with UI routing covered by the shared policy module; remaining: finish the full coordinator and request-scoped parse/decision contract, integrate canonical result/error normalization across providers, and verify current-commit live behavior. Existing deadline/concurrency/output bounds are implemented at the background boundary; FetchXML API cancellation remains limited |
 | Schema Explorer | Implemented: discover tables, search display/logical names, inspect columns/types/primary fields, insert selected logical names and generate SELECT | Add relationship/navigation metadata and autocomplete; cache metadata per environment with invalidation and permission-safe errors |
 | Native Dataverse SQL provider | Implemented for Microsoft's native endpoint SQL subset; uses current Dynamics page context; follows bounded same-origin paging links and validates projections | Do not treat it as the product engine. Route only statements whose semantics and syntax fit this provider; normalize all response/error shapes |
 | In-house SQL parser/compiler | Implemented as sqlstudio/js/sql-engine.js; parses a bounded SELECT grammar and compiles to FetchXML; metadata validation and XML escaping exist | It is not a complete SQL engine. Extend the AST/planner and add missing constructs listed below; add semantic tests before enabling a feature |
