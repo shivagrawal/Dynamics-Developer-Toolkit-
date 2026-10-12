@@ -153,7 +153,11 @@
     }
     const invalid = validatePlan(plan);
     if (invalid) return invalid;
-    return { ok: true, code: "OK", error: null, route: "native-sql", plan, limits: LIMITS };
+    // The native Dataverse SQL endpoint has been observed to ignore FETCH NEXT
+    // row bounds. Route this known capability mismatch before any native call;
+    // the bounded FetchXML compiler rejects paging shapes it cannot represent exactly.
+    const route = plan.hasOffset ? "fetchxml" : "native-sql";
+    return { ok: true, code: "OK", error: null, route, plan, limits: LIMITS };
   }
 
   function validXmlReferences(value) {
