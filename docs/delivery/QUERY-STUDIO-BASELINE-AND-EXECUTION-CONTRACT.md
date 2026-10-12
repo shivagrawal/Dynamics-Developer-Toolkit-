@@ -4,6 +4,15 @@
 **Integration branch:** `feature/sql4cds-query-studio`  
 **Product boundary:** independent, read-only browser-based Dataverse SQL workspace. SQL4CDS and XrmToolBox are not runtime dependencies.
 
+## Coordinator routing checkpoint — 2026-10-12
+
+**Status: partial implementation; release remains blocked.** The shared policy module now returns a deterministic provider route for parsed OFFSET/FETCH statements, selecting `fetchxml` before native SQL dispatch because the live native endpoint previously returned more rows than the requested FETCH NEXT bound. The Query Studio UI consumes this shared route decision and passes its parsed plan into the FetchXML compiler. The background dispatcher still independently enforces the policy at the execution trust boundary; the UI decision is routing guidance, not authorization.
+
+- Changed implementation: `sqlstudio/js/sql-policy.js`, `ui/sql-studio-view.js`.
+- Regression coverage: `tests/query-studio/sql-policy.test.mjs` asserts the route; `tests/query-studio/sql-studio-ui.test.mjs` now supplies the real parser/policy to routing fixtures.
+- This slice does **not** claim a single parse across UI and background trust boundaries, nor does it complete the full provider coordinator or canonical normalizer integration.
+- CI and live Dataverse checks for this slice are pending until the branch's pull-request workflow finishes. Do not mark the work complete or release-ready before those results are observed.
+
 ## Current integration checkpoint — 2026-10-11
 
 This section supersedes older workflow counts below when describing the current integrated branch. Historical evidence remains historical.
