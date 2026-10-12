@@ -11,7 +11,7 @@
 - Changed implementation: `sqlstudio/js/sql-policy.js`, `ui/sql-studio-view.js`.
 - Regression coverage: `tests/query-studio/sql-policy.test.mjs` asserts the route; `tests/query-studio/sql-studio-ui.test.mjs` now supplies the real parser/policy to routing fixtures.
 - This slice does **not** claim a single parse across UI and background trust boundaries, nor does it complete the full provider coordinator or canonical normalizer integration.
-- CI and live Dataverse checks for this slice are pending until the branch's pull-request workflow finishes. Do not mark the work complete or release-ready before those results are observed.
+- CI and live Dataverse checks for this slice remain unverified. PR run [38214929109](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38214929109) failed twice before any job step ran: the job response had an empty `steps` array, no runner ID/name, and no retrievable log artifact. This does not establish a code/test failure because syntax validation and the Node test suite did not execute. A prior run [38160620391](https://github.com/shivagrawal/Dynamics-Developer-Toolkit-/actions/runs/38160620391) did execute both steps and passed on the then-current feature snapshot. The precise cause of the PR-run startup failure is not exposed by the available GitHub responses. Do not mark the work complete or release-ready before the regression workflow executes on the exact PR head and live Dataverse checks are observed.
 
 ## Current integration checkpoint — 2026-10-11
 
