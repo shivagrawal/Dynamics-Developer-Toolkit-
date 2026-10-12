@@ -6,6 +6,8 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const resultNormalizer = require("../../sqlstudio/js/sql-result-normalizer.js");
+const sqlEngine = require("../../sqlstudio/js/sql-engine.js");
+const sqlPolicy = require("../../sqlstudio/js/sql-policy.js");
 
 const source = await readFile(new URL("../../ui/sql-studio-view.js", import.meta.url), "utf8");
 
@@ -75,6 +77,7 @@ test("Query Studio paginates large result sets without losing exportable results
   }));
   const window = {
     DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlPolicy: sqlPolicy,
     D365AnalyzerApi: {
       send: async action => {
         assert.equal(action, "querySql");
@@ -155,6 +158,8 @@ test("single Execute uses native SQL first and only falls back on typed capabili
   const window = {
     DevLensSqlResultNormalizer: resultNormalizer,
     DevLensSqlEngine: {
+      parse: sqlEngine.parse,
+      tokenize: sqlEngine.tokenize,
       plan: () => ({ table: "contact", joins: [], columns: [{ column: "fullname" }], offset: 0, fetch: null, alias: "c" }),
       compile: () => ({
         fetchXml: '<fetch><entity name="contact"><attribute name="fullname"/></entity></fetch>',
