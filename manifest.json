@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "Dynamics 365 & Dataverse DevLens",
   "short_name": "D365 DevLens",
-  "version": "5.20.13.1",
-  "version_name": "5.20.13.1 Metadata Performance Hotfix",
-  "description": "Developer diagnostics for Dynamics 365 and Dataverse with events, JavaScript, fields, metadata, process, custom control, security, audit, command palette, and developer toolkit capabilities.",
+  "version": "5.21.0.0",
+  "version_name": "5.21.0.0 SQL Query Studio + Schema Explorer Preview",
+  "description": "Developer diagnostics for Dynamics 365 and Dataverse with Query Studio and Schema Explorer preview, events, JavaScript, fields, metadata, process, custom control, security, audit, command palette, and developer toolkit capabilities.",
   "permissions": [
     "scripting",
     "tabs",
@@ -68,6 +68,9 @@
         "ui/process-view.js",
         "ui/custom-control-view.js",
         "ui/security-audit-view.js",
+        "sqlstudio/js/sql-engine.js",
+        "sqlstudio/js/sql-result-normalizer.js",
+        "ui/sql-studio-view.js",
         "content-ui.js",
         "impersonation-ui.js"
       ],

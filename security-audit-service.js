@@ -1,6 +1,34 @@
 "use strict";
 function devLensSecurityAuditBridge(action, p) {
   "use strict";
+  const queryExecution = action === "sqlQuery" ? (() => {
+    const deadlineAt = Math.min(Number(p?.__devlensExecution?.deadlineAt) || Date.now() + 120000, Date.now() + 120000);
+    const suppliedBytes = Number(p?.__devlensExecution?.maxOutputBytes);
+    const maxOutputBytes = Number.isInteger(suppliedBytes) && suppliedBytes > 0 ? Math.min(suppliedBytes, 64 * 1024 * 1024) : 64 * 1024 * 1024;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
+    return {
+      deadlineAt, controller, timer, maxOutputBytes, outputBytes: 0, outputLimitHit: false,
+      assertActive() {
+        if (controller.signal.aborted || Date.now() >= deadlineAt) {
+          controller.abort();
+          const error = Error("Query execution exceeded the 120-second deadline.");
+          error.code = "QUERY_TIMEOUT";
+          throw error;
+        }
+      },
+      reserveRow(row) {
+        this.assertActive();
+        let serialized;
+        try { serialized = JSON.stringify(row); } catch { serialized = ""; }
+        const estimatedBytes = typeof serialized === "string" ? serialized.length * 3 : 0;
+        if (this.outputBytes + estimatedBytes > this.maxOutputBytes) { this.outputLimitHit = true; return false; }
+        this.outputBytes += estimatedBytes;
+        return true;
+      },
+      finish() { clearTimeout(timer); }
+    };
+  })() : null;
   const S = v => v == null ? "" : String(v);
   const G = v => S(v).replace(/[{}]/g, "");
   const X = v => S(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&apos;");
@@ -10,11 +38,20 @@ function devLensSecurityAuditBridge(action, p) {
   const cache = (window.__DEVLENS_SECURITY_AUDIT_CACHE_5143 ??= {
     userRoles: new Map(), rolePrivileges: new Map(), privileges: null, tables: null
   });
+  const apiRoot = new URL("/api/data/v9.2/", base);
+  const maxPages = 100;
   async function get(path) {
-    const response = await fetch(`${base}/api/data/v9.2/${path}`, {
+    queryExecution?.assertActive();
+    const url = new URL(String(path), apiRoot);
+    if (url.origin !== apiRoot.origin || !url.pathname.startsWith(apiRoot.pathname)) {
+      throw Error("Blocked a Dataverse request outside the current environment's Web API.");
+    }
+    const response = await fetch(url.toString(), {
       credentials: "same-origin",
-      headers: { Accept: "application/json", "OData-MaxVersion": "4.0", "OData-Version": "4.0", Prefer: 'odata.include-annotations="*"' }
+      headers: { Accept: "application/json", "OData-MaxVersion": "4.0", "OData-Version": "4.0", Prefer: 'odata.include-annotations="*"' },
+      ...(queryExecution ? { signal: queryExecution.controller.signal } : {})
     });
+    queryExecution?.assertActive();
     if (!response.ok) {
       let message = "";
       try { message = (await response.json())?.error?.message || ""; } catch { }
@@ -22,15 +59,57 @@ function devLensSecurityAuditBridge(action, p) {
     }
     return response.json();
   }
-  async function all(path) {
+  async function all(path, maxRows = 10000) {
     const rows = [];
     let next = path;
+    let pages = 0;
+    const seen = new Set();
     while (next) {
-      const data = await get(next.replace(`${base}/api/data/v9.2/`, ""));
-      rows.push(...(data.value || []));
+      queryExecution?.assertActive();
+      const pageUrl = new URL(String(next), apiRoot).toString();
+      if (seen.has(pageUrl)) throw Error("Dataverse returned a repeated paging link; retrieval stopped safely.");
+      if (pages >= maxPages) throw Error("Dataverse retrieval exceeded the 100-page safety limit.");
+      seen.add(pageUrl);
+      const data = await get(next);
+      const pageRows = Array.isArray(data.value) ? data.value : [];
+      const room = maxRows - rows.length;
+      for (const row of pageRows.slice(0, Math.max(0, room))) {
+        if (queryExecution && !queryExecution.reserveRow(row)) { const error = Error("Query result exceeded the 64 MiB estimated output-buffer limit."); error.code = "QUERY_OUTPUT_LIMIT"; throw error; }
+        rows.push(row);
+      }
       next = data["@odata.nextLink"] || "";
+      pages++;
+      if (pageRows.length > room || (rows.length >= maxRows && next)) {
+        throw Error("Dataverse retrieval exceeded the 10,000-row safety limit; refine the query.");
+      }
     }
     return rows;
+  }
+  async function allBounded(path, maxRows = 10000) {
+    const rows = [];
+    let next = path;
+    let pages = 0;
+    const seen = new Set();
+    while (next && rows.length < maxRows) {
+      queryExecution?.assertActive();
+      const pageUrl = new URL(String(next), apiRoot).toString();
+      if (seen.has(pageUrl)) throw Error("Dataverse returned a repeated paging link; retrieval stopped safely.");
+      if (pages >= maxPages) return { rows, truncated: true };
+      seen.add(pageUrl);
+      const data = await get(next);
+      const pageRows = Array.isArray(data.value) ? data.value : [];
+      const room = maxRows - rows.length;
+      for (const row of pageRows.slice(0, Math.max(0, room))) {
+        if (queryExecution && !queryExecution.reserveRow(row)) break;
+        rows.push(row);
+      }
+      next = data["@odata.nextLink"] || "";
+      pages++;
+      if (pageRows.length > room || queryExecution?.outputLimitHit) return { rows, truncated: true };
+      // At an exact safety cap, completeness cannot be established even when the server omits a next link.
+      if (rows.length >= maxRows) return { rows, truncated: true };
+    }
+    return { rows, truncated: false };
   }
   const fxAll = xml => all(`roles?fetchXml=${encodeURIComponent(xml)}`);
   async function context() {
@@ -221,7 +300,654 @@ function devLensSecurityAuditBridge(action, p) {
     }
     return { groups, moreRecords: !!collection.MoreRecords, pagingCookie: collection.PagingCookie || "", clientUrl: base };
   }
+
+  function sqlUnquote(value) {
+    return String(value || "").replace(/''/g, "'");
+  }
+  function sqlLiteral(sql, pattern) {
+    const match = String(sql).match(pattern);
+    return match ? sqlUnquote(match[1]) : null;
+  }
+  function sqlLikeTerm(sql, pattern) {
+    const value = sqlLiteral(sql, pattern);
+    return value;
+  }
+  function sqlDepth(mask) {
+    return ({ 1: "User", 2: "Business Unit", 4: "Parent:Child BU", 8: "Organization" })[Number(mask)] || null;
+  }
+  function sqlDistinct(rows, keys) {
+    const seen = new Set();
+    // Approximate the Dataverse SQL surface's usual case/accent-insensitive string comparison.
+    const collationKey = value => {
+      if (typeof value !== "string") return value ?? null;
+      return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    };
+    return rows.filter(row => {
+      const key = JSON.stringify(keys.map(name => collationKey(row[name])));
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  function sqlSort(rows, fields) {
+    return rows.sort((a, b) => {
+      for (const [field, direction] of fields) {
+        const av = a[field] == null ? "" : String(a[field]);
+        const bv = b[field] == null ? "" : String(b[field]);
+        const cmp = av.localeCompare(bv, undefined, { numeric: false, sensitivity: "base" });
+        if (cmp) return direction === "desc" ? -cmp : cmp;
+      }
+      return 0;
+    });
+  }
+  async function sqlUsersByName(term) {
+    const xml = "<fetch top='5000'><entity name='systemuser'><attribute name='systemuserid'/><attribute name='fullname'/><filter><condition attribute='fullname' operator='like' value='" + X(term) + "' /></filter><order attribute='fullname'/></entity></fetch>";
+    return (await all("systemusers?fetchXml=" + encodeURIComponent(xml))).map(row => ({
+      id: G(row.systemuserid), name: row.fullname || "", raw: row
+    }));
+  }
+
+  async function sqlUserRolesByName(term) {
+    const xml = "<fetch top='5000'><entity name='role'><attribute name='roleid'/><attribute name='name'/><link-entity name='systemuserroles' from='roleid' to='roleid' link-type='inner'><link-entity name='systemuser' from='systemuserid' to='systemuserid' alias='SU' link-type='inner'><attribute name='systemuserid'/><attribute name='fullname'/><filter><condition attribute='fullname' operator='like' value='" + X(term) + "'/></filter></link-entity></link-entity><link-entity name='businessunit' from='businessunitid' to='businessunitid' alias='BU' link-type='inner'><attribute name='name'/></link-entity></entity></fetch>";
+    const result = await allBounded("roles?fetchXml=" + encodeURIComponent(xml), 5000);
+    return { rows: result.rows.map(row => ({
+      fullname: row["SU.fullname"] || row["su.fullname"] || "",
+      systemuserid: G(row["SU.systemuserid"] || row["su.systemuserid"]),
+      role_name: row.name || row["R.name"] || row["r.name"] || "",
+      role_businessunit: row["BU.name"] || row["bu.name"] || ""
+    })), truncated: result.truncated };
+  }
+  async function sqlUserTableByName(term, logicalName) {
+    const table = S(logicalName).toLowerCase();
+    if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw Error("Invalid table logical name in user privilege query.");
+    const xml = "<fetch top='5000' distinct='true'><entity name='systemuserroles'><attribute name='systemuserroleid'/><link-entity name='systemuser' to='systemuserid' from='systemuserid' alias='su' link-type='inner'><attribute name='fullname'/><attribute name='systemuserid'/><filter><condition attribute='fullname' operator='like' value='" + X(term) + "'/></filter></link-entity><link-entity name='role' to='roleid' from='roleid' alias='ur' link-type='inner'><attribute name='name'/><attribute name='roleid'/><link-entity name='businessunit' to='businessunitid' from='businessunitid' alias='bu' link-type='inner'><attribute name='name'/></link-entity><link-entity name='role' to='parentrootroleid' from='parentrootroleid' alias='pr' link-type='inner'><attribute name='roleid'/><link-entity name='roleprivileges' to='roleid' from='roleid' alias='rp' link-type='inner'><attribute name='privilegedepthmask'/><attribute name='roleprivilegeid'/><link-entity name='privilege' to='privilegeid' from='privilegeid' alias='p' link-type='inner'><attribute name='name'/><attribute name='privilegeid'/><link-entity name='privilegeobjecttypecodes' to='privilegeid' from='privilegeid' alias='potc' link-type='inner'><link-entity name='entity' to='objecttypecode' from='objecttypecode' alias='e' link-type='inner'><attribute name='logicalname'/><filter><condition attribute='logicalname' operator='eq' value='" + X(table) + "'/></filter></link-entity></link-entity></link-entity></link-entity></link-entity></link-entity></entity></fetch>";
+    const result = await allBounded("systemuserrolescollection?fetchXml=" + encodeURIComponent(xml), 5000);
+    return { rows: result.rows.map(row => ({
+      fullname: row["su.fullname"] || "",
+      role_name: row["ur.name"] || "",
+      role_businessunit: row["bu.name"] || "",
+      privilege_name: row["p.name"] || "",
+      depth: sqlDepth(row["rp.privilegedepthmask"]) || (row["rp.privilegedepthmask"] == null ? "" : S(row["rp.privilegedepthmask"]))
+    })), truncated: result.truncated };
+  }
+
+  async function sqlPrivilegesForTable(logicalName) {
+    const table = S(logicalName).toLowerCase();
+    if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw Error("Invalid table logical name in security query.");
+    const xml = "<fetch distinct='true'><entity name='privilege'><attribute name='name'/><link-entity name='privilegeobjecttypecodes' from='privilegeid' to='privilegeid' link-type='inner'><link-entity name='entity' from='objecttypecode' to='objecttypecode' alias='e' link-type='inner'><attribute name='logicalname'/><filter><condition attribute='logicalname' operator='eq' value='" + X(table) + "'/></filter></link-entity></link-entity><order attribute='name'/></entity></fetch>";
+    const result = await allBounded("privileges?fetchXml=" + encodeURIComponent(xml), 10000);
+    return { rows: sqlDistinct(result.rows.map(row => ({ privilege_name: row.name || "" })), ["privilege_name"]), truncated: result.truncated };
+  }
+  async function sqlRolesByPrivilegeName(privilegeName) {
+    const xml = "<fetch distinct='true'><entity name='roleprivileges'><attribute name='privilegedepthmask'/><link-entity name='role' to='roleid' from='roleid' alias='r' link-type='inner'><attribute name='roleid'/><attribute name='name'/><link-entity name='businessunit' to='businessunitid' from='businessunitid' alias='bu' link-type='inner'><attribute name='name'/></link-entity></link-entity><link-entity name='privilege' to='privilegeid' from='privilegeid' alias='p' link-type='inner'><attribute name='name'/><filter><condition attribute='name' operator='eq' value='" + X(privilegeName) + "'/></filter></link-entity></entity></fetch>";
+    const result = await allBounded("roleprivilegescollection?fetchXml=" + encodeURIComponent(xml), 10000);
+    return { rows: result.rows.map(row => ({
+      role_name: row["r.name"] || "",
+      business_unit: row["bu.name"] || "",
+      privilege_name: row["p.name"] || privilegeName,
+      depth: sqlDepth(row.privilegedepthmask) || (row.privilegedepthmask == null ? "" : S(row.privilegedepthmask))
+    })), truncated: result.truncated };
+  }
+  async function sqlRoleAccessRows(roleName) {
+    const xml = "<fetch distinct='true'><entity name='roleprivileges'><attribute name='privilegedepthmask'/><link-entity name='role' to='roleid' from='roleid' alias='r' link-type='inner'><attribute name='roleid'/><attribute name='name'/><filter><condition attribute='name' operator='eq' value='" + X(roleName) + "'/></filter><link-entity name='businessunit' to='businessunitid' from='businessunitid' alias='bu' link-type='inner'><attribute name='name'/></link-entity></link-entity><link-entity name='privilege' to='privilegeid' from='privilegeid' alias='p' link-type='inner'><attribute name='name'/><link-entity name='privilegeobjecttypecodes' to='privilegeid' from='privilegeid' alias='potc' link-type='inner'><link-entity name='entity' to='objecttypecode' from='objecttypecode' alias='e' link-type='inner'><attribute name='logicalname'/></link-entity></link-entity></link-entity></entity></fetch>";
+    const result = await allBounded("roleprivilegescollection?fetchXml=" + encodeURIComponent(xml), 10000);
+    return { rows: result.rows.map(row => ({
+      table_name: row["e.logicalname"] || "",
+      privilege_name: row["p.name"] || "",
+      depth: sqlDepth(row.privilegedepthmask),
+      role_name: row["r.name"] || roleName,
+      business_unit: row["bu.name"] || ""
+    })), truncated: result.truncated };
+  }
+  function sqlAuditValue(values, key) {
+    const value = values?.[key];
+    if (value === null || value === undefined) return null;
+    if (typeof value !== "object") return S(value);
+    if (Object.prototype.hasOwnProperty.call(value, "Value")) return value.Value == null ? null : S(value.Value);
+    if (Object.prototype.hasOwnProperty.call(value, "Id")) return value.Id == null ? null : S(value.Id);
+    return JSON.stringify(value);
+  }
+  async function sqlAuditRows(recordId) {
+    const id = G(recordId).toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw Error("Audit query requires a valid record GUID in the objectid filter.");
+    const auditResult = await allBounded("audits?$select=auditid,createdon,operation,_userid_value,objecttypecode&$filter=_objectid_value eq " + id + "&$orderby=createdon desc&$top=1001", 1001);
+    const auditRows = auditResult.rows;
+    let truncated = auditResult.truncated || auditRows.length > 1000;
+    const output = [];
+    async function expandAuditRow(auditRow) {
+      const auditId = G(auditRow.auditid);
+      if (!auditId) return [];
+      const response = await get("audits(" + auditId + ")/Microsoft.Dynamics.CRM.RetrieveAuditDetails");
+      const detail = response.AuditDetail || {};
+      const oldValues = detail.OldValue?.Attributes || detail.OldValue || {};
+      const newValues = detail.NewValue?.Attributes || detail.NewValue || {};
+      const keys = [...new Set([...Object.keys(oldValues), ...Object.keys(newValues)])]
+        .filter(key => !key.startsWith("@") && !key.includes("@"));
+      const changedBy = auditRow["_userid_value@OData.Community.Display.V1.FormattedValue"];
+      const event = auditRow.operation == null ? null : (({ 1: "Create", 2: "Update" })[Number(auditRow.operation)] || S(auditRow.operation));
+      return keys.map(key => {
+        const logicalName = key.startsWith("_") && key.endsWith("_value") ? key.slice(1, -6) : key;
+        return {
+          createdon: auditRow.createdon == null ? null : S(auditRow.createdon),
+          ChangedBy: changedBy == null ? null : S(changedBy),
+          Event: event,
+          logicalname: logicalName,
+          oldvalue: sqlAuditValue(oldValues, key),
+          newvalue: sqlAuditValue(newValues, key)
+        };
+      });
+    }
+    // Keep concurrency low to avoid Dataverse service-protection spikes while
+    // preventing up to 1,000 audit-detail requests from running serially.
+    const auditLimit = Math.min(auditRows.length, 1000);
+    const maxAttributeRows = 10000;
+    const concurrency = 4;
+    let attributeLimitReached = false;
+    for (let offset = 0; offset < auditLimit; offset += concurrency) {
+      const batch = auditRows.slice(offset, Math.min(offset + concurrency, auditLimit));
+      const expanded = await Promise.all(batch.map(expandAuditRow));
+      for (const row of expanded.flat()) {
+        if (output.length >= maxAttributeRows) {
+          truncated = true;
+          attributeLimitReached = true;
+          break;
+        }
+        output.push(row);
+      }
+      if (attributeLimitReached) break;
+    }
+    return { rows: sqlSort(output, [["createdon", "desc"], ["logicalname", "asc"]]), truncated };
+  }
+  function stripSqlComments(sql) {
+    const input = String(sql || "");
+    let out = "", quote = "", line = false, blockDepth = 0;
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i], next = input[i + 1];
+      if (line) {
+        if (ch === "\n" || ch === "\r") { line = false; out += ch; }
+        else out += " ";
+        continue;
+      }
+      if (blockDepth > 0) {
+        if (ch === "/" && next === "*") { blockDepth++; out += "  "; i++; }
+        else if (ch === "*" && next === "/") { blockDepth--; out += "  "; i++; }
+        else out += ch === "\n" || ch === "\r" ? ch : " ";
+        continue;
+      }
+      if (quote) {
+        out += ch;
+        if (ch === quote && next === quote) { out += next; i++; }
+        else if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'" || ch === '"') { quote = ch; out += ch; continue; }
+      if (ch === "[") { quote = "]"; out += ch; continue; }
+      if (ch === "-" && next === "-") { line = true; out += "  "; i++; continue; }
+      if (ch === "/" && next === "*") { blockDepth = 1; out += "  "; i++; continue; }
+      out += ch;
+    }
+    if (blockDepth > 0) throw Error("Unterminated SQL block comment.");
+    if (quote) throw Error("Unterminated SQL quoted value or identifier.");
+    return out;
+  }
+  function hasMultipleSqlStatements(sql) {
+    let quote = "", ended = false;
+    for (let i = 0; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (quote) { if (ch === quote && next === quote) { i++; continue; } if (ch === quote) quote = ""; continue; }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (ch === "[") { quote = "]"; continue; }
+      if (ch === ";") { ended = true; continue; }
+      if (ended && !/\s/.test(ch)) return true;
+    }
+    return false;
+  }
+
+  function sqlProjectionAliases(sql) {
+    const select = /\bSELECT\b/i.exec(sql);
+    if (!select) throw Error("Security SQL must start with SELECT after comments.");
+    let start = select.index + select[0].length;
+    const distinct = /^\s*DISTINCT\b/i.exec(sql.slice(start));
+    const isDistinct = !!distinct;
+    if (distinct) start += distinct[0].length;
+    let depth = 0, quote = "", from = -1;
+    for (let i = start; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (ch === "[") { quote = "]"; continue; }
+      if (ch === "(") { depth++; continue; }
+      if (ch === ")") { depth--; continue; }
+      if (depth === 0 && sql.slice(i, i + 4).toUpperCase() === "FROM" &&
+          (i === 0 || !/[A-Za-z0-9_$]/.test(sql[i - 1])) &&
+          !/[A-Za-z0-9_$]/.test(sql[i + 4] || " ")) { from = i; break; }
+    }
+    if (from < 0 || quote || depth !== 0) throw Error("Could not parse the security SQL SELECT projection.");
+    const list = sql.slice(start, from), parts = [];
+    let begin = 0; depth = 0; quote = "";
+    for (let i = 0; i < list.length; i++) {
+      const ch = list[i], next = list[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (ch === "[") { quote = "]"; continue; }
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      else if (ch === "," && depth === 0) { parts.push(list.slice(begin, i).trim()); begin = i + 1; }
+    }
+    parts.push(list.slice(begin).trim());
+    const unquote = value => {
+      const v = String(value || "").trim();
+      if (v.startsWith("[") && v.endsWith("]")) return v.slice(1, -1).replace(/]]/g, "]");
+      if (v.startsWith('"') && v.endsWith('"')) return v.slice(1, -1).replace(/""/g, '"');
+      return v;
+    };
+    const aliases = parts.map(part => {
+      const as = /\s+AS\s+(\[[^\]]+\]|"(?:""|[^"])*"|[A-Za-z_][A-Za-z0-9_$]*)\s*$/i.exec(part);
+      if (as) return unquote(as[1]);
+      if (/^(?:\[[^\]]+\]|"(?:""|[^"])*"|[A-Za-z_][A-Za-z0-9_$]*)(?:\.(?:\[[^\]]+\]|"(?:""|[^"])*"|[A-Za-z_][A-Za-z0-9_$]*))?$/.test(part)) return unquote(part.split(".").pop());
+      return "";
+    });
+    aliases.parts = parts;
+    aliases.distinct = isDistinct;
+    return aliases;
+  }
+  function normalizeSqlExpression(value) {
+    let output = "", quote = "";
+    for (let i = 0; i < value.length; i++) {
+      const ch = value[i], next = value[i + 1];
+      if (quote) {
+        output += ch;
+        if (ch === quote && next === quote) { output += next; i++; }
+        else if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'" || ch === '"') { quote = ch; output += ch; continue; }
+      if (ch === "[") { quote = "]"; output += ch; continue; }
+      if (/\s/.test(ch)) continue;
+      output += ch.toUpperCase();
+    }
+    return output;
+  }
+  function assertSqlProjection(sql, expected, shape, expectedExpressions, expectedDistinct) {
+    const actual = sqlProjectionAliases(sql);
+    const got = actual, want = expected;
+    if (got.length !== want.length || got.some((name, index) => name !== want[index])) {
+      throw Error("Unsupported SELECT projection for " + shape + ". Expected columns in order: " +
+        expected.join(", ") + "; found: " + (actual.map(name => name || "(expression needs an alias)").join(", ") || "(none)") + ".");
+    }
+    if (expectedDistinct !== undefined && actual.distinct !== expectedDistinct) {
+      throw Error("Unsupported SELECT DISTINCT setting for " + shape + ".");
+    }
+    if (expectedExpressions) {
+      if (actual.parts.length !== expectedExpressions.length ||
+          actual.parts.some((part, index) => normalizeSqlExpression(part) !== normalizeSqlExpression(expectedExpressions[index]))) {
+        throw Error("Unsupported SELECT expressions for " + shape + ". Expressions must preserve the SQL query semantics.");
+      }
+    }
+  }
+
+  function maskSqlStringLiterals(sql) {
+    let output = "", inString = false;
+    for (let i = 0; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (inString) {
+        if (ch === "'" && next === "'") { output += "  "; i++; }
+        else if (ch === "'") { output += " "; inString = false; }
+        else output += ch === "\n" || ch === "\r" ? ch : " ";
+        continue;
+      }
+      if (ch === "'") { inString = true; output += " "; continue; }
+      output += ch;
+    }
+    return output;
+  }
+
+  function assertSqlShape(sql, shape, requirements) {
+    const structure = maskSqlStringLiterals(sql);
+    for (const [pattern, description] of requirements) {
+      if (!pattern.test(structure)) throw Error("Unsupported SQL structure for " + shape + ": expected " + description + ".");
+    }
+  }
+  function assertSqlJoinStructure(sql, expectedJoins, expectedApplies, shape) {
+    const fromMatch = /\bFROM\b/i.exec(sql);
+    if (!fromMatch) throw Error("Unsupported SQL structure for " + shape + ": FROM clause is required.");
+    let quote = "", depth = 0, end = sql.length;
+    for (let i = fromMatch.index + fromMatch[0].length; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'") { quote = ch; continue; }
+      if (ch === "(") { depth++; continue; }
+      if (ch === ")") { depth--; continue; }
+      if (depth === 0 && /^(?:WHERE|GROUP\s+BY|ORDER\s+BY|HAVING)\b/i.test(sql.slice(i)) &&
+          (i === 0 || /\s/.test(sql[i - 1]))) { end = i; break; }
+    }
+    const clause = sql.slice(fromMatch.index + fromMatch[0].length, end);
+    quote = "";
+    depth = 0;
+    let joins = 0, applies = 0, commas = 0;
+    for (let i = 0; i < clause.length; i++) {
+      const ch = clause[i], next = clause[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'") { quote = ch; continue; }
+      if (ch === "(") { depth++; continue; }
+      if (ch === ")") { depth--; continue; }
+      if (depth !== 0) continue;
+      if (ch === ",") { commas++; continue; }
+      if (/[A-Za-z_]/.test(ch)) {
+        const match = /^[A-Za-z_][A-Za-z0-9_]*/.exec(clause.slice(i));
+        const word = match[0].toUpperCase();
+        if (word === "JOIN") joins++;
+        if (word === "APPLY") applies++;
+        i += match[0].length - 1;
+      }
+    }
+    if (joins !== expectedJoins || applies !== expectedApplies || commas !== 0) {
+      throw Error("Unsupported SQL relationship structure for " + shape +
+        ". Expected " + expectedJoins + " JOIN(s), " + expectedApplies +
+        " APPLY clause(s), and no comma joins; found " + joins + " JOIN(s), " +
+        applies + " APPLY clause(s), and " + commas + " comma join(s).");
+    }
+  }
+  function roleAccessProjectionExpressions() {
+    const depthCase = "CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' END";
+    const aggregate = (condition, alias) => "ISNULL(MAX(CASE WHEN " + condition + " THEN " + depthCase + " END), 'None') AS " + alias;
+    return [
+      "e.logicalname AS table_name",
+      aggregate("p.name LIKE 'prvCreate%'", "CreateAccess"),
+      aggregate("p.name LIKE 'prvRead%'", "ReadAccess"),
+      aggregate("p.name LIKE 'prvWrite%'", "WriteAccess"),
+      aggregate("p.name LIKE 'prvDelete%'", "DeleteAccess"),
+      aggregate("p.name LIKE 'prvAppend%' AND p.name NOT LIKE 'prvAppendTo%'", "AppendAccess"),
+      aggregate("p.name LIKE 'prvAppendTo%'", "AppendToAccess"),
+      aggregate("p.name LIKE 'prvAssign%'", "AssignAccess"),
+      aggregate("p.name LIKE 'prvShare%'", "ShareAccess")
+    ];
+  }
+
+  function sqlDepthRequirements() {
+    return [
+      [/\bWHEN\s+1\s+THEN\s+'User'/i, "the User depth mapping"],
+      [/\bWHEN\s+2\s+THEN\s+'Business Unit'/i, "the Business Unit depth mapping"],
+      [/\bWHEN\s+4\s+THEN\s+'Parent:Child BU'/i, "the Parent:Child BU depth mapping"],
+      [/\bWHEN\s+8\s+THEN\s+'Organization'/i, "the Organization depth mapping"]
+    ];
+  }
+
+  function sqlWhereStructure(sql) {
+    const where = /\bWHERE\b/i.exec(sql);
+    if (!where) return "";
+    const start = where.index + where[0].length;
+    let depth = 0, quote = "", end = sql.length;
+    for (let i = start; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'") { quote = ch; continue; }
+      if (ch === "(") { depth++; continue; }
+      if (ch === ")") { depth--; continue; }
+      if (depth === 0 && /^(?:GROUP\s+BY|ORDER\s+BY)\b/i.test(sql.slice(i)) &&
+          (i === 0 || /\s/.test(sql[i - 1]))) { end = i; break; }
+      if (ch === ";" && !sql.slice(i + 1).trim()) { end = i; break; }
+    }
+    const clause = sql.slice(start, end).trim();
+    return clause.replace(/'(?:''|[^'])*'/g, "?").replace(/\s+/g, "").toUpperCase();
+  }
+  function assertSqlWhereStructure(sql, expected, shape) {
+    const actual = sqlWhereStructure(sql);
+    if (actual !== expected) {
+      throw Error("Unsupported WHERE clause for " + shape + ". This compatibility handler does not ignore or reinterpret additional predicates.");
+    }
+  }
+
+  function sqlOrderByStructure(sql) {
+    let depth = 0, quote = "", start = -1, clauseLength = 0;
+    for (let i = 0; i < sql.length; i++) {
+      const ch = sql[i], next = sql[i + 1];
+      if (quote) {
+        if (ch === quote && next === quote) { i++; continue; }
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === "'") { quote = ch; continue; }
+      if (ch === "(") { depth++; continue; }
+      if (ch === ")") { depth--; continue; }
+      if (depth === 0 && /^ORDER\s+BY\b/i.test(sql.slice(i)) &&
+          (i === 0 || /\s/.test(sql[i - 1]))) {
+        start = i;
+        clauseLength = /^ORDER\s+BY\b/i.exec(sql.slice(i))[0].length;
+        break;
+      }
+    }
+    if (start < 0) return "";
+    let clause = sql.slice(start + clauseLength).trim().replace(/;\s*$/, "");
+    clause = clause.replace(/'(?:''|[^'])*'/g, "?").replace(/\s+/g, "").toUpperCase();
+    return clause.replace(/ASC$/, "");
+  }
+  function assertSqlOrderBy(sql, expected, shape) {
+    const actual = sqlOrderByStructure(sql);
+    if (actual !== expected) {
+      throw Error("Unsupported ORDER BY clause for " + shape + ". This compatibility handler cannot reorder results to match that clause.");
+    }
+  }
+
+  async function sqlQuery(sql) {
+    const original = S(sql);
+    if (!original.trim()) throw Error("Read-only SQL mode accepts SELECT statements only.");
+    if (original.length > 100000) throw Error("Query exceeds the 100,000 character limit.");
+    const query = stripSqlComments(original).trim();
+    if (!query || !/^SELECT\b/i.test(query)) throw Error("Read-only SQL mode accepts SELECT statements only.");
+    if (hasMultipleSqlStatements(query)) throw Error("Run one SELECT statement at a time.");
+    const projection = sqlProjectionAliases(query);
+    const columns = [], rows = [];
+    let kind = "";
+    let truncated = false;
+    if (/\bFROM\s+systemuserroles\b/i.test(query) && /\bJOIN\s+systemuser\b/i.test(query)) {
+      kind = "user-roles";
+      assertSqlProjection(query, ["fullname", "systemuserid", "role_name", "role_businessunit"], kind, ["SU.fullname", "SU.systemuserid", "R.name AS role_name", "BU.name AS role_businessunit"], false);
+      assertSqlShape(query, kind, [
+        [/\bJOIN\s+systemuser\s+(?:AS\s+)?SU\b/i, "the SystemUser join"],
+        [/\bJOIN\s+role\s+(?:AS\s+)?R\b/i, "the Role join"],
+        [/\bJOIN\s+businessunit\s+(?:AS\s+)?BU\b/i, "the BusinessUnit join"],
+        [/\bSU\.fullname\s+LIKE\b/i, "the fullname LIKE filter"],
+        [/\bSUR\.systemuserid\s*=\s*SU\.systemuserid\b/i, "the user-role membership relationship"],
+        [/\bSUR\.roleid\s*=\s*R\.roleid\b/i, "the role relationship"],
+        [/\bR\.businessunitid\s*=\s*BU\.businessunitid\b/i, "the role business-unit relationship"]
+      ]);
+      assertSqlJoinStructure(query, 3, 0, kind);
+      assertSqlWhereStructure(query, "SU.FULLNAMELIKE?", kind);
+      assertSqlOrderBy(query, "", kind);
+      const term = sqlLikeTerm(query, /\bSU\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
+      if (term == null) throw Error("User-role query requires a SU.fullname LIKE string filter.");
+      const result = await sqlUserRolesByName(term);
+      rows.push(...result.rows);
+      truncated = result.truncated;
+      columns.push("fullname", "systemuserid", "role_name", "role_businessunit");
+    } else if (/\bFROM\s+privilege\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query) && /\bentity\b/i.test(query)) {
+      kind = "entity-privileges";
+      assertSqlProjection(query, ["privilege_name"], kind, ["p.name AS privilege_name"], true);
+      assertSqlShape(query, kind, [
+        [/\bJOIN\s+privilegeobjecttypecodes\s+potc\s+ON\s+potc\.privilegeid\s*=\s*p\.privilegeid\b/i, "the privilege-object-type-code relationship"],
+        [/\bJOIN\s+entity\s+e\s+ON\s+e\.objecttypecode\s*=\s*potc\.objecttypecode\b/i, "the entity mapping relationship"],
+        [/\be\.logicalname\s*=/i, "the entity logical-name equality filter"]
+      ]);
+      assertSqlJoinStructure(query, 2, 0, kind);
+      assertSqlWhereStructure(query, "E.LOGICALNAME=?", kind);
+      assertSqlOrderBy(query, "P.NAME", kind);
+      const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
+      if (!table) throw Error("Privilege query requires an e.logicalname equality filter.");
+      const result = await sqlPrivilegesForTable(table);
+      rows.push(...result.rows);
+      truncated = result.truncated;
+      columns.push("privilege_name");
+    } else if (/\bFROM\s+systemuser\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\bprivilegeobjecttypecodes\b/i.test(query)) {
+      kind = "user-entity-privileges";
+      assertSqlProjection(query, ["fullname", "role_name", "role_businessunit", "privilege_name", "depth"], kind, [
+        "su.fullname",
+        "ur.name AS role_name",
+        "bu.name AS role_businessunit",
+        "p.name AS privilege_name",
+        "CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' ELSE CAST(rp.privilegedepthmask AS VARCHAR(10)) END AS depth"
+      ], true);
+      assertSqlShape(query, kind, [
+        [/\bJOIN\s+systemuserroles\s+sur\s+ON\s+sur\.systemuserid\s*=\s*su\.systemuserid\b/i, "the user-role membership relationship"],
+        [/\bJOIN\s+role\s+ur\s+ON\s+ur\.roleid\s*=\s*sur\.roleid\b/i, "the user's role relationship"],
+        [/\bJOIN\s+businessunit\s+bu\s+ON\s+bu\.businessunitid\s*=\s*ur\.businessunitid\b/i, "the role business-unit relationship"],
+        [/\bJOIN\s+role\s+pr\s+ON\s+pr\.parentrootroleid\s*=\s*ur\.parentrootroleid\b/i, "the root-role inheritance relationship"],
+        [/\bJOIN\s+roleprivileges\s+rp\s+ON\s+rp\.roleid\s*=\s*pr\.roleid\b/i, "the inherited role privilege relationship"],
+        [/\bJOIN\s+privilege\s+p\s+ON\s+p\.privilegeid\s*=\s*rp\.privilegeid\b/i, "the privilege relationship"],
+        [/\bJOIN\s+privilegeobjecttypecodes\s+potc\s+ON\s+potc\.privilegeid\s*=\s*p\.privilegeid\b/i, "the privilege entity mapping"],
+        [/\bJOIN\s+entity\s+e\s+ON\s+e\.objecttypecode\s*=\s*potc\.objecttypecode\b/i, "the entity logical-name mapping"],
+        [/\bCASE\s+rp\.privilegedepthmask\b/i, "the privilege-depth CASE mapping"],
+        [/\bsu\.fullname\s+LIKE\b/i, "the user fullname LIKE filter"],
+        [/\be\.logicalname\s*=/i, "the entity logical-name equality filter"]
+      ]);
+      assertSqlJoinStructure(query, 8, 0, kind);
+      assertSqlWhereStructure(query, "SU.FULLNAMELIKE?ANDE.LOGICALNAME=?", kind);
+      assertSqlOrderBy(query, "SU.FULLNAME,UR.NAME,P.NAME", kind);
+      const term = sqlLikeTerm(query, /\bsu\.fullname\s+LIKE\s+'((?:''|[^'])*)'/i);
+      const table = sqlLiteral(query, /\be\.logicalname\s*=\s*'((?:''|[^'])*)'/i);
+      if (term == null || !table) throw Error("User privilege query requires fullname LIKE and entity logicalname filters.");
+      const result = await sqlUserTableByName(term, table);
+      rows.push(...result.rows);
+      truncated = result.truncated;
+      columns.push("fullname", "role_name", "role_businessunit", "privilege_name", "depth");
+    } else if (/\bFROM\s+role\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\bp\.name\s*=\s*'/i.test(query)) {
+      kind = "roles-by-privilege";
+      assertSqlProjection(query, ["role_name", "business_unit", "privilege_name", "depth"], kind, [
+        "r.name AS role_name",
+        "bu.name AS business_unit",
+        "p.name AS privilege_name",
+        "CASE rp.privilegedepthmask WHEN 1 THEN 'User' WHEN 2 THEN 'Business Unit' WHEN 4 THEN 'Parent:Child BU' WHEN 8 THEN 'Organization' ELSE CAST(rp.privilegedepthmask AS VARCHAR(10)) END AS depth"
+      ], true);
+      assertSqlShape(query, kind, [
+        [/\bJOIN\s+roleprivileges\s+rp\s+ON\s+rp\.roleid\s*=\s*r\.roleid\b/i, "the role-privilege relationship"],
+        [/\bJOIN\s+privilege\s+p\s+ON\s+p\.privilegeid\s*=\s*rp\.privilegeid\b/i, "the privilege relationship"],
+        [/\bJOIN\s+businessunit\s+bu\s+ON\s+bu\.businessunitid\s*=\s*r\.businessunitid\b/i, "the role business-unit relationship"],
+        [/\bp\.name\s*=/i, "the privilege-name equality filter"]
+      ]);
+      assertSqlJoinStructure(query, 3, 0, kind);
+      assertSqlWhereStructure(query, "P.NAME=?", kind);
+      assertSqlOrderBy(query, "R.NAME,BU.NAME", kind);
+      const privilegeName = sqlLiteral(query, /\bp\.name\s*=\s*'((?:''|[^'])*)'/i);
+      if (privilegeName == null) throw Error("Role privilege query requires a p.name equality filter.");
+      const result = await sqlRolesByPrivilegeName(privilegeName);
+      rows.push(...result.rows);
+      truncated = result.truncated;
+      columns.push("role_name", "business_unit", "privilege_name", "depth");
+    } else if (/\bFROM\s+role\b/i.test(query) && /\broleprivileges\b/i.test(query) && /\br\.name\s*=\s*'/i.test(query)) {
+      kind = "role-table-access";
+      assertSqlProjection(query, ["table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess"], kind, roleAccessProjectionExpressions(), false);
+      assertSqlShape(query, kind, [
+        [/\bJOIN\s+roleprivileges\s+rp\s+ON\s+rp\.roleid\s*=\s*r\.roleid\b/i, "the role-privilege relationship"],
+        [/\bJOIN\s+privilege\s+p\s+ON\s+p\.privilegeid\s*=\s*rp\.privilegeid\b/i, "the privilege relationship"],
+        [/\bJOIN\s+privilegeobjecttypecodes\s+potc\s+ON\s+potc\.privilegeid\s*=\s*p\.privilegeid\b/i, "the privilege-object-type-code relationship"],
+        [/\bJOIN\s+entity\s+e\s+ON\s+e\.objecttypecode\s*=\s*potc\.objecttypecode\b/i, "the entity mapping relationship"],
+        [/\bGROUP\s+BY\s+e\.logicalname\b/i, "GROUP BY e.logicalname"],
+        [/\br\.name\s*=/i, "the role-name equality filter"]
+      ]);
+      assertSqlJoinStructure(query, 4, 0, kind);
+      assertSqlWhereStructure(query, "R.NAME=?", kind);
+      assertSqlOrderBy(query, "E.LOGICALNAME", kind);
+      const roleName = sqlLiteral(query, /\br\.name\s*=\s*'((?:''|[^'])*)'/i);
+      if (roleName == null) throw Error("Role access query requires an r.name equality filter.");
+      const accessResult = await sqlRoleAccessRows(roleName);
+      const accessRows = accessResult.rows;
+      truncated = accessResult.truncated;
+      const grouped = new Map();
+      const operationFor = name => {
+        const match = /^prv(AppendTo|Create|Read|Write|Delete|Append|Assign|Share)/i.exec(String(name || ""));
+        if (!match) return null;
+        if (match[1].toLowerCase() === "appendto") return "AppendToAccess";
+        return ({ create:"CreateAccess", read:"ReadAccess", write:"WriteAccess", delete:"DeleteAccess", append:"AppendAccess", assign:"AssignAccess", share:"ShareAccess" })[match[1].toLowerCase()] || null;
+      };
+      for (const item of accessRows) {
+        if (!item.table_name) continue;
+        if (!grouped.has(item.table_name)) grouped.set(item.table_name, { table_name: item.table_name });
+        const outputColumn = operationFor(item.privilege_name);
+        if (!outputColumn || !item.depth) continue;
+        const current = grouped.get(item.table_name)[outputColumn];
+        if (current == null || String(item.depth).localeCompare(String(current)) > 0) grouped.get(item.table_name)[outputColumn] = item.depth;
+      }
+      for (const row of grouped.values()) {
+        for (const field of ["CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess"]) row[field] = row[field] || "None";
+        rows.push(row);
+      }
+      sqlSort(rows, [["table_name", "asc"]]);
+      columns.push("table_name", "CreateAccess", "ReadAccess", "WriteAccess", "DeleteAccess", "AppendAccess", "AppendToAccess", "AssignAccess", "ShareAccess");
+    } else if (/\bFROM\s+audit\b/i.test(query) && /\bobjectid\s*=\s*'/i.test(query)) {
+      kind = "record-audit";
+      assertSqlProjection(query, ["createdon", "ChangedBy", "Event", "logicalname", "oldvalue", "newvalue"], kind, [
+        "a.createdon",
+        "u.fullname AS ChangedBy",
+        "CASE a.operation WHEN 1 THEN 'Create' WHEN 2 THEN 'Update' ELSE CAST(a.operation AS VARCHAR(10)) END AS Event",
+        "ca.logicalname",
+        "ca.oldvalue",
+        "ca.newvalue"
+      ], false);
+      assertSqlShape(query, kind, [
+        [/\bCROSS\s+APPLY\s+OPENJSON\s*\(\s*a\.changedata/i, "audit changedata JSON expansion"],
+        [/\bLEFT\s+JOIN\s+systemuser\s+u\s+ON\s+a\.userid\s*=\s*u\.systemuserid\b/i, "the changed-by user relationship"],
+        [/\ba\.objectid\s*=/i, "the record objectid equality filter"]
+      ]);
+      const jsonPath = sqlLiteral(query, /\bOPENJSON\s*\(\s*a\.changedata\s*,\s*'((?:''|[^'])*)'/i);
+      if (jsonPath !== "$.changedAttributes") throw Error("Audit query must expand the $.changedAttributes JSON path.");
+      const validJsonColumns = /\bWITH\s*\(\s*logicalname\s+NVARCHAR\s*\(\s*100\s*\)\s*'\$\.logicalName'\s*,\s*oldvalue\s+NVARCHAR\s*\(\s*MAX\s*\)\s*'\$\.oldValue'\s*,\s*newvalue\s+NVARCHAR\s*\(\s*MAX\s*\)\s*'\$\.newValue'\s*\)\s*ca\b/i.test(query);
+      if (!validJsonColumns) throw Error("Audit query must map logicalName, oldValue, and newValue from changedAttributes.");
+      assertSqlJoinStructure(query, 1, 1, kind);
+      assertSqlWhereStructure(query, "A.OBJECTID=?", kind);
+      assertSqlOrderBy(query, "A.CREATEDONDESC", kind);
+      const id = sqlLiteral(query, /\ba\.objectid\s*=\s*'((?:''|[^'])*)'/i);
+      if (!id) throw Error("Audit query requires an objectid GUID filter.");
+      const auditResult = await sqlAuditRows(id);
+      rows.push(...auditResult.rows);
+      truncated = auditResult.truncated;
+      columns.push("createdon", "ChangedBy", "Event", "logicalname", "oldvalue", "newvalue");
+    } else {
+      throw Error("This security SQL shape is not implemented by the JavaScript compatibility adapter. Query was not sent to the Dataverse SQL endpoint.");
+    }
+    if (projection.distinct) rows.splice(0, rows.length, ...sqlDistinct(rows, columns));
+    if (/\bORDER\s+BY\b/i.test(query)) {
+      if (kind === "entity-privileges") sqlSort(rows, [["privilege_name", "asc"]]);
+      else if (kind === "user-entity-privileges") sqlSort(rows, [["fullname", "asc"], ["role_name", "asc"], ["privilege_name", "asc"]]);
+      else if (kind === "roles-by-privilege") sqlSort(rows, [["role_name", "asc"], ["business_unit", "asc"]]);
+      else if (kind === "role-table-access") sqlSort(rows, [["table_name", "asc"]]);
+      else if (kind === "record-audit") sqlSort(rows, [["createdon", "desc"]]);
+    }
+    const globalContext = Xrm.Utility.getGlobalContext();
+    queryExecution?.assertActive();
+    return {
+      ok: true,
+      provider: "dataverse-security-query-adapter",
+      compatibilityMode: kind,
+      clientUrl: base,
+      environmentId: G(globalContext.organizationSettings?.bapEnvironmentId),
+      currentUser: { id: G(globalContext.userSettings?.userId), name: globalContext.userSettings?.userName || "" },
+      columns, rows, rowCount: rows.length, readOnly: true, truncated,
+      warning: truncated ? "Results reached a configured safety limit and may be incomplete. Refine the query to avoid truncation." : ""
+    };
+  }
+
   return (async () => {
+    if (action === "sqlQuery") return await sqlQuery(p.sql);
     if (action === "context") return { ok: true, data: await context() };
     if (action === "tables") return { ok: true, data: await tables(p.query) };
     if (action === "users") return { ok: true, data: await users(p.query) };
@@ -234,7 +960,11 @@ function devLensSecurityAuditBridge(action, p) {
     if (action === "recordSearch") return { ok: true, data: await recordSearch(p.table, p.field, p.value, p.mode) };
     if (action === "audit") return { ok: true, data: await audit(p.table, p.recordId) };
     throw Error("Unsupported action");
-  })().catch(error => ({ ok: false, error: error.message || S(error) }));
+  })().catch(error => ({
+    ok: false,
+    ...(queryExecution?.controller.signal.aborted || error?.code === "QUERY_TIMEOUT" ? { code: "QUERY_TIMEOUT" } : error?.code === "QUERY_OUTPUT_LIMIT" ? { code: "QUERY_OUTPUT_LIMIT" } : {}),
+    error: queryExecution?.controller.signal.aborted ? "Query execution exceeded the 120-second deadline." : error.message || S(error)
+  })).finally(() => queryExecution?.finish());
 }
 async function environmentInfo(tab) {
   try {

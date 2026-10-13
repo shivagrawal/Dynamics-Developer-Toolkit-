@@ -1,0 +1,41 @@
+name: Security SQL Live Dataverse Integration
+
+# Verification trigger: validate the six supported security/audit query shapes and a disposable audit-history fixture in dataverse-test.
+on:
+  push:
+    branches:
+      - feature/sql4cds-query-studio
+    paths:
+      - "security-audit-service.js"
+      - "sqlstudio/js/sql-engine.js"
+      - "tests/query-studio/security-query-live.test.mjs"
+      - ".github/workflows/security-query-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-security-queries:
+    name: Validate security SQL and audit integration against Dataverse
+    runs-on: ubuntu-latest
+    environment: dataverse-test
+    timeout-minutes: 15
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: feature/sql4cds-query-studio
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Execute live security query tests (includes a disposable audit fixture)
+        env:
+          DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
+          DATAVERSE_TENANT_ID: ${{ secrets.DATAVERSE_TENANT_ID }}
+          DATAVERSE_CLIENT_ID: ${{ secrets.DATAVERSE_CLIENT_ID }}
+          DATAVERSE_CLIENT_SECRET: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
+        run: node --test tests/query-studio/security-query-live.test.mjs

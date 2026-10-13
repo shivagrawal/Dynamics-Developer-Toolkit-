@@ -1,7 +1,49 @@
 "use strict";
 
+const DEVLENS_QUERY_MAX_CONCURRENT = 4;
+const DEVLENS_QUERY_DEADLINE_MS = 120000;
+const DEVLENS_QUERY_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+let devLensActiveQueryExecutions = 0;
+
 function pageBridge(action, payload) {
   "use strict";
+
+  const queryExecution = action === "querySql" || action === "queryFetchXml" ? (() => {
+    const suppliedDeadline = Number(payload?.__devlensExecution?.deadlineAt);
+    const deadlineAt = Number.isFinite(suppliedDeadline) && suppliedDeadline > 0
+      ? Math.min(suppliedDeadline, Date.now() + 120000)
+      : Date.now() + 120000;
+    const suppliedBytes = Number(payload?.__devlensExecution?.maxOutputBytes);
+    const maxOutputBytes = Number.isInteger(suppliedBytes) && suppliedBytes > 0
+      ? Math.min(suppliedBytes, 64 * 1024 * 1024)
+      : 64 * 1024 * 1024;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
+    return {
+      deadlineAt, maxOutputBytes, controller, timer, outputBytes: 0, outputLimitHit: false,
+      assertActive() {
+        if (controller.signal.aborted || Date.now() >= deadlineAt) {
+          controller.abort();
+          const error = Error("Query execution exceeded the 120-second deadline.");
+          error.code = "QUERY_TIMEOUT";
+          throw error;
+        }
+      },
+      reserveRow(row) {
+        this.assertActive();
+        let serialized;
+        try { serialized = JSON.stringify(row); } catch { serialized = ""; }
+        const estimatedBytes = typeof serialized === "string" ? serialized.length * 3 : 0;
+        if (this.outputBytes + estimatedBytes > this.maxOutputBytes) {
+          this.outputLimitHit = true;
+          return false;
+        }
+        this.outputBytes += estimatedBytes;
+        return true;
+      },
+      finish() { clearTimeout(timer); }
+    };
+  })() : null;
 
   const clean = (value) => (value ? String(value).replace(/[{}]/g, "") : null);
   const localizedLabel = (value) =>
@@ -80,14 +122,19 @@ function pageBridge(action, payload) {
       headers,
     });
     if (!response.ok) {
-      let detail = "";
-      try {
-        detail = (await response.json())?.error?.message || "";
-      } catch {}
-      throw Error(
-        detail ||
+      let body = null;
+      try { body = await response.json(); } catch {}
+      const providerError = body?.error;
+      const error = Error(
+        providerError?.message ||
           `Dataverse request failed: ${response.status} ${response.statusText}`,
       );
+      // Only preserve this exact, typed capability result. Never infer fallback
+      // eligibility from an HTTP status or provider error text.
+      if (providerError?.code === "PROVIDER_CAPABILITY_REJECTION") {
+        error.code = "PROVIDER_CAPABILITY_REJECTION";
+      }
+      throw error;
     }
     if (response.status === 204) return {};
     return response.json();
@@ -696,6 +743,357 @@ function pageBridge(action, payload) {
     return{ok:true,entityName:ctx.entityName,rows};
   }
   async function shellContext() { const ctx=await context({requireEntity:false,requireForm:false}); return {ok:true,clientUrl:ctx.clientUrl,environmentId:ctx.environmentId,currentUser:{id:ctx.userId,name:ctx.userName}}; }
+  async function schemaTable(logicalName) {
+    const requested = String(logicalName || "").trim().toLowerCase();
+    if (!/^[a-z_][a-z0-9_]*$/.test(requested))
+      return { ok: false, error: "Enter a valid Dataverse table logical name." };
+    const ctx = await context({ requireEntity: false, requireForm: false });
+    const base = `${ctx.clientUrl}/api/data/v9.2/EntityDefinitions(LogicalName='${escapeOData(requested)}')`;
+    const definition = await fetchJson(
+      `${base}?$select=LogicalName,SchemaName,EntitySetName,MetadataId,DisplayName,PrimaryIdAttribute,PrimaryNameAttribute,IsCustomEntity&$expand=Attributes($select=LogicalName,SchemaName,DisplayName,AttributeType,IsCustomAttribute,IsValidForRead,IsValidForAdvancedFind,RequiredLevel)`,
+    );
+    const columns = (definition.Attributes || []).map((attribute) => ({
+      logicalName: attribute.LogicalName || "",
+      schemaName: attribute.SchemaName || "",
+      displayName: localizedLabel(attribute.DisplayName) || attribute.LogicalName || "",
+      attributeType: attribute.AttributeType || "Unknown",
+      isCustom: attribute.IsCustomAttribute === true,
+      validForRead: attribute.IsValidForRead?.Value ?? attribute.IsValidForRead ?? true,
+      validForAdvancedFind: attribute.IsValidForAdvancedFind?.Value ?? attribute.IsValidForAdvancedFind ?? true,
+      requiredLevel: attribute.RequiredLevel?.Value || "None",
+      maxLength: null,
+      precision: null,
+      format: "",
+      isPrimaryId: attribute.LogicalName === definition.PrimaryIdAttribute,
+      isPrimaryName: attribute.LogicalName === definition.PrimaryNameAttribute
+    })).sort((a, b) => a.logicalName.localeCompare(b.logicalName));
+    return {
+      ok: true,
+      data: {
+        logicalName: definition.LogicalName,
+        schemaName: definition.SchemaName,
+        displayName: localizedLabel(definition.DisplayName) || definition.LogicalName,
+        entitySetName: definition.EntitySetName,
+        metadataId: definition.MetadataId,
+        isCustom: definition.IsCustomEntity === true,
+        primaryIdAttribute: definition.PrimaryIdAttribute || "",
+        primaryNameAttribute: definition.PrimaryNameAttribute || "",
+        columns
+      }
+    };
+  }
+  function simpleSqlProjection(query) {
+    // Only validate straightforward, unaliased single-table projections. More complex
+    // queries are left to Dataverse's SQL parser rather than guessed at locally.
+    const match = query.replace(/;\s*$/, "").match(/^\s*SELECT\s+(?:DISTINCT\s+)?(?:TOP\s+\d+\s+)?([\s\S]+?)\s+FROM\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?=WHERE\b|ORDER\s+BY\b|GROUP\s+BY\b|$)/i);
+    if (!match) return null;
+    const list = match[1].trim();
+    if (!list || /\bAS\b/i.test(list) || /[()]/.test(list)) return null;
+    if (list === "*") return ["*"];
+    const columns = list.split(",").map(part => part.trim()).filter(Boolean);
+    if (!columns.length || columns.some(part => !/^(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*$/.test(part))) return null;
+    return columns.map(part => part.split(".").pop().toLowerCase());
+  }
+
+  function columnsFromODataContext(odataContext) {
+    if (typeof odataContext !== "string") return null;
+    const marker = odataContext.match(/#([A-Za-z_][A-Za-z0-9_]*)\(/);
+    if (!marker || marker.index == null) return null;
+    const openIndex = marker.index + marker[0].length - 1;
+    let depth = 0;
+    let closeIndex = -1;
+    for (let i = openIndex; i < odataContext.length; i++) {
+      if (odataContext[i] === "(") depth++;
+      else if (odataContext[i] === ")") {
+        depth--;
+        if (depth === 0) {
+          closeIndex = i;
+          break;
+        }
+        if (depth < 0) return null;
+      }
+    }
+    if (closeIndex < 0) return null;
+
+    const parts = [];
+    let start = openIndex + 1;
+    depth = 0;
+    for (let i = start; i < closeIndex; i++) {
+      if (odataContext[i] === "(") depth++;
+      else if (odataContext[i] === ")") depth--;
+      else if (odataContext[i] === "," && depth === 0) {
+        parts.push(odataContext.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    parts.push(odataContext.slice(start, closeIndex).trim());
+
+    // Navigation expansions can appear both as a bare name and as name().
+    // Exclude the bare duplicate when the same name has a nested expansion.
+    const expansions = new Set(parts.filter(part => /^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(part))
+      .map(part => part.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*\(/)[1].toLowerCase()));
+    const columns = parts
+      .filter(part => /^[A-Za-z_][A-Za-z0-9_]*$/.test(part))
+      .filter(part => !expansions.has(part.toLowerCase()));
+    return columns.length ? [...new Set(columns)] : null;
+  }
+
+  async function queryFetchXmlReadOnly(fetchXml, tableName, offsetValue = 0, limitValue = null, queryExecution = null) {
+    if (typeof fetchXml !== "string" || !fetchXml.trim()) return { ok: false, error: "A compiled FetchXML query is required." };
+    if (fetchXml.length > 1000000) return { ok: false, error: "Compiled query exceeds the 1,000,000 character limit." };
+    const table = String(tableName || "").trim().toLowerCase();
+    if (!/^[a-z_][a-z0-9_]*$/.test(table)) return { ok: false, error: "Invalid Dataverse table logical name." };
+    if (!/^\s*<fetch(?:\s|>)/i.test(fetchXml)) {
+      return { ok: false, error: "Only FetchXML queries are accepted." };
+    }
+    const entityMatch = fetchXml.match(/<entity\s+[^>]*name\s*=\s*["']([a-z_][a-z0-9_]*)["']/i);
+    if (!entityMatch || entityMatch[1].toLowerCase() !== table) return { ok: false, error: "FetchXML base entity does not match the requested table." };
+    if (/<(?:update|delete|create|upsert|insert)\b/i.test(fetchXml)) return { ok: false, error: "Only read-only FetchXML is accepted." };
+
+    const hasTop = /<fetch\b[^>]*\btop\s*=\s*["']/i.test(fetchXml);
+    const offset = Number(offsetValue || 0);
+    const limit = limitValue == null ? null : Number(limitValue);
+    if (!Number.isInteger(offset) || offset < 0 || offset >= 10000) return { ok: false, error: "OFFSET must be an integer from 0 to 9999." };
+    if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 5000 || offset + limit > 10000)) return { ok: false, error: "FETCH NEXT must be an integer from 1 to 5000 and fit within the 10,000-row safety cap." };
+    if (hasTop && (offset > 0 || limit !== null)) return { ok: false, error: "TOP cannot be combined with OFFSET/FETCH." };
+    const pageSize = limit !== null ? Math.min(500, Math.max(1, offset + limit)) : 500;
+    const maxPages = Math.ceil(10000 / pageSize);
+    const escapeXmlAttribute = value => String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
+    const setFetchAttribute = (xml, name, value) => {
+      const match = xml.match(/<fetch\b([^>]*)>/i);
+      if (!match) throw Error("Compiled FetchXML has no fetch root.");
+      const attribute = new RegExp("\\s" + name + "\\s*=\\s*(['\"])[\\s\\S]*?\\1", "i");
+      const attributes = match[1].replace(attribute, "").trim();
+      return xml.slice(0, match.index) + "<fetch" + (attributes ? " " + attributes : "") + " " + name + "=\"" + escapeXmlAttribute(value) + "\">" + xml.slice(match.index + match[0].length);
+    };
+    const decodePagingCookie = cookieXml => {
+      if (typeof cookieXml !== "string") return null;
+      const match = cookieXml.match(/\bpagingcookie\s*=\s*["']([^"']+)["']/i);
+      if (!match) return null;
+      let decoded = match[1];
+      try { decoded = decodeURIComponent(decodeURIComponent(decoded)); } catch { return null; }
+      return decoded.startsWith("<") ? decoded : null;
+    };
+
+    const entities = [];
+    let page = 1, pagingCookie = null, moreRecords = false, pagesFetched = 0;
+    while (true) {
+      let pageXml = fetchXml;
+      if (!hasTop) {
+        pageXml = setFetchAttribute(pageXml, "count", pageSize);
+        pageXml = setFetchAttribute(pageXml, "page", page);
+        if (pagingCookie) pageXml = setFetchAttribute(pageXml, "paging-cookie", pagingCookie);
+      }
+      queryExecution?.assertActive();
+      const result = await Xrm.WebApi.retrieveMultipleRecords(table, "?fetchXml=" + pageXml, 5000);
+      queryExecution?.assertActive();
+      const pageEntities = Array.isArray(result?.entities) ? result.entities : [];
+      for (const entity of pageEntities) {
+        if (queryExecution && !queryExecution.reserveRow(entity)) break;
+        entities.push(entity);
+      }
+      pagesFetched++;
+      if (queryExecution?.outputLimitHit) { moreRecords = true; break; }
+      if (hasTop) { moreRecords = !!result?.nextLink; break; }
+      const nextCookie = decodePagingCookie(result?.fetchXmlPagingCookie);
+      if (limit !== null && entities.length >= offset + limit) {
+        moreRecords = entities.length > offset + limit || !!nextCookie || pageEntities.length === pageSize;
+        break;
+      }
+      if (entities.length >= pageSize * maxPages) { moreRecords = true; break; }
+      if (nextCookie) {
+        pagingCookie = nextCookie;
+        page++;
+        continue;
+      }
+      if (pageEntities.length < pageSize) { moreRecords = false; break; }
+      // Without a cookie, fall back to simple paging, still bounded by the 10,000-row engine cap.
+      pagingCookie = null;
+      page++;
+    }
+    const visibleEntities = entities.slice(offset, limit === null ? undefined : offset + limit);
+    const columns = [...new Set(visibleEntities.flatMap(row => Object.keys(row).filter(key => !key.startsWith("@") && !key.includes("@"))))];
+    const rows = visibleEntities.map(row => {
+      const cleanRow = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (key.startsWith("@") || key.includes("@")) continue;
+        cleanRow[key] = value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "value") ? value.value : value;
+      }
+      return cleanRow;
+    });
+    return { ok: true, provider: "dataverse-fetchxml-js-engine", table, columns, rows, rowCount: rows.length, rowsFetched: entities.length, pagesFetched, moreRecords: queryExecution?.outputLimitHit ? true : hasTop || limit !== null ? false : moreRecords, truncated: !!queryExecution?.outputLimitHit || (!hasTop && limit === null && moreRecords) };
+  }
+
+  async function querySqlReadOnly(sql, queryExecution = null) {
+    if (typeof sql !== "string" || !sql.trim()) return { ok: false, error: "Enter a SELECT query." };
+    if (sql.length > 100000) return { ok: false, error: "Query exceeds the 100,000 character limit." };
+    const query = sql.trim();
+    if (!/^SELECT\b/i.test(query)) return { ok: false, error: "Read-only mode accepts SELECT statements only." };
+    if (/;\s*\S/.test(query.replace(/;\s*$/, ""))) return { ok: false, error: "Run one SELECT statement at a time." };
+    // The Dataverse SQL endpoint requires the entity set matching the query's base table.
+    const match = query.match(/\bFROM\s+((?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*)/i);
+    if (!match) return { ok: false, error: "Could not identify the base table after FROM." };
+    const tableName = match[1].split(".").pop().replace(/^[\[\"]|[\]\"]$/g, "");
+    const expectedProjection = simpleSqlProjection(query);
+    queryExecution?.assertActive();
+    const ctx = await context({ requireEntity: false, requireForm: false });
+    queryExecution?.assertActive();
+    const metadata = await Xrm.Utility.getEntityMetadata(tableName);
+    queryExecution?.assertActive();
+    if (!metadata?.EntitySetName) return { ok: false, error: "Dataverse did not return an entity set for " + tableName + "." };
+    const endpoint = new URL("/api/data/v9.2/" + metadata.EntitySetName, ctx.clientUrl);
+    endpoint.searchParams.set("sql", query);
+    const result = await fetchJson(endpoint.toString(), {
+      method: "GET",
+      headers: { Prefer: 'odata.include-annotations="*"' },
+      cache: "no-store",
+      ...(queryExecution ? { signal: queryExecution.controller.signal } : {})
+    });
+    queryExecution?.assertActive();
+    const maxRows = 10000;
+    const maxPages = 100;
+    const rawRows = [];
+    let truncated = false;
+    let nextLink = result["@odata.nextLink"] || null;
+    const appendPageRows = pageRows => {
+      const rows = Array.isArray(pageRows) ? pageRows : [];
+      const remaining = maxRows - rawRows.length;
+      let added = 0;
+      for (const row of rows.slice(0, Math.max(0, remaining))) {
+        if (queryExecution && !queryExecution.reserveRow(row)) { truncated = true; break; }
+        rawRows.push(row);
+        added++;
+      }
+      if (rows.length > remaining || added < Math.min(rows.length, Math.max(0, remaining))) truncated = true;
+    };
+    appendPageRows(result.value);
+    const seenPageLinks = new Set();
+    let pagesFetched = 1;
+    while (nextLink && rawRows.length < maxRows && pagesFetched < maxPages && !queryExecution?.outputLimitHit) {
+      queryExecution?.assertActive();
+      if (seenPageLinks.has(nextLink)) throw Error("Dataverse returned a repeated paging link; query execution stopped safely.");
+      seenPageLinks.add(nextLink);
+      const pageUrl = new URL(nextLink, ctx.clientUrl);
+      const clientOrigin = new URL(ctx.clientUrl).origin;
+      if (pageUrl.origin !== clientOrigin || !pageUrl.pathname.startsWith("/api/data/v9.2/")) {
+        throw Error("Dataverse returned an invalid paging URL; query execution stopped safely.");
+      }
+      const page = await fetchJson(pageUrl.toString(), {
+        method: "GET",
+        headers: { Prefer: 'odata.include-annotations="*"' },
+        cache: "no-store",
+        ...(queryExecution ? { signal: queryExecution.controller.signal } : {})
+      });
+      queryExecution?.assertActive();
+      appendPageRows(page.value);
+      nextLink = page["@odata.nextLink"] || null;
+      pagesFetched++;
+    }
+    if (nextLink) truncated = true;
+    const contextColumns = columnsFromODataContext(result["@odata.context"]);
+    if (expectedProjection) {
+      if (!contextColumns) {
+        return {
+          ok: false,
+          error: "Dataverse did not return a verifiable SQL result projection. Query Studio has stopped this result rather than displaying potentially unrelated columns. Check whether the SQL query option is supported by this environment."
+        };
+      }
+      // SELECT * is verified by the response context itself; it defines the retrievable result columns.
+      if (!(expectedProjection.length === 1 && expectedProjection[0] === "*")) {
+      const actual = new Set(contextColumns.map(column => column.toLowerCase()));
+      const expected = new Set(expectedProjection);
+      const primaryId = String(metadata.PrimaryIdAttribute || "").toLowerCase();
+      const rowKeys = new Set(rawRows.flatMap(row => Object.keys(row).map(key => key.toLowerCase())));
+      // Dataverse represents a logical lookup column (e.g. parentcustomerid) as
+      // _<logicalname>_value. Require the context's navigation expansion and the
+      // actual row backing field before treating it as a verified lookup mapping.
+      const lookupMappings = expectedProjection
+        .filter(column => !actual.has(column))
+        .map(column => ({ column, backing: "_" + column + "_value" }))
+        .filter(mapping =>
+          actual.has(mapping.backing) &&
+          rowKeys.has(mapping.backing) &&
+          (result["@odata.context"] || "").toLowerCase().includes(mapping.column.toLowerCase() + "_")
+        );
+      const lookupBackingFields = new Set(lookupMappings.map(mapping => mapping.backing));
+      const lookupColumns = new Set(lookupMappings.map(mapping => mapping.column));
+      const missing = expectedProjection.filter(column => !actual.has(column) && !lookupColumns.has(column));
+      // Some Dataverse SQL endpoint responses include extra context columns (for example,
+      // ownerid) even when every requested column is present. Missing requested columns
+      // remain a hard failure; extra columns are safely removed from the final projection below.
+      if (missing.length) {
+        return {
+          ok: false,
+          error: "Dataverse returned result metadata that does not match the SELECT projection. Requested: " +
+            expectedProjection.join(", ") + ". Returned metadata: " + contextColumns.join(", ") +
+            ". Missing from response metadata: " + missing.join(", ") +
+            ". Query Studio stopped because a requested column could not be verified."
+        };
+      }
+      }
+    }
+    const rows = rawRows.map(row => {
+      const normalized = {};
+      for (const [key, value] of Object.entries(row)) {
+        // OData annotations can use namespaces beyond @OData (e.g. @Microsoft.Dynamics.CRM).
+        // Exclude any annotated property while preserving ordinary data fields.
+        if (key.startsWith("@") || key.includes("@")) continue;
+        // Dataverse encodes dotted SQL table aliases in row keys, e.g. a_x002e_name.
+        const displayKey = key.replace(/_x002e_/gi, ".");
+        normalized[displayKey] = value;
+      }
+      return normalized;
+    });
+    // Present lookup values under the logical SQL column requested by the user.
+    // Keep the backing Web API field when it was explicitly selected as well.
+    const projectedLookupBackings = new Set();
+    if (expectedProjection) {
+      for (const column of expectedProjection) {
+        const backing = "_" + column + "_value";
+        const hasContextBacking = contextColumns?.some(name => name.toLowerCase() === backing);
+        const hasRowBacking = rows.some(row => Object.prototype.hasOwnProperty.call(row, backing));
+        const hasNavigationExpansion = (result["@odata.context"] || "").toLowerCase().includes(column.toLowerCase() + "_");
+        if (hasContextBacking && hasRowBacking && hasNavigationExpansion && !expectedProjection.includes(backing)) {
+          projectedLookupBackings.add(backing);
+          for (const row of rows) {
+            row[column] = row[backing] ?? null;
+            delete row[backing];
+          }
+        }
+      }
+    }
+    const rowColumns = [...new Set(rows.flatMap(row => Object.keys(row)))];
+    // For a simple verified projection, expose only columns explicitly requested in SQL.
+    // This safely handles endpoint-generated extras without weakening missing-column checks.
+    const isSimpleProjection = expectedProjection && !(expectedProjection.length === 1 && expectedProjection[0] === "*");
+    const outputRows = isSimpleProjection ? rows.map(row => {
+      const projected = {};
+      for (const column of expectedProjection) {
+        const actualKey = Object.keys(row).find(key => key.toLowerCase() === column.toLowerCase());
+        if (actualKey !== undefined) projected[column] = row[actualKey];
+      }
+      return projected;
+    }) : rows;
+    const columns = isSimpleProjection
+      ? expectedProjection
+      : [...new Set([...(contextColumns || []).filter(column => !projectedLookupBackings.has(column.toLowerCase())), ...rowColumns])];
+    const totalRecordCount = result["@Microsoft.Dynamics.CRM.totalrecordcount"] ?? null;
+    const totalRecordCountLimitExceeded = result["@Microsoft.Dynamics.CRM.totalrecordcountlimitexceeded"] ?? false;
+    const resultTruncated = truncated || totalRecordCountLimitExceeded === true;
+    return {
+      ok: true,
+      clientUrl: ctx.clientUrl,
+      environmentId: ctx.environmentId,
+      currentUser: { id: ctx.userId, name: ctx.userName },
+      columns,
+      rows: outputRows,
+      responseContext: result["@odata.context"] || null,
+      totalRecordCount,
+      totalRecordCountLimitExceeded,
+      truncated: resultTruncated,
+      warning: resultTruncated ? "Results may be incomplete because a Dataverse count limit or the 10,000-row/100-page safety limit was reached. Refine the query to retrieve a smaller result set." : ""
+    };
+  }
   function formLocation(attribute) {
     const output = [];
     attribute.controls?.forEach?.((control) => {
@@ -1219,28 +1617,194 @@ function pageBridge(action, payload) {
                   ? Promise.resolve(cancelMetadataIndex())
             : action === "metadataEntity"
               ? metadataEntity(payload?.logicalName)
-              : action === "processExplorer"
+              : action === "schemaTable"
+                ? schemaTable(payload?.logicalName)
+                : action === "processExplorer"
                 ? surfaceContext({ requireEntity: true, requireForm: false }).then((ctx) => processExplorer(ctx, !!payload?.force))
-              : action === "tool"
+              : action === "queryFetchXml"
+          ? queryFetchXmlReadOnly(payload?.fetchXml, payload?.tableName, payload?.offset, payload?.limit, queryExecution)
+          : action === "querySql"
+          ? querySqlReadOnly(payload?.sql, queryExecution)
+          : action === "tool"
                 ? tool(payload || {})
                 : Promise.resolve({ ok: false, error: "Unknown action" });
   return task.catch((error) => ({
     ok: false,
-    error: error.message || String(error),
-  }));
+    ...(queryExecution?.controller.signal.aborted || error?.code === "QUERY_TIMEOUT" ? { code: "QUERY_TIMEOUT" } : error?.code === "PROVIDER_CAPABILITY_REJECTION" ? { code: "PROVIDER_CAPABILITY_REJECTION" } : {}),
+    error: queryExecution?.controller.signal.aborted || error?.code === "QUERY_TIMEOUT" ? "Query execution exceeded the 120-second deadline." : error.message || String(error),
+  })).finally(() => queryExecution?.finish());
 }
 
+function stripSqlLiteralsAndComments(sql) {
+  const input = String(sql || "");
+  let output = "";
+  let inString = false;
+  let inLineComment = false;
+  let blockDepth = 0;
+  for (let i = 0; i < input.length; i++) {
+    const current = input[i];
+    const next = input[i + 1];
+    if (inLineComment) {
+      if (current === "\n" || current === "\r") {
+        inLineComment = false;
+        output += current;
+      } else output += " ";
+      continue;
+    }
+    if (blockDepth > 0) {
+      if (current === "/" && next === "*") {
+        output += "  ";
+        i++;
+        blockDepth++;
+      } else if (current === "*" && next === "/") {
+        output += "  ";
+        i++;
+        blockDepth--;
+      } else output += current === "\n" || current === "\r" ? current : " ";
+      continue;
+    }
+    if (inString) {
+      if (current === "'" && next === "'") {
+        output += "  ";
+        i++;
+      } else if (current === "'") {
+        output += " ";
+        inString = false;
+      } else output += current === "\n" || current === "\r" ? current : " ";
+      continue;
+    }
+    if (current === "'") {
+      inString = true;
+      output += " ";
+      continue;
+    }
+    if (current === "-" && next === "-") {
+      inLineComment = true;
+      output += "  ";
+      i++;
+      continue;
+    }
+    if (current === "/" && next === "*") {
+      blockDepth = 1;
+      output += "  ";
+      i++;
+      continue;
+    }
+    output += current;
+  }
+  return output;
+}
+function isSecuritySqlCandidate(sql) {
+  const query = stripSqlLiteralsAndComments(sql);
+  return /\bFROM\s+systemuserroles\b/i.test(query) ||
+    (/\bFROM\s+privilege\b/i.test(query) && /\bJOIN\s+privilegeobjecttypecodes\b/i.test(query)) ||
+    /\b(?:FROM|JOIN)\s+roleprivileges\b/i.test(query) ||
+    (/\bFROM\s+audit\b/i.test(query) && /\bCROSS\s+APPLY\s+OPENJSON\b/i.test(query));
+}
+function isSupportedSecuritySqlShape(sql) {
+  const original = String(sql || "");
+  const query = stripSqlLiteralsAndComments(original);
+  const has = pattern => pattern.test(query);
+  const projection = pattern => pattern.test(query.slice(0, query.search(/\bFROM\b/i) < 0 ? query.length : query.search(/\bFROM\b/i)));
+  if (has(/\bFROM\s+systemuserroles\s+(?:AS\s+)?SUR\b/i) &&
+      has(/\bJOIN\s+systemuser\s+(?:AS\s+)?SU\s+ON\s+SUR\.systemuserid\s*=\s*SU\.systemuserid\b/i)) {
+    return projection(/\bSELECT\s+SU\.fullname\s*,\s*SU\.systemuserid\s*,\s*R\.name\s+AS\s+role_name\s*,\s*BU\.name\s+AS\s+role_businessunit\b/i) &&
+      has(/\bJOIN\s+role\s+(?:AS\s+)?R\s+ON\s+SUR\.roleid\s*=\s*R\.roleid\b/i) &&
+      has(/\bJOIN\s+businessunit\s+(?:AS\s+)?BU\s+ON\s+R\.businessunitid\s*=\s*BU\.businessunitid\b/i) &&
+      /\bSU\.fullname\s+LIKE\s+'(?:''|[^'])*'/i.test(original);
+  }
+  if (has(/\bFROM\s+privilege\s+(?:AS\s+)?P\b/i) && has(/\bJOIN\s+privilegeobjecttypecodes\s+(?:AS\s+)?POTC\s+ON\s+POTC\.privilegeid\s*=\s*P\.privilegeid\b/i)) {
+    return projection(/\bSELECT\s+DISTINCT\s+P\.name\s+AS\s+privilege_name\b/i) &&
+      has(/\bJOIN\s+entity\s+(?:AS\s+)?E\s+ON\s+E\.objecttypecode\s*=\s*POTC\.objecttypecode\b/i) &&
+      /\bE\.logicalname\s*=\s*'(?:''|[^'])*'/i.test(original);
+  }
+  if (has(/\bFROM\s+systemuser\s+(?:AS\s+)?SU\b/i) && has(/\bJOIN\s+systemuserroles\s+(?:AS\s+)?SUR\s+ON\s+SUR\.systemuserid\s*=\s*SU\.systemuserid\b/i) && has(/\bJOIN\s+roleprivileges\s+(?:AS\s+)?RP\b/i)) {
+    return projection(/\bSELECT\s+SU\.fullname\s*,[\s\S]*\bCASE\s+RP\.privilegedepthmask\b/i) &&
+      has(/\bJOIN\s+privilegeobjecttypecodes\s+(?:AS\s+)?POTC\b/i) &&
+      has(/\bJOIN\s+entity\s+(?:AS\s+)?E\b/i) &&
+      /\bSU\.fullname\s+LIKE\s+'(?:''|[^'])*'/i.test(original) &&
+      /\bE\.logicalname\s*=\s*'(?:''|[^'])*'/i.test(original);
+  }
+  if (has(/\bFROM\s+role\s+(?:AS\s+)?R\b/i) && has(/\bJOIN\s+roleprivileges\s+(?:AS\s+)?RP\s+ON\s+RP\.roleid\s*=\s*R\.roleid\b/i)) {
+    if (has(/\bGROUP\s+BY\s+E\.logicalname\b/i)) {
+      return projection(/\bSELECT\s+E\.logicalname\b/i) &&
+        has(/\bJOIN\s+privilegeobjecttypecodes\s+(?:AS\s+)?POTC\b/i) &&
+        /\bR\.name\s*=\s*'(?:''|[^'])*'/i.test(original);
+    }
+    return (has(/\bJOIN\s+privilege\s+(?:AS\s+)?P\b/i) &&
+      ( /\bP\.name\s*=\s*'(?:''|[^'])*'/i.test(original) || /\bR\.name\s*=\s*'(?:''|[^'])*'/i.test(original) ));
+  }
+  if (has(/\bFROM\s+audit\s+(?:AS\s+)?A\b/i)) {
+    return has(/\bCROSS\s+APPLY\s+OPENJSON\s*\(\s*A\.changedata/i) &&
+      /\bA\.objectid\s*=\s*'(?:''|[^'])*'/i.test(original) &&
+      has(/\bLEFT\s+JOIN\s+systemuser\s+(?:AS\s+)?U\s+ON\s+A\.userid\s*=\s*U\.systemuserid\b/i);
+  }
+  return false;
+}
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "DEVLENS_ACTION") return;
+  if (message.action === "querySql") {
+    const securityCandidate = isSecuritySqlCandidate(message.payload?.sql);
+    const supportedSecurityShape = isSupportedSecuritySqlShape(message.payload?.sql);
+    // A query that touches a named security/audit surface must match an approved adapter
+    // shape. Never let an unsupported near-match fall through to the generic SQL provider.
+    if (securityCandidate && !supportedSecurityShape) {
+      reply({ ok: false, code: "UNSUPPORTED_SECURITY_SQL_SHAPE", error: "This security/audit SQL query does not match a supported read-only query shape." });
+      return;
+    }
+    const specializedSecurity = securityCandidate && supportedSecurityShape && typeof devLensSecurityAuditBridge === "function";
+    const decision = globalThis.DevLensSqlPolicy?.evaluate(message.payload?.sql, globalThis.DevLensSqlEngine, { specializedSecurity });
+    if (!decision?.ok) {
+      reply({ ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only SQL policy is unavailable; execution was stopped." });
+      return;
+    }
+  }
+  if (message.action === "queryFetchXml") {
+    const decision = globalThis.DevLensSqlPolicy?.validateFetchXml(message.payload?.fetchXml, message.payload?.tableName);
+    if (!decision?.ok) {
+      reply({ ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only query policy is unavailable; execution was stopped." });
+      return;
+    }
+  }
+  const isQueryExecution = message.action === "querySql" || message.action === "queryFetchXml";
+  if (isQueryExecution && devLensActiveQueryExecutions >= DEVLENS_QUERY_MAX_CONCURRENT) {
+    reply({ ok: false, code: "QUERY_CONCURRENCY_LIMIT", error: "Query Studio already has four queries executing. Wait for one to finish before starting another." });
+    return;
+  }
+  if (isQueryExecution) devLensActiveQueryExecutions++;
+  const executionPayload = isQueryExecution
+    ? { ...(message.payload || {}), __devlensExecution: { deadlineAt: Date.now() + DEVLENS_QUERY_DEADLINE_MS, maxOutputBytes: DEVLENS_QUERY_MAX_OUTPUT_BYTES } }
+    : (message.payload || {});
+  const securitySql = message.action === "querySql" &&
+    isSecuritySqlCandidate(message.payload?.sql) && isSupportedSecuritySqlShape(message.payload?.sql) &&
+    typeof devLensSecurityAuditBridge === "function";
+  let replied = false;
+  const executionTimer = isQueryExecution ? setTimeout(() => {
+    if (replied) return;
+    replied = true;
+    reply({
+      ok: false,
+      code: "QUERY_TIMEOUT",
+      error: "Query Studio exceeded its 120-second deadline. If the active Dataverse API call cannot be cancelled, its execution slot remains occupied until that call settles."
+    });
+  }, DEVLENS_QUERY_DEADLINE_MS) : null;
+  const replyOnce = result => {
+    if (replied) return;
+    replied = true;
+    if (executionTimer) clearTimeout(executionTimer);
+    reply(result);
+  };
   chrome.scripting
     .executeScript({
       target: { tabId: sender.tab.id, allFrames: message.action !== "tool" },
       world: "MAIN",
-      func: pageBridge,
-      args: [message.action, message.payload || {}],
+      func: securitySql ? devLensSecurityAuditBridge : pageBridge,
+      args: securitySql
+        ? ["sqlQuery", { ...executionPayload, sql: message.payload.sql }]
+        : [message.action, executionPayload],
     })
     .then((results) =>
-      reply(
+      replyOnce(
         results.find((item) => item.result?.ok)?.result ||
           results.find((item) => item.result?.error)?.result || {
             ok: false,
@@ -1248,7 +1812,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           },
       ),
     )
-    .catch((error) => reply({ ok: false, error: error.message }));
+    .catch((error) => replyOnce({ ok: false, error: error.message }))
+    .finally(() => {
+      if (executionTimer) clearTimeout(executionTimer);
+      if (isQueryExecution) devLensActiveQueryExecutions = Math.max(0, devLensActiveQueryExecutions - 1);
+    });
   return true;
 });
 

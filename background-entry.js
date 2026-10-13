@@ -1,1 +1,1 @@
-importScripts("background.js", "impersonation-service.js", "process-explorer-service.js", "custom-control-service.js", "security-audit-service.js");
+importScripts("sqlstudio/js/sql-engine.js", "sqlstudio/js/sql-policy.js", "background.js", "impersonation-service.js", "process-explorer-service.js", "custom-control-service.js", "security-audit-service.js");
