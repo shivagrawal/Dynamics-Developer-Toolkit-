@@ -575,3 +575,26 @@ test("FetchXML action follows paging cookies and returns multiple pages", async 
   assert.match(harness.requestedFetchXml[1].query, /page="2"/);
   assert.match(harness.requestedFetchXml[1].query, /paging-cookie="&lt;cookie/);
 });
+
+test("coordinated Execute rejects unsafe SQL before any page/provider invocation", async () => {
+  const harness = createHarness({ response: { value: [] } });
+  const { result } = await harness.runAction("queryExecute", { sql: "DELETE FROM account" });
+  assert.equal(result.ok, false);
+  assert.equal(harness.requestedUrls.length, 0);
+  assert.equal(harness.requestedFetchXml.length, 0);
+});
+
+test("coordinated Execute routes ordinary SELECT through one background action to native SQL", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)",
+      value: [{ accountid: "a1", name: "Contoso" }]
+    }
+  });
+  const { result } = await harness.runAction("queryExecute", { sql: "SELECT accountid, name FROM account" });
+  assert.equal(result.ok, true);
+  assert.equal(result.provider, "dataverse-native-sql");
+  assert.equal(result.rows[0].name, "Contoso");
+  assert.equal(harness.requestedUrls.length, 1);
+  assert.match(harness.requestedUrls[0], /\/api\/data\/v9\.2\/accounts\?sql=/);
+});
