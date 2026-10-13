@@ -1,0 +1,71 @@
+name: Query Studio Authenticated Chromium Browser Host
+
+on:
+  push:
+    branches:
+      - work/query-studio-browser-host
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium-extension-host:
+    name: Authenticated Dynamics extension smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
+      DYNAMICS_APP_URL: ${{ vars.DYNAMICS_APP_URL }}
+      DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64: ${{ secrets.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64 }}
+    steps:
+      - name: Check out tested revision
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Validate required browser-host configuration
+        shell: bash
+        run: |
+          node --input-type=module -e '
+            const required = ["DATAVERSE_URL", "DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64"];
+            const missing = required.filter(key => !process.env[key]);
+            if (missing.length) {
+              console.error("Missing required GitHub Actions secrets: " + missing.join(", "));
+              console.error("Set DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64 to base64-encoded Playwright storage-state JSON from a dedicated test user.");
+              process.exit(1);
+            }
+            const base = new URL(process.env.DATAVERSE_URL);
+            const app = new URL(process.env.DYNAMICS_APP_URL || base.origin + "/main.aspx");
+            const allowed = url => url.protocol === "https:" && /\\.crm(?:\\d+)?\\.dynamics\\.com$|\\.crm\\.microsoftdynamics\\.us$|\\.crm\\.dynamics\\.cn$/i.test(url.hostname);
+            if (!allowed(base) || !allowed(app) || base.origin !== app.origin) {
+              console.error("DATAVERSE_URL and DYNAMICS_APP_URL must be HTTPS URLs on the same Dataverse organization.");
+              process.exit(1);
+            }
+            console.log("Browser-host configuration validated; credential values are not printed.");
+          '
+
+      - name: Install Playwright and Chromium dependencies
+        run: |
+          npm install --no-save --no-package-lock playwright
+          npx playwright install --with-deps chromium
+
+      - name: Run authenticated extension browser-host smoke test
+        run: node tests/query-studio/browser-host-smoke.mjs
+
+      - name: Publish redacted browser-host checkpoint
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Query Studio browser-host verification"
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Result: **${JOB_STATUS}**"
+            echo "- Scope: Chromium, unpacked extension, authenticated Dynamics host, Query Studio UI, background queryExecute, bounded read-only SQL."
+            echo "- Authentication material and query result values are not included."
+            echo "- Persistent security/audit mutation tests were not run."
+          } >> "$GITHUB_STEP_SUMMARY"
