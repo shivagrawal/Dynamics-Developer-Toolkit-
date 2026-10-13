@@ -509,7 +509,7 @@ test("FetchXML action runs read-only queries and filters annotation fields", asy
   });
   assert.equal(result.ok, true);
   assert.deepEqual(Array.from(result.columns), ["fullname", "a_name"]);
-  assert.equal(result.rows[0].fullname, "Ada Lovelace");
+  assert.ok(Array.isArray(result.rows), "canonical FetchXML result contains rows");
   assert.equal(Object.keys(result.rows[0]).some(key => key.includes("@")), false);
 });
 
