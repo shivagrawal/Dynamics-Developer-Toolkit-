@@ -372,18 +372,39 @@
   async function execute() {
     if (state.running) return;
     if (!state.sql.trim()) { state.error = "Enter a SELECT query first."; render(); return; }
-    // The live Dataverse SQL endpoint currently returns rows beyond FETCH NEXT
-    // for OFFSET/FETCH queries. Route this syntax to the bounded FetchXML
-    // executor, which implements page/count semantics, rather than trusting the
-    // endpoint to enforce a bound it has been observed to ignore.
-    let parsedPlan = null;
-    try {
-      if (window.DevLensSqlEngine?.plan) parsedPlan = window.DevLensSqlEngine.plan(state.sql);
-    } catch (_) {
-      // The authoritative background SQL policy returns the parser diagnostic.
+    // Ask the background-owned coordinator to validate and choose the route.
+    // The UI consumes the returned trusted plan for FetchXML compilation; it
+    // never decides which provider should execute the query.
+    const routeApi = window.D365AnalyzerApi;
+    if (!routeApi?.send) {
+      state.error = "DevLens Dataverse bridge is not available. Reload the Dynamics tab.";
+      render();
+      return;
     }
-    if (parsedPlan?.hasOffset && !isSecurityAuditQuery(state.sql)) {
-      await executeEngine(parsedPlan);
+    let routeDecision;
+    try {
+      routeDecision = await routeApi.send("queryRouteDecision", { sql: state.sql });
+    } catch (error) {
+      state.error = error?.message || "Could not obtain an execution route.";
+      state.status = "Query planning failed";
+      render();
+      return;
+    }
+    if (!routeDecision?.ok) {
+      const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(routeDecision || { code: "INTERNAL" });
+      state.error = safeError?.message || routeDecision?.error || "The query was rejected by the read-only policy.";
+      state.status = "Query rejected";
+      render();
+      return;
+    }
+    if (routeDecision.route === "fetchxml") {
+      await executeEngine(routeDecision.plan);
+      return;
+    }
+    if (!["native-sql", "security-audit"].includes(routeDecision.route)) {
+      state.error = "The coordinator returned an unsupported execution route.";
+      state.status = "Query planning failed";
+      render();
       return;
     }
     state.running = true;
