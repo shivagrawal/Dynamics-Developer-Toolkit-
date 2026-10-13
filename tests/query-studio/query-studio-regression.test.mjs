@@ -610,6 +610,11 @@ test("coordinated Execute routes ordinary SELECT through one background action t
 test("coordinated Execute sends OFFSET/FETCH to bounded FetchXML and projects its rows", async () => {
   const harness = createHarness({
     fetchXmlResponse: { entities: [
+      { fullname: "Contact Zero" },
+      { fullname: "Contact One" },
+      { fullname: "Contact Two" },
+      { fullname: "Contact Three" },
+      { fullname: "Contact Four" },
       { fullname: "Contact Five" },
       { fullname: "Contact Six" },
       { fullname: "Contact Seven" },
