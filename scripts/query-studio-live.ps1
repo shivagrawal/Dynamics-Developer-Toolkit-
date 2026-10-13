@@ -34,7 +34,7 @@ public static class QueryStudioCredentialManager {
             c.CredentialBlobSize = (UInt32)bytes.Length; c.CredentialBlob = blob;
             c.Persist = 2; c.UserName = Environment.UserName;
             if (!CredWrite(ref c, 0)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-        } finally { Marshal.ZeroFreeHGlobal(blob); Array.Clear(bytes, 0, bytes.Length); }
+        } finally { for (int i = 0; i < bytes.Length; i++) Marshal.WriteByte(blob, i, 0); Marshal.FreeHGlobal(blob); Array.Clear(bytes, 0, bytes.Length); }
     }
     public static string Read(string target) {
         IntPtr ptr;
