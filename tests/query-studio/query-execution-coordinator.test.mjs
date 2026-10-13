@@ -105,7 +105,7 @@ test("fallback requires typed capability rejection and planner-approved equivale
   });
   assert.equal(alternateCalls, 1);
   assert.equal(result.ok, true);
-  assert.equal(result.provider, "native-sql", "the route identity should not be inferred from a generic provider flag");
+  assert.equal(result.provider, "fetchxml", "provider identity must reflect the actual fallback provider");
 });
 
 test("missing provider fails closed", async () => {
