@@ -7,6 +7,7 @@ const source = await readFile(new URL("../../background.js", import.meta.url), "
 const require = (await import("node:module")).createRequire(import.meta.url);
 const sqlEngine = require("../../sqlstudio/js/sql-engine.js");
 const sqlPolicy = require("../../sqlstudio/js/sql-policy.js");
+const coordinator = require("../../sqlstudio/js/query-execution-coordinator.js");
 
 function loadBackground() {
   let listener;
@@ -23,7 +24,7 @@ function loadBackground() {
     },
     tabs: {}
   };
-  const context = { chrome, devLensSecurityAuditBridge: securityBridge, DevLensSqlEngine: sqlEngine, DevLensSqlPolicy: sqlPolicy, console, URL, setTimeout, clearTimeout, AbortController, window: {} };
+  const context = { chrome, devLensSecurityAuditBridge: securityBridge, DevLensSqlEngine: sqlEngine, DevLensSqlPolicy: sqlPolicy, DevLensQueryExecutionCoordinator: coordinator, console, URL, setTimeout, clearTimeout, AbortController, window: {} };
   vm.runInNewContext(source, context, { filename: "background.js" });
   return { context, calls, get listener() { return listener; }, securityBridge };
 }
@@ -383,4 +384,43 @@ test("dispatcher does not retry or switch bridges after provider failures", asyn
       });
     }
   }
+});
+
+
+test("background coordinator returns the authoritative route and trusted plan without provider calls", async () => {
+  const { listener, calls } = loadBackground();
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const native = await dispatch({ type: "DEVLENS_ACTION", action: "queryRouteDecision", payload: { sql: "SELECT TOP 5 accountid, name FROM account" } });
+  assert.equal(native.ok, true);
+  assert.equal(native.route, "native-sql");
+  assert.equal(native.plan.table, "account");
+  const paged = await dispatch({ type: "DEVLENS_ACTION", action: "queryRouteDecision", payload: { sql: "SELECT accountid, name FROM account ORDER BY name OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY" } });
+  assert.equal(paged.ok, true);
+  assert.equal(paged.route, "fetchxml");
+  assert.equal(paged.plan.offset, 5);
+  assert.equal(paged.plan.fetch, 5);
+  assert.equal(calls.length, 0, "route planning must not invoke Dataverse providers");
+});
+
+test("background coordinator rejects unsafe SQL before returning a route", async () => {
+  const { listener, calls } = loadBackground();
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const result = await dispatch({ type: "DEVLENS_ACTION", action: "queryRouteDecision", payload: { sql: "DELETE FROM account" } });
+  assert.equal(result.ok, false);
+  assert.equal(result.route, undefined);
+  assert.equal(calls.length, 0);
+});
+
+
+test("native SQL execution refuses OFFSET/FETCH when the coordinator requires FetchXML", async () => {
+  const { listener, calls } = loadBackground();
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const result = await dispatch({
+    type: "DEVLENS_ACTION",
+    action: "querySql",
+    payload: { sql: "SELECT accountid, name FROM account ORDER BY name OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY" }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "ROUTE_REQUIRED");
+  assert.equal(calls.length, 0, "native SQL provider must not run for a FetchXML-routed query");
 });

@@ -6,6 +6,7 @@ import vm from "node:vm";
 const require = createRequire(import.meta.url);
 const engine = require("../../sqlstudio/js/sql-engine.js");
 const policy = require("../../sqlstudio/js/sql-policy.js");
+const coordinator = require("../../sqlstudio/js/query-execution-coordinator.js");
 
 test("accepts only parsed read-only SELECT plans and returns a typed route", () => {
   const result = policy.evaluate("SELECT TOP 10 fullname FROM contact WHERE statecode = 0", engine);
@@ -177,7 +178,7 @@ test("background SQL dispatch rejects adversarial statements before any provider
     },
     tabs: {}
   };
-  const context = { chrome, DevLensSqlEngine: engine, DevLensSqlPolicy: policy, console, URL, setTimeout, clearTimeout };
+  const context = { chrome, DevLensSqlEngine: engine, DevLensSqlPolicy: policy, DevLensQueryExecutionCoordinator: coordinator, console, URL, setTimeout, clearTimeout };
   vm.runInNewContext(backgroundSource, context, { filename: "background.js" });
   const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
   const rejectedSql = [

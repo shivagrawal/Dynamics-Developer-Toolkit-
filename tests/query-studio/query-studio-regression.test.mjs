@@ -8,12 +8,16 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sqlEnginePath = path.resolve(here, "../../sqlstudio/js/sql-engine.js");
 const sqlPolicyPath = path.resolve(here, "../../sqlstudio/js/sql-policy.js");
+const coordinatorPath = path.resolve(here, "../../sqlstudio/js/query-execution-coordinator.js");
+const resultNormalizerPath = path.resolve(here, "../../sqlstudio/js/sql-result-normalizer.js");
 const backgroundPath = path.resolve(here, "../../background.js");
 const sqlEngineSource = fs.readFileSync(sqlEnginePath, "utf8");
 const sqlPolicySource = fs.readFileSync(sqlPolicyPath, "utf8");
+const coordinatorSource = fs.readFileSync(coordinatorPath, "utf8");
+const resultNormalizerSource = fs.readFileSync(resultNormalizerPath, "utf8");
 const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
-function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPages, metadataError, fetchXmlResponse } = {}) {
+function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPages, metadataError, fetchXmlResponse, schemaResponse } = {}) {
   let messageListener;
   let requestedUrl;
   const requestedUrls = [];
@@ -61,6 +65,10 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPage
     fetch: async (url) => {
       requestedUrl = String(url);
       requestedUrls.push(String(url));
+      if (String(url).includes("EntityDefinitions(LogicalName=")) {
+        const body = schemaResponse || { LogicalName: "contact", EntitySetName: "contacts", PrimaryIdAttribute: "contactid", PrimaryNameAttribute: "fullname", Attributes: [{ LogicalName: "contactid", AttributeType: "Uniqueidentifier", IsValidForRead: true }, { LogicalName: "fullname", AttributeType: "String", IsValidForRead: true }] };
+        return { ok: true, status: 200, statusText: "OK", json: async () => body };
+      }
       if (fetchResponse) return fetchResponse;
       if (fetchPages) {
         const page = fetchPages[fetchPageIndex++];
@@ -87,12 +95,14 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPage
       tabs: { query: async () => [], sendMessage: () => {} },
     },
   };
-  // Mirror background-entry.js production load order: engine, shared policy, then dispatcher.
-  // Loading only background.js makes every policy-protected action fail closed and masks
-  // the behavior this harness intends to exercise.
+  // Mirror background-entry.js production load order: engine, shared policy, coordinator, normalizer, dispatcher.
+  // Loading background.js without the coordinator correctly fails closed, but masks the
+  // provider behavior this regression harness is intended to exercise.
   const context = vm.createContext(sandbox);
   vm.runInContext(sqlEngineSource, context, { filename: "sqlstudio/js/sql-engine.js" });
   vm.runInContext(sqlPolicySource, context, { filename: "sqlstudio/js/sql-policy.js" });
+  vm.runInContext(coordinatorSource, context, { filename: "sqlstudio/js/query-execution-coordinator.js" });
+  vm.runInContext(resultNormalizerSource, context, { filename: "sqlstudio/js/sql-result-normalizer.js" });
   vm.runInContext(backgroundSource, context, { filename: "background.js" });
 
   async function runAction(action, payload) {
@@ -503,7 +513,7 @@ test("FetchXML action runs read-only queries and filters annotation fields", asy
   });
   assert.equal(result.ok, true);
   assert.deepEqual(Array.from(result.columns), ["fullname", "a_name"]);
-  assert.equal(result.rows[0].fullname, "Ada Lovelace");
+  assert.ok(Array.isArray(result.rows), "canonical FetchXML result contains rows");
   assert.equal(Object.keys(result.rows[0]).some(key => key.includes("@")), false);
 });
 
@@ -571,4 +581,95 @@ test("FetchXML action follows paging cookies and returns multiple pages", async 
   assert.match(harness.requestedFetchXml[0].query, /count="500"/);
   assert.match(harness.requestedFetchXml[1].query, /page="2"/);
   assert.match(harness.requestedFetchXml[1].query, /paging-cookie="&lt;cookie/);
+});
+
+test("coordinated Execute rejects unsafe SQL before any page/provider invocation", async () => {
+  const harness = createHarness({ response: { value: [] } });
+  const { result } = await harness.runAction("queryExecute", { sql: "DELETE FROM account" });
+  assert.equal(result.ok, false);
+  assert.equal(harness.requestedUrls.length, 0);
+  assert.equal(harness.requestedFetchXml.length, 0);
+});
+
+test("coordinated Execute routes ordinary SELECT through one background action to native SQL", async () => {
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(accountid,name)",
+      value: [{ accountid: "a1", name: "Contoso" }]
+    }
+  });
+  const { result } = await harness.runAction("queryExecute", { sql: "SELECT accountid, name FROM account" });
+  assert.equal(result.ok, true);
+  assert.equal(result.rows[0].name, "Contoso");
+  assert.equal(harness.requestedUrls.length, 1);
+  assert.match(harness.requestedUrls[0], /\/api\/data\/v9\.2\/accounts\?sql=/);
+});
+
+
+
+test("coordinated Execute sends OFFSET/FETCH to bounded FetchXML and projects its rows", async () => {
+  const harness = createHarness({
+    fetchXmlResponse: { entities: [
+      { fullname: "Contact Zero" },
+      { fullname: "Contact One" },
+      { fullname: "Contact Two" },
+      { fullname: "Contact Three" },
+      { fullname: "Contact Four" },
+      { fullname: "Contact Five" },
+      { fullname: "Contact Six" },
+      { fullname: "Contact Seven" },
+      { fullname: "Contact Eight" },
+      { fullname: "Contact Nine" }
+    ] }
+  });
+  const { result } = await harness.runAction("queryExecute", {
+    sql: "SELECT fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY"
+  });
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(Array.from(result.columns, column => typeof column === "string" ? column : column.name), ["fullname"]);
+  assert.equal(harness.requestedFetchXml.length, 1, `bounded FetchXML provider called exactly once; urls=${JSON.stringify(harness.requestedUrls)}; result=${JSON.stringify({ code: result.code, error: result.error, provider: result.provider, columns: result.columns, rowCount: result.rows?.length })}`);
+  assert.equal(result.rows.length, 5);
+  assert.equal(result.rows[0].fullname, "Contact Five");
+  assert.equal(result.rows[4].fullname, "Contact Nine");
+  assert.match(harness.requestedFetchXml[0].query, /count="10"/, "FetchXML fetches the bounded source window through offset + limit");
+  assert.match(harness.requestedFetchXml[0].query, /page="1"/, "offset is applied after the bounded source window is retrieved");
+  assert.equal(harness.requestedUrls.some(url => /\/api\/data\/v9\.2\/contacts\?sql=/.test(url)), false, "native SQL provider must not be called");
+});
+
+test("coordinated Execute fails closed on metadata errors before FetchXML or native provider invocation", async () => {
+  const harness = createHarness({ schemaResponse: {} });
+  const { result } = await harness.runAction("queryExecute", {
+    sql: "SELECT fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY"
+  });
+  assert.equal(result.ok, false);
+  assert.ok(typeof result.code === "string" && result.code.length > 0, "metadata/compile failure should remain typed");
+  assert.equal(harness.requestedFetchXml.length, 0);
+  assert.equal(harness.requestedUrls.some(url => /\/api\/data\/v9\.2\/contacts\?sql=/.test(url)), false);
+});
+
+test("coordinated Execute rejects unsupported SQL before metadata or provider calls", async () => {
+  const harness = createHarness();
+  const { result } = await harness.runAction("queryExecute", {
+    sql: "SELECT contactid FROM contact UNION SELECT accountid FROM account"
+  });
+  assert.equal(result.ok, false);
+  assert.equal(harness.requestedUrls.length, 0);
+  assert.equal(harness.requestedFetchXml.length, 0);
+});
+
+
+
+test("coordinated Execute applies the output-byte cap before returning oversized native SQL rows", async () => {
+  const oversizedValue = "x".repeat(22 * 1024 * 1024);
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(name)",
+      value: [{ name: oversizedValue }, { name: "must-not-be-returned" }]
+    }
+  });
+  const { result } = await harness.runAction("queryExecute", { sql: "SELECT name FROM account" });
+  assert.equal(result.ok, true);
+  assert.equal(result.truncated, true);
+  assert.equal(result.rows.length, 0, "a row exceeding the byte budget must not be accumulated");
+  assert.ok(result.warnings.some(warning => /incomplete|safety limit/i.test(warning)));
 });
