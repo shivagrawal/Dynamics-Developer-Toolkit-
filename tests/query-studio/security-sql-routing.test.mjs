@@ -410,3 +410,17 @@ test("background coordinator rejects unsafe SQL before returning a route", async
   assert.equal(result.route, undefined);
   assert.equal(calls.length, 0);
 });
+
+
+test("native SQL execution refuses OFFSET/FETCH when the coordinator requires FetchXML", async () => {
+  const { listener, calls } = loadBackground();
+  const dispatch = message => new Promise(resolve => listener(message, { tab: { id: 123 } }, resolve));
+  const result = await dispatch({
+    type: "DEVLENS_ACTION",
+    action: "querySql",
+    payload: { sql: "SELECT accountid, name FROM account ORDER BY name OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY" }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "ROUTE_REQUIRED");
+  assert.equal(calls.length, 0, "native SQL provider must not run for a FetchXML-routed query");
+});
