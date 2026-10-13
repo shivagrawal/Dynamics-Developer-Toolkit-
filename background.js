@@ -1879,18 +1879,30 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       return;
     }
     devLensActiveQueryExecutions++;
-    const executionPayload = { __devlensExecution: { deadlineAt: Date.now() + DEVLENS_QUERY_DEADLINE_MS, maxOutputBytes: DEVLENS_QUERY_MAX_OUTPUT_BYTES } };
+    const startedAt = Date.now();
+    const executionPayload = { __devlensExecution: { deadlineAt: startedAt + DEVLENS_QUERY_DEADLINE_MS, maxOutputBytes: DEVLENS_QUERY_MAX_OUTPUT_BYTES } };
     let replied = false;
+    const normalizeResponse = result => {
+      const normalizer = globalThis.DevLensSqlResultNormalizer;
+      if (!normalizer?.normalizeOutcome) {
+        return { ok: false, code: "POLICY_UNAVAILABLE", error: "The query result contract is unavailable; execution was stopped." };
+      }
+      try {
+        return normalizer.normalizeOutcome(result, { durationMs: Math.max(0, Date.now() - startedAt) });
+      } catch {
+        return normalizer.normalizeError({ code: "INTERNAL" });
+      }
+    };
     const timer = setTimeout(() => {
       if (replied) return;
       replied = true;
-      reply({ ok: false, code: "QUERY_TIMEOUT", error: "Query Studio exceeded its 120-second deadline. An in-flight Dataverse call may continue until it settles." });
+      reply(normalizeResponse({ ok: false, code: "QUERY_TIMEOUT", error: "Query Studio exceeded its 120-second deadline. An in-flight Dataverse call may continue until it settles." }));
     }, DEVLENS_QUERY_DEADLINE_MS);
     const replyOnce = result => {
       if (replied) return;
       replied = true;
       clearTimeout(timer);
-      reply(result);
+      reply(normalizeResponse(result));
     };
     executeQueryStudioCoordinated(sql, sender, executionPayload)
       .then(replyOnce)
