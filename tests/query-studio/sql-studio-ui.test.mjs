@@ -50,6 +50,29 @@ function createHost() {
   return host;
 }
 
+
+function installRouteDecisionMock(window) {
+  const api = window.D365AnalyzerApi;
+  if (!api || typeof api.send !== "function") return;
+  const send = api.send.bind(api);
+  api.send = async (action, payload) => {
+    if (action === "queryRouteDecision") {
+      const sql = String(payload?.sql || "");
+      const securitySurface = /\\b(?:audit|systemuserroles|roleprivileges|privilegeobjecttypecodes|systemuser|businessunit)\\b/i.test(sql);
+      if (securitySurface) return { ok: true, route: "security-audit", plan: null };
+      if (/\\bOFFSET\\b/i.test(sql)) {
+        const plan = window.DevLensSqlEngine?.plan?.(sql) || {
+          table: "contact", joins: [], columns: [{ column: "fullname" }],
+          offset: 5, fetch: 5, hasOffset: true, alias: "c", orderBy: []
+        };
+        return { ok: true, route: "fetchxml", plan };
+      }
+      return { ok: true, route: "native-sql", plan: null };
+    }
+    return send(action, payload);
+  };
+}
+
 function rowCount(html) {
   const body = /<tbody>([\s\S]*?)<\/tbody>/.exec(html)?.[1] || "";
   return (body.match(/<tr>/g) || []).length;
@@ -109,6 +132,7 @@ test("Query Studio paginates large result sets without losing exportable results
     },
     console
   };
+  installRouteDecisionMock(window);
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
   assert.match(host.innerHTML, />Execute<\/button>/);
@@ -150,7 +174,7 @@ test("Query Studio paginates large result sets without losing exportable results
 });
 
 
-test("single Execute uses native SQL first and only falls back on typed capability rejection", async () => {
+test("single Execute does not implicitly reroute typed capability failures", async () => {
   const calls = [];
   const window = {
     DevLensSqlResultNormalizer: resultNormalizer,
@@ -189,9 +213,10 @@ test("single Execute uses native SQL first and only falls back on typed capabili
   assert.match(host.innerHTML, />Execute<\/button>/);
   assert.doesNotMatch(host.innerHTML, /Execute via FetchXML/);
   await click(host, "execute");
-  assert.deepEqual(calls, ["querySql", "schemaTable", "queryFetchXml"]);
-  assert.match(host.innerHTML, /dataverse-fetchxml-js-engine/);
-  assert.match(host.innerHTML, /token=\[redacted\]/);
+  assert.deepEqual(calls, ["querySql"]);
+  assert.match(host.innerHTML, /could not complete the request/i);
+  assert.doesNotMatch(host.innerHTML, /dataverse-fetchxml-js-engine/);
+  assert.doesNotMatch(host.innerHTML, /token=\[redacted\]/);
   assert.doesNotMatch(host.innerHTML, /secret-value|access_token=secret|example\.invalid/);
 });
 
