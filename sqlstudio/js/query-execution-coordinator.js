@@ -39,7 +39,7 @@
       return { ok: true, route: "security-audit", plan: null, reason: "approved-security-audit-shape" };
     }
     const plan = decision.plan;
-    if (plan?.hasOffset === true || plan?.offset != null || plan?.fetch != null) {
+    if (plan?.hasOffset === true || (Number.isInteger(plan?.offset) && plan.offset > 0) || plan?.fetch != null) {
       return { ok: true, route: "fetchxml", plan, reason: "bounded-offset-fetch-semantics" };
     }
     return { ok: true, route: "native-sql", plan, reason: "native-provider-default" };
