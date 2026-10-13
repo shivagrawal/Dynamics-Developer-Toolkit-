@@ -1864,6 +1864,47 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return;
   }
   if (message?.type !== "DEVLENS_ACTION") return;
+  if (message.action === "queryExecute") {
+    const sql = message.payload?.sql;
+    if (typeof sql !== "string" || !sql.trim()) {
+      reply({ ok: false, code: "SQL_SYNTAX", error: "Enter a SQL SELECT query." });
+      return;
+    }
+    if (!sender?.tab?.id) {
+      reply({ ok: false, code: "TRANSPORT", error: "Query Studio requires an active Dynamics tab." });
+      return;
+    }
+    if (devLensActiveQueryExecutions >= DEVLENS_QUERY_MAX_CONCURRENT) {
+      reply({ ok: false, code: "QUERY_CONCURRENCY_LIMIT", error: "Query Studio already has four queries executing. Wait for one to finish before starting another." });
+      return;
+    }
+    devLensActiveQueryExecutions++;
+    const executionPayload = { __devlensExecution: { deadlineAt: Date.now() + DEVLENS_QUERY_DEADLINE_MS, maxOutputBytes: DEVLENS_QUERY_MAX_OUTPUT_BYTES } };
+    let replied = false;
+    const timer = setTimeout(() => {
+      if (replied) return;
+      replied = true;
+      reply({ ok: false, code: "QUERY_TIMEOUT", error: "Query Studio exceeded its 120-second deadline. An in-flight Dataverse call may continue until it settles." });
+    }, DEVLENS_QUERY_DEADLINE_MS);
+    const replyOnce = result => {
+      if (replied) return;
+      replied = true;
+      clearTimeout(timer);
+      reply(result);
+    };
+    executeQueryStudioCoordinated(sql, sender, executionPayload)
+      .then(replyOnce)
+      .catch(error => replyOnce({
+        ok: false,
+        code: error?.code === "QUERY_TIMEOUT" ? "QUERY_TIMEOUT" : "TRANSPORT",
+        error: error?.code === "QUERY_TIMEOUT" ? "Query Studio exceeded its 120-second deadline." : "The coordinated Dataverse query could not be completed."
+      }))
+      .finally(() => {
+        clearTimeout(timer);
+        devLensActiveQueryExecutions = Math.max(0, devLensActiveQueryExecutions - 1);
+      });
+    return true;
+  }
   if (message.action === "querySql") {
     const securityCandidate = isSecuritySqlCandidate(message.payload?.sql);
     const supportedSecurityShape = isSupportedSecuritySqlShape(message.payload?.sql);
