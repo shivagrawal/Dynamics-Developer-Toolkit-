@@ -631,8 +631,8 @@ test("coordinated Execute sends OFFSET/FETCH to bounded FetchXML and projects it
   assert.equal(result.rows.length, 5);
   assert.equal(result.rows[0].fullname, "Contact Five");
   assert.equal(result.rows[4].fullname, "Contact Nine");
-  assert.match(harness.requestedFetchXml[0].query, /count="5"/);
-  assert.match(harness.requestedFetchXml[0].query, /page="2"/);
+  assert.match(harness.requestedFetchXml[0].query, /count="10"/, "FetchXML fetches the bounded source window through offset + limit");
+  assert.match(harness.requestedFetchXml[0].query, /page="1"/, "offset is applied after the bounded source window is retrieved");
   assert.equal(harness.requestedUrls.some(url => /\/api\/data\/v9\.2\/contacts\?sql=/.test(url)), false, "native SQL provider must not be called");
 });
 
