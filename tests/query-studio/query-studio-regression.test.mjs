@@ -8,9 +8,11 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sqlEnginePath = path.resolve(here, "../../sqlstudio/js/sql-engine.js");
 const sqlPolicyPath = path.resolve(here, "../../sqlstudio/js/sql-policy.js");
+const coordinatorPath = path.resolve(here, "../../sqlstudio/js/query-execution-coordinator.js");
 const backgroundPath = path.resolve(here, "../../background.js");
 const sqlEngineSource = fs.readFileSync(sqlEnginePath, "utf8");
 const sqlPolicySource = fs.readFileSync(sqlPolicyPath, "utf8");
+const coordinatorSource = fs.readFileSync(coordinatorPath, "utf8");
 const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
 function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPages, metadataError, fetchXmlResponse } = {}) {
@@ -87,12 +89,13 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPage
       tabs: { query: async () => [], sendMessage: () => {} },
     },
   };
-  // Mirror background-entry.js production load order: engine, shared policy, then dispatcher.
-  // Loading only background.js makes every policy-protected action fail closed and masks
-  // the behavior this harness intends to exercise.
+  // Mirror background-entry.js production load order: engine, shared policy, coordinator, dispatcher.
+  // Loading background.js without the coordinator correctly fails closed, but masks the
+  // provider behavior this regression harness is intended to exercise.
   const context = vm.createContext(sandbox);
   vm.runInContext(sqlEngineSource, context, { filename: "sqlstudio/js/sql-engine.js" });
   vm.runInContext(sqlPolicySource, context, { filename: "sqlstudio/js/sql-policy.js" });
+  vm.runInContext(coordinatorSource, context, { filename: "sqlstudio/js/query-execution-coordinator.js" });
   vm.runInContext(backgroundSource, context, { filename: "background.js" });
 
   async function runAction(action, payload) {

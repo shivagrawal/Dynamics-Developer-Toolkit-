@@ -1743,6 +1743,29 @@ function isSupportedSecuritySqlShape(sql) {
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "DEVLENS_ACTION") return;
+  if (message.action === "queryRouteDecision") {
+    const sql = message.payload?.sql;
+    const securityCandidate = isSecuritySqlCandidate(sql);
+    const supportedSecurityShape = isSupportedSecuritySqlShape(sql);
+    if (securityCandidate && !supportedSecurityShape) {
+      reply({ ok: false, code: "UNSUPPORTED_SECURITY_SQL_SHAPE", error: "This security/audit SQL query does not match a supported read-only query shape." });
+      return;
+    }
+    const specializedSecurity = securityCandidate && supportedSecurityShape && typeof devLensSecurityAuditBridge === "function";
+    const coordinator = globalThis.DevLensQueryExecutionCoordinator;
+    if (!coordinator?.decide) {
+      reply({ ok: false, code: "POLICY_UNAVAILABLE", error: "The query execution coordinator is unavailable; execution was stopped." });
+      return;
+    }
+    const decision = coordinator.decide(sql, globalThis.DevLensSqlEngine, globalThis.DevLensSqlPolicy, { specializedSecurity });
+    if (!decision?.ok) {
+      reply({ ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only SQL policy rejected the query." });
+      return;
+    }
+    reply({ ok: true, route: decision.route, reason: decision.reason, plan: decision.plan || null });
+    return;
+  }
+  if (message?.type !== "DEVLENS_ACTION") return;
   if (message.action === "querySql") {
     const securityCandidate = isSecuritySqlCandidate(message.payload?.sql);
     const supportedSecurityShape = isSupportedSecuritySqlShape(message.payload?.sql);
@@ -1753,9 +1776,22 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       return;
     }
     const specializedSecurity = securityCandidate && supportedSecurityShape && typeof devLensSecurityAuditBridge === "function";
-    const decision = globalThis.DevLensSqlPolicy?.evaluate(message.payload?.sql, globalThis.DevLensSqlEngine, { specializedSecurity });
+    const coordinator = globalThis.DevLensQueryExecutionCoordinator;
+    if (!coordinator?.decide) {
+      reply({ ok: false, code: "POLICY_UNAVAILABLE", error: "The query execution coordinator is unavailable; execution was stopped." });
+      return;
+    }
+    const decision = coordinator.decide(message.payload?.sql, globalThis.DevLensSqlEngine, globalThis.DevLensSqlPolicy, { specializedSecurity });
     if (!decision?.ok) {
       reply({ ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only SQL policy is unavailable; execution was stopped." });
+      return;
+    }
+    if (decision.route === "fetchxml") {
+      reply({ ok: false, code: "ROUTE_REQUIRED", error: "This query requires the bounded FetchXML route. Query Studio must compile and execute the coordinator-approved plan instead of sending it to native SQL." });
+      return;
+    }
+    if (decision.route !== "native-sql" && decision.route !== "security-audit") {
+      reply({ ok: false, code: "ROUTE_UNAVAILABLE", error: "The coordinator selected a route that cannot be executed by this action." });
       return;
     }
   }
