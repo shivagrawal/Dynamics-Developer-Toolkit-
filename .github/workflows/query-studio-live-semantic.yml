@@ -38,7 +38,7 @@ jobs:
               process.exit(1);
             }
             const url = new URL(process.env.DATAVERSE_URL);
-            if (url.protocol !== "https:" || !/\\.crm(?:\\d+)?\\.dynamics\\.com$|\\.crm\\.microsoftdynamics\\.us$|\\.crm\\.dynamics\\.cn$/i.test(url.hostname)) {
+            if (url.protocol !== "https:" || !/\.crm(?:\\d+)?\.dynamics\\.com$|\.crm\.microsoftdynamics\\.us$|\.crm\.dynamics\\.cn$/i.test(url.hostname)) {
               console.error("DATAVERSE_URL must be an HTTPS Dataverse organization URL.");
               process.exit(1);
             }
