@@ -1,5 +1,5 @@
 import readline from "node:readline/promises";
-import { stdin, stdout } from "node:process";
+import { stdin, stderr } from "node:process";
 import { chromium } from "playwright";
 
 const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\\/+$/, "");
@@ -17,9 +17,9 @@ try {
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto(appUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
-  console.log("Sign in to the dedicated Dynamics test user in the opened Chromium window.");
-  console.log("Complete any MFA prompts, then return here after the model-driven app has loaded.");
-  const rl = readline.createInterface({ input: stdin, output: stdout });
+  console.error("Sign in to the dedicated Dynamics test user in the opened Chromium window.");
+  console.error("Complete any MFA prompts, then return here after the model-driven app has loaded.");
+  const rl = readline.createInterface({ input: stdin, output: stderr });
   await rl.question("Press Enter only after you can see the authenticated Dynamics app: ");
   rl.close();
 
