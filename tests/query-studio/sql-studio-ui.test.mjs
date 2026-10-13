@@ -353,7 +353,7 @@ test("single Execute never falls back for timeout, transport, throttling, metada
       URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
     };
     installRouteDecisionMock(window);
-  vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
+    vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
     window.DevLensSqlStudioView.renderInto(host);
     await click(host, "execute");
     assert.deepEqual(calls, ["querySql"], code + " must not trigger provider fallback");
