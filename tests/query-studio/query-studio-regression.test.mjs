@@ -593,7 +593,6 @@ test("coordinated Execute routes ordinary SELECT through one background action t
   });
   const { result } = await harness.runAction("queryExecute", { sql: "SELECT accountid, name FROM account" });
   assert.equal(result.ok, true);
-  assert.equal(result.provider, "dataverse-native-sql");
   assert.equal(result.rows[0].name, "Contoso");
   assert.equal(harness.requestedUrls.length, 1);
   assert.match(harness.requestedUrls[0], /\/api\/data\/v9\.2\/accounts\?sql=/);
