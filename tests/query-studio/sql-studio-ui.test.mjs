@@ -57,19 +57,42 @@ function installRouteDecisionMock(window) {
   api.__routeDecisionMockInstalled = true;
   const send = api.send.bind(api);
   api.send = async (action, payload) => {
-    if (action === "queryRouteDecision") {
+    if (action === "queryExecute") {
       const sql = String(payload?.sql || "");
-      const securitySurface = /\b(?:audit|systemuserroles|roleprivileges|privilegeobjecttypecodes|systemuser|businessunit)\b/i.test(sql);
-      if (securitySurface) return { ok: true, route: "security-audit", plan: null };
-      if (/\bOFFSET\b/i.test(sql)) {
-        const plan = window.DevLensSqlEngine?.plan?.(sql) || {
-          table: "contact", joins: [], columns: [{ column: "fullname" }],
-          offset: 5, fetch: 5, hasOffset: true, alias: "c", orderBy: []
+      const securitySurface = /\\b(?:audit|systemuserroles|roleprivileges|privilegeobjecttypecodes|systemuser|businessunit)\\b/i.test(sql);
+      if (securitySurface || !/\\bOFFSET\\b/i.test(sql)) return send("querySql", payload);
+      const plan = window.DevLensSqlEngine?.plan?.(sql) || {
+        table: "contact", joins: [], columns: [{ column: "fullname" }],
+        offset: 5, fetch: 5, hasOffset: true, alias: "c", orderBy: []
+      };
+      const metadata = { entities: {} };
+      for (const logicalName of [...new Set([plan.table, ...(plan.joins || []).map(join => join.table)])]) {
+        const response = await send("schemaTable", { logicalName });
+        if (!response?.ok || !response.data) return response;
+        metadata.entities[logicalName] = {
+          logicalName: response.data.logicalName, entitySetName: response.data.entitySetName,
+          primaryIdAttribute: response.data.primaryIdAttribute,
+          columns: (response.data.columns || []).map(column => ({
+            logicalName: column.logicalName, attributeType: column.attributeType,
+            queryable: column.validForRead !== false && String(column.attributeType || "").toLowerCase() !== "virtual"
+          }))
         };
-        return { ok: true, route: "fetchxml", plan };
       }
-      return { ok: true, route: "native-sql", plan: null };
+      const compiled = window.DevLensSqlEngine.compile(plan, metadata);
+      const response = await send("queryFetchXml", { tableName: plan.table, fetchXml: compiled.fetchXml, offset: plan.offset, limit: plan.fetch });
+      if (!response?.ok) return response;
+      const projections = compiled.resultColumns || plan.columns.map(column => ({ label: column.alias || column.column, key: column.alias || column.column }));
+      return {
+        ...response,
+        columns: projections.map(projection => ({ name: projection.label, label: projection.label, sourceKey: projection.label })),
+        rows: (response.rows || []).map(row => Object.fromEntries(projections.map(projection => {
+          const key = Object.keys(row).find(candidate => candidate.toLowerCase() === projection.key.toLowerCase());
+          return [projection.label, key ? row[key] : null];
+        }))),
+        provider: response.provider || "dataverse-fetchxml-js-engine"
+      };
     }
+    if (action === "queryRouteDecision") return { ok: false, error: "UI must not request a separate route decision." };
     return send(action, payload);
   };
 }
