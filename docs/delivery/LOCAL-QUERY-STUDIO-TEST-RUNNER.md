@@ -52,15 +52,19 @@ node .\scripts\query-studio-local-runner.mjs --live
 
 Close and reopen PowerShell after changing user environment variables. Live tests are never part of the daily scheduled task.
 
-For the semantic harness, set `SQL_QUERY` to a reviewed, bounded, read-only query and run:
+For the semantic harness, use the credential helper's one-command semantic mode. It defaults to a bounded Account query and restores any pre-existing process environment variables when finished:
 
 ```powershell
-$env:SQL_QUERY = "SELECT TOP 5 accountid, name FROM account ORDER BY name"
-node .\scripts\query-studio-local-runner.mjs --live --live-semantic
-Remove-Item Env:\SQL_QUERY
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\query-studio-live.ps1 -Semantic
 ```
 
-Review the current harness implementation and query restrictions before using this option. Never supply sensitive row values in SQL.
+To use a different query, pass `-SqlQuery`. It must be one SELECT statement with `TOP 1` through `TOP 25`, no comments or semicolons, and a maximum length of 2,000 characters. The live harness further restricts tables and validates the query before making requests. Example:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\query-studio-live.ps1 -Semantic -SqlQuery "SELECT TOP 5 accountid, name FROM account ORDER BY name"
+```
+
+Review the current harness implementation and query restrictions before using this option. Never supply sensitive row values in SQL. Audit tests remain disabled.
 
 ## Audit tests are deliberately opt-in
 
