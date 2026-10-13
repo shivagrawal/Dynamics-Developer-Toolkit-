@@ -372,38 +372,9 @@
   async function execute() {
     if (state.running) return;
     if (!state.sql.trim()) { state.error = "Enter a SELECT query first."; render(); return; }
-    // Ask the background-owned coordinator to validate and choose the route.
-    // The UI consumes the returned trusted plan for FetchXML compilation; it
-    // never decides which provider should execute the query.
-    const routeApi = window.D365AnalyzerApi;
-    if (!routeApi?.send) {
+    const api = window.D365AnalyzerApi;
+    if (!api?.send) {
       state.error = "DevLens Dataverse bridge is not available. Reload the Dynamics tab.";
-      render();
-      return;
-    }
-    let routeDecision;
-    try {
-      routeDecision = await routeApi.send("queryRouteDecision", { sql: state.sql });
-    } catch (error) {
-      state.error = error?.message || "Could not obtain an execution route.";
-      state.status = "Query planning failed";
-      render();
-      return;
-    }
-    if (!routeDecision?.ok) {
-      const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(routeDecision || { code: "INTERNAL" });
-      state.error = safeError?.message || routeDecision?.error || "The query was rejected by the read-only policy.";
-      state.status = "Query rejected";
-      render();
-      return;
-    }
-    if (routeDecision.route === "fetchxml") {
-      await executeEngine(routeDecision.plan);
-      return;
-    }
-    if (!["native-sql", "security-audit"].includes(routeDecision.route)) {
-      state.error = "The coordinator returned an unsupported execution route.";
-      state.status = "Query planning failed";
       render();
       return;
     }
@@ -412,27 +383,29 @@
     state.results = null;
     state.pageIndex = 0;
     state.lastQuery = state.sql;
-    state.status = "Executing…";
+    state.status = "Planning and executing…";
     const started = performance.now();
     render();
-
     try {
-      const api = window.D365AnalyzerApi;
-      if (!api?.send) throw new Error("DevLens Dataverse bridge is not available. Reload the Dynamics tab.");
-      const response = await api.send("querySql", { sql: state.sql });
+      // The background owns policy evaluation, route selection, metadata loading,
+      // compilation, provider invocation and the single provider response boundary.
+      // The UI deliberately supplies SQL only; it cannot select a provider or submit FetchXML.
+      const response = await api.send("queryExecute", { sql: state.sql });
       if (!response?.ok) {
-        // Route choice is owned by the background coordinator. Do not retry a
-        // failed native request through a second provider from the UI.
         const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(response || { code: "INTERNAL" });
-        throw Object.assign(new Error(safeError?.message || response?.error || "Query failed."), { code: safeError?.code || response?.code, category: safeError?.category });
+        throw Object.assign(new Error(safeError?.message || response?.error || "Query failed."), {
+          code: safeError?.code || response?.code,
+          category: safeError?.category
+        });
       }
       state.ctx = { clientUrl: response.clientUrl, environmentId: response.environmentId, currentUser: response.currentUser };
       state.durationMs = Math.round(performance.now() - started);
-      state.results = legacyNormalizedResult(response, state.durationMs, "dataverse-native-sql");
-      state.status = "Query completed as " + (response.currentUser?.name || "current Dynamics user");
-    } catch (e) {
-      const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(e);
-      state.error = safeError?.message || e.message || String(e);
+      state.results = legacyNormalizedResult(response, state.durationMs, response.provider || "dataverse-native-sql");
+      state.status = "Query completed" + (response.currentUser?.name ? " as " + response.currentUser.name : "") +
+        " (" + state.results.rows.length + " rows)" + (state.results.truncated ? " · results limited" : "");
+    } catch (error) {
+      const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(error);
+      state.error = safeError?.message || error?.message || String(error);
       state.status = "Query failed";
       state.durationMs = Math.round(performance.now() - started);
     } finally {
