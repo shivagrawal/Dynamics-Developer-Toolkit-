@@ -134,6 +134,7 @@ test("Query Studio paginates large result sets without losing exportable results
     console
   };
   installRouteDecisionMock(window);
+  installRouteDecisionMock(window);
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
   assert.match(host.innerHTML, />Execute<\/button>/);
@@ -209,6 +210,7 @@ test("single Execute does not implicitly reroute typed capability failures", asy
     performance: { now: () => 1 }, Blob: class { constructor(parts) { this.parts = parts; } },
     URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
   };
+  installRouteDecisionMock(window);
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
   assert.match(host.innerHTML, />Execute<\/button>/);
@@ -261,6 +263,7 @@ test("single Execute routes OFFSET/FETCH directly through bounded FetchXML", asy
     performance: { now: () => 1 }, Blob: class { constructor(parts) { this.parts = parts; } },
     URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
   };
+  installRouteDecisionMock(window);
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
   await click(host, "execute");
@@ -296,6 +299,7 @@ test("OFFSET/FETCH routing never bypasses named security/audit queries", async (
     performance: { now: () => 1 }, Blob: class { constructor(parts) { this.parts = parts; } },
     URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
   };
+  installRouteDecisionMock(window);
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
   const editor = host.querySelector("textarea");
@@ -322,6 +326,7 @@ test("single Execute does not fall back on authorization or generic provider err
     window, document: { activeElement: null, createElement: () => ({ click() {} }) },
     performance: { now: () => 1 }, Blob: class {}, URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
   };
+  installRouteDecisionMock(window);
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
   await click(host, "execute");
@@ -348,7 +353,8 @@ test("single Execute never falls back for timeout, transport, throttling, metada
       performance: { now: () => 1 }, Blob: class {},
       URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
     };
-    vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
+    installRouteDecisionMock(window);
+  vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
     window.DevLensSqlStudioView.renderInto(host);
     await click(host, "execute");
     assert.deepEqual(calls, ["querySql"], code + " must not trigger provider fallback");
@@ -374,6 +380,7 @@ test("typed capability responses never reroute named security/audit queries", as
     performance: { now: () => 1 }, Blob: class {},
     URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} }, console
   };
+  installRouteDecisionMock(window);
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
   const editor = host.querySelector("textarea");
