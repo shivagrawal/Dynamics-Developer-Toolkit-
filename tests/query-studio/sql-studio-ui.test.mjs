@@ -265,6 +265,9 @@ test("single Execute routes OFFSET/FETCH directly through bounded FetchXML", asy
   installRouteDecisionMock(window);
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
+  const editor = host.querySelector("textarea");
+  editor.value = "SELECT fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY";
+  editor.onInput();
   await click(host, "execute");
   assert.deepEqual(calls.map(call => call.action), ["schemaTable", "queryFetchXml"]);
   assert.equal(calls[1].payload.offset, 5);
