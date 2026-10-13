@@ -622,10 +622,10 @@ test("coordinated Execute sends OFFSET/FETCH to bounded FetchXML and projects it
   });
   assert.equal(result.ok, true, result.error);
   assert.deepEqual(Array.from(result.columns, column => typeof column === "string" ? column : column.name), ["fullname"]);
+  assert.equal(harness.requestedFetchXml.length, 1, `bounded FetchXML provider called exactly once; urls=${JSON.stringify(harness.requestedUrls)}; result=${JSON.stringify({ code: result.code, error: result.error, provider: result.provider, columns: result.columns, rowCount: result.rows?.length })}`);
   assert.equal(result.rows.length, 5);
   assert.equal(result.rows[0].fullname, "Contact Five");
   assert.equal(result.rows[4].fullname, "Contact Nine");
-  assert.equal(harness.requestedFetchXml.length, 1, "bounded FetchXML provider called exactly once");
   assert.match(harness.requestedFetchXml[0].query, /count="5"/);
   assert.match(harness.requestedFetchXml[0].query, /page="2"/);
   assert.equal(harness.requestedUrls.some(url => /\/api\/data\/v9\.2\/contacts\?sql=/.test(url)), false, "native SQL provider must not be called");
