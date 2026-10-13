@@ -134,7 +134,6 @@ test("Query Studio paginates large result sets without losing exportable results
     console
   };
   installRouteDecisionMock(window);
-  installRouteDecisionMock(window);
   vm.runInNewContext(source, context, { filename: "sql-studio-view.js" });
   window.DevLensSqlStudioView.renderInto(host);
   assert.match(host.innerHTML, />Execute<\/button>/);
