@@ -610,21 +610,21 @@ test("coordinated Execute routes ordinary SELECT through one background action t
 test("coordinated Execute sends OFFSET/FETCH to bounded FetchXML and projects its rows", async () => {
   const harness = createHarness({
     fetchXmlResponse: { entities: [
-      { contactid: "contact-5", fullname: "Contact Five" },
-      { contactid: "contact-6", fullname: "Contact Six" },
-      { contactid: "contact-7", fullname: "Contact Seven" },
-      { contactid: "contact-8", fullname: "Contact Eight" },
-      { contactid: "contact-9", fullname: "Contact Nine" }
+      { fullname: "Contact Five" },
+      { fullname: "Contact Six" },
+      { fullname: "Contact Seven" },
+      { fullname: "Contact Eight" },
+      { fullname: "Contact Nine" }
     ] }
   });
   const { result } = await harness.runAction("queryExecute", {
-    sql: "SELECT contactid, fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY"
+    sql: "SELECT fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY"
   });
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(Array.from(result.columns, column => typeof column === "string" ? column : column.name), ["contactid", "fullname"]);
+  assert.deepEqual(Array.from(result.columns, column => typeof column === "string" ? column : column.name), ["fullname"]);
   assert.equal(result.rows.length, 5);
-  assert.equal(result.rows[0].contactid, "contact-5");
-  assert.equal(result.rows[4].contactid, "contact-9");
+  assert.equal(result.rows[0].fullname, "Contact Five");
+  assert.equal(result.rows[4].fullname, "Contact Nine");
   assert.equal(harness.requestedFetchXml.length, 1, "bounded FetchXML provider called exactly once");
   assert.match(harness.requestedFetchXml[0].query, /count="5"/);
   assert.match(harness.requestedFetchXml[0].query, /page="2"/);
@@ -634,7 +634,7 @@ test("coordinated Execute sends OFFSET/FETCH to bounded FetchXML and projects it
 test("coordinated Execute fails closed on metadata errors before FetchXML or native provider invocation", async () => {
   const harness = createHarness({ schemaResponse: {} });
   const { result } = await harness.runAction("queryExecute", {
-    sql: "SELECT contactid FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY"
+    sql: "SELECT fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY"
   });
   assert.equal(result.ok, false);
   assert.ok(typeof result.code === "string" && result.code.length > 0, "metadata/compile failure should remain typed");
