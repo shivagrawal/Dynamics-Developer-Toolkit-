@@ -1,5 +1,9 @@
 [CmdletBinding()]
-param([switch]$Setup)
+param(
+    [switch]$Setup,
+    [switch]$Semantic,
+    [string]$SqlQuery = "SELECT TOP 5 accountid, name FROM account ORDER BY name"
+)
 
 $ErrorActionPreference = "Stop"
 $prefix = "DynamicsDeveloperToolkit.QueryStudio."
@@ -86,6 +90,13 @@ if ($Setup) {
 }
 
 $loaded = @{}
+$originalEnvironment = @{}
+if ($Semantic) {
+    if ([string]::IsNullOrWhiteSpace($SqlQuery)) { throw "Semantic mode requires a bounded read-only SQL query." }
+    if ($SqlQuery.Length -gt 2000 -or $SqlQuery -match ";|--|/\*|\*/" -or $SqlQuery -notmatch '^\s*SELECT\b' -or $SqlQuery -notmatch '^\s*SELECT\s+(DISTINCT\s+)?TOP\s+(?:[1-9]|1\d|2[0-5])\b') {
+        throw "Semantic SQL must be one SELECT with TOP 1-25, no comments or semicolons, and at most 2,000 characters."
+    }
+}
 foreach ($name in $names) {
     $value = [QueryStudioCredentialManager]::Read($prefix + $name)
     if ([string]::IsNullOrWhiteSpace($value)) {
@@ -97,11 +108,27 @@ $root = Split-Path -Parent $PSScriptRoot
 $runner = Join-Path $root "scripts\query-studio-local-runner.mjs"
 if (-not (Test-Path -LiteralPath $runner)) { throw "Query Studio runner not found: $runner" }
 try {
-    foreach ($name in $names) { Set-Item -Path ("Env:" + $name) -Value $loaded[$name] }
-    Write-Host "Running offline regressions and read-only Dataverse integration tests. Audit tests are disabled."
-    & node $runner --live
+    foreach ($name in $names) {
+        $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+        Set-Item -Path ("Env:" + $name) -Value $loaded[$name]
+    }
+    $originalEnvironment["SQL_QUERY"] = [Environment]::GetEnvironmentVariable("SQL_QUERY", "Process")
+    if ($Semantic) {
+        $env:SQL_QUERY = $SqlQuery
+        Write-Host "Running offline regressions, read-only Dataverse integration tests, and bounded semantic checks. Audit tests are disabled."
+        & node $runner --live --live-semantic
+    } else {
+        Write-Host "Running offline regressions and read-only Dataverse integration tests. Audit tests are disabled."
+        & node $runner --live
+    }
     if ($LASTEXITCODE -ne 0) { throw "Query Studio runner failed with exit code $LASTEXITCODE." }
 } finally {
-    foreach ($name in $names) { Remove-Item -Path ("Env:" + $name) -ErrorAction SilentlyContinue }
+    foreach ($name in $names) {
+        if ($null -eq $originalEnvironment[$name]) { Remove-Item -Path ("Env:" + $name) -ErrorAction SilentlyContinue }
+        else { Set-Item -Path ("Env:" + $name) -Value $originalEnvironment[$name] }
+    }
+    if ($null -eq $originalEnvironment["SQL_QUERY"]) { Remove-Item Env:SQL_QUERY -ErrorAction SilentlyContinue }
+    else { Set-Item Env:SQL_QUERY -Value $originalEnvironment["SQL_QUERY"] }
     $loaded.Clear()
+    $originalEnvironment.Clear()
 }
