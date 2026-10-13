@@ -2,7 +2,7 @@ import readline from "node:readline/promises";
 import { stdin, stderr } from "node:process";
 import { chromium } from "playwright";
 
-const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\\/+$/, "");
+const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\/+$/, "");
 const appUrl = process.env.DYNAMICS_APP_URL || (baseUrl ? baseUrl + "/main.aspx" : "");
 if (!baseUrl || !appUrl) throw new Error("Set DATAVERSE_URL and optionally DYNAMICS_APP_URL before capturing a browser session.");
 
@@ -31,7 +31,7 @@ try {
   const encoded = Buffer.from(JSON.stringify(state), "utf8").toString("base64");
   // This is a bearer session snapshot. Do not paste it into chat, source control, or logs.
   // Pipe stdout directly to a clipboard/secret-management command instead.
-  process.stdout.write(encoded + "\\n");
+  process.stdout.write(encoded + "\n");
   console.error("Session state captured. Treat the emitted value as a password; it may expire and must be rotated.");
 } finally {
   await browser.close();
