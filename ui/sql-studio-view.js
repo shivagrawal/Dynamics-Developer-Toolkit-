@@ -402,7 +402,7 @@
       state.durationMs = Math.round(performance.now() - started);
       // queryExecute returns the canonical normalized outcome; only convert it for
       // the legacy grid renderer here, without reinterpreting provider-specific shapes.
-      state.results = Array.isArray(response.columns) && response.columns.every(column => column && typeof column === "object" && typeof column.name === "string" && typeof column.label === "string") ? window.DevLensSqlResultNormalizer.toLegacyResult(response) : legacyNormalizedResult(response, state.durationMs, response.provider || "dataverse-native-sql");
+      state.results = Array.isArray(response.columns) && response.columns.every(column => column && typeof column === "object" && typeof column.name === "string" && typeof column.label === "string") && typeof response.provider === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(response.provider) && Array.isArray(response.warnings) && typeof response.durationMs === "number" ? window.DevLensSqlResultNormalizer.toLegacyResult(response) : legacyNormalizedResult(response, state.durationMs, response.provider || "dataverse-native-sql");
       state.status = "Query completed" + (response.currentUser?.name ? " as " + response.currentUser.name : "") +
         " (" + state.results.rows.length + " rows)" + (state.results.truncated ? " · results limited" : "");
     } catch (error) {
