@@ -400,7 +400,9 @@
       }
       state.ctx = { clientUrl: response.clientUrl, environmentId: response.environmentId, currentUser: response.currentUser };
       state.durationMs = Math.round(performance.now() - started);
-      state.results = legacyNormalizedResult(response, state.durationMs, response.provider || "dataverse-native-sql");
+      // queryExecute returns the canonical normalized outcome; only convert it for
+      // the legacy grid renderer here, without reinterpreting provider-specific shapes.
+      state.results = window.DevLensSqlResultNormalizer.toLegacyResult(response);
       state.status = "Query completed" + (response.currentUser?.name ? " as " + response.currentUser.name : "") +
         " (" + state.results.rows.length + " rows)" + (state.results.truncated ? " · results limited" : "");
     } catch (error) {
