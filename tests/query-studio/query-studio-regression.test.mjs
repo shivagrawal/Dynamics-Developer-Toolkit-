@@ -657,3 +657,19 @@ test("coordinated Execute rejects unsupported SQL before metadata or provider ca
   assert.equal(harness.requestedFetchXml.length, 0);
 });
 
+
+
+test("coordinated Execute applies the output-byte cap before returning oversized native SQL rows", async () => {
+  const oversizedValue = "x".repeat(22 * 1024 * 1024);
+  const harness = createHarness({
+    response: {
+      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(name)",
+      value: [{ name: oversizedValue }, { name: "must-not-be-returned" }]
+    }
+  });
+  const { result } = await harness.runAction("queryExecute", { sql: "SELECT name FROM account" });
+  assert.equal(result.ok, true);
+  assert.equal(result.truncated, true);
+  assert.equal(result.rows.length, 0, "a row exceeding the byte budget must not be accumulated");
+  assert.ok(result.warnings.some(warning => /incomplete|safety limit/i.test(warning)));
+});
