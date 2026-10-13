@@ -372,18 +372,23 @@
   async function execute() {
     if (state.running) return;
     if (!state.sql.trim()) { state.error = "Enter a SELECT query first."; render(); return; }
-    // The live Dataverse SQL endpoint currently returns rows beyond FETCH NEXT
-    // for OFFSET/FETCH queries. Route this syntax to the bounded FetchXML
-    // executor, which implements page/count semantics, rather than trusting the
-    // endpoint to enforce a bound it has been observed to ignore.
-    let parsedPlan = null;
+    // Ask the shared policy module for the deterministic provider route before
+    // dispatch. The background repeats the gate at the trust boundary; this UI
+    // decision is for routing only and is never treated as authorization.
+    let executionDecision = null;
     try {
-      if (window.DevLensSqlEngine?.plan) parsedPlan = window.DevLensSqlEngine.plan(state.sql);
+      const policy = window.DevLensSqlPolicy;
+      if (policy?.evaluate && window.DevLensSqlEngine) {
+        executionDecision = policy.evaluate(state.sql, window.DevLensSqlEngine, {
+          specializedSecurity: isSecurityAuditQuery(state.sql)
+        });
+      }
     } catch (_) {
-      // The authoritative background SQL policy returns the parser diagnostic.
+      // The background policy remains authoritative and returns the diagnostic.
     }
-    if (parsedPlan?.hasOffset && !isSecurityAuditQuery(state.sql)) {
-      await executeEngine(parsedPlan);
+    if (executionDecision?.ok && executionDecision.route === "fetchxml" &&
+        executionDecision.plan && !isSecurityAuditQuery(state.sql)) {
+      await executeEngine(executionDecision.plan);
       return;
     }
     state.running = true;

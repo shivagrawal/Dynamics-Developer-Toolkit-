@@ -15,6 +15,16 @@ test("accepts only parsed read-only SELECT plans and returns a typed route", () 
   assert.equal(result.plan.type, "select");
 });
 
+test("routes bounded OFFSET/FETCH to FetchXML before native SQL dispatch", () => {
+  const result = policy.evaluate(
+    "SELECT fullname FROM contact ORDER BY fullname OFFSET 0 ROWS FETCH NEXT 5 ROWS ONLY",
+    engine
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.route, "fetchxml");
+  assert.equal(result.plan.hasOffset, true);
+});
+
 test("rejects writes, batches, malformed SQL and unsupported grammar", () => {
   for (const sql of [
     "DELETE FROM contact",

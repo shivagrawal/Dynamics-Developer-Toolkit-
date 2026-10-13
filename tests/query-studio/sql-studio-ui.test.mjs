@@ -6,6 +6,8 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const resultNormalizer = require("../../sqlstudio/js/sql-result-normalizer.js");
+const sqlEngine = require("../../sqlstudio/js/sql-engine.js");
+const sqlPolicy = require("../../sqlstudio/js/sql-policy.js");
 
 const source = await readFile(new URL("../../ui/sql-studio-view.js", import.meta.url), "utf8");
 
@@ -75,6 +77,7 @@ test("Query Studio paginates large result sets without losing exportable results
   }));
   const window = {
     DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlPolicy: sqlPolicy,
     D365AnalyzerApi: {
       send: async action => {
         assert.equal(action, "querySql");
@@ -154,7 +157,10 @@ test("single Execute uses native SQL first and only falls back on typed capabili
   const calls = [];
   const window = {
     DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlPolicy: sqlPolicy,
     DevLensSqlEngine: {
+      parse: sqlEngine.parse,
+      tokenize: sqlEngine.tokenize,
       plan: () => ({ table: "contact", joins: [], columns: [{ column: "fullname" }], offset: 0, fetch: null, alias: "c" }),
       compile: () => ({
         fetchXml: '<fetch><entity name="contact"><attribute name="fullname"/></entity></fetch>',
@@ -203,7 +209,10 @@ test("single Execute routes OFFSET/FETCH directly through bounded FetchXML", asy
   };
   const window = {
     DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlPolicy: sqlPolicy,
     DevLensSqlEngine: {
+      parse: sqlEngine.parse,
+      tokenize: sqlEngine.tokenize,
       plan: () => plan,
       compile: () => ({
         fetchXml: '<fetch page="2" count="5"><entity name="contact"><attribute name="fullname"/></entity></fetch>',
@@ -250,7 +259,10 @@ test("OFFSET/FETCH routing never bypasses named security/audit queries", async (
   const calls = [];
   const window = {
     DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlPolicy: sqlPolicy,
     DevLensSqlEngine: {
+      parse: sqlEngine.parse,
+      tokenize: sqlEngine.tokenize,
       plan: () => ({ hasOffset: true, table: "systemuserroles", joins: [], columns: [{ column: "systemuserid" }], offset: 0, fetch: 5, alias: "sur" })
     },
     D365AnalyzerApi: {
@@ -284,6 +296,7 @@ test("single Execute does not fall back on authorization or generic provider err
   const calls = [];
   const window = {
     DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlPolicy: sqlPolicy,
     D365AnalyzerApi: {
       send: async action => {
         calls.push(action);
@@ -309,6 +322,7 @@ test("single Execute never falls back for timeout, transport, throttling, metada
     const calls = [];
     const window = {
       DevLensSqlResultNormalizer: resultNormalizer,
+      DevLensSqlPolicy: sqlPolicy,
       D365AnalyzerApi: {
         send: async action => {
           calls.push(action);
@@ -335,6 +349,7 @@ test("typed capability responses never reroute named security/audit queries", as
   const calls = [];
   const window = {
     DevLensSqlResultNormalizer: resultNormalizer,
+    DevLensSqlPolicy: sqlPolicy,
     D365AnalyzerApi: {
       send: async action => {
         calls.push(action);
