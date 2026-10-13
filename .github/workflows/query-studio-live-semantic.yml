@@ -1,0 +1,64 @@
+name: Query Studio Live Dataverse Semantic Verification
+
+on:
+  push:
+    branches:
+      - work/query-studio-runtime-boundary
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-semantic-matrix:
+    name: Read-only live Dataverse semantic matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
+      DATAVERSE_TENANT_ID: ${{ secrets.DATAVERSE_TENANT_ID }}
+      DATAVERSE_CLIENT_ID: ${{ secrets.DATAVERSE_CLIENT_ID }}
+      DATAVERSE_CLIENT_SECRET: ${{ secrets.DATAVERSE_CLIENT_SECRET }}
+    steps:
+      - name: Check out tested revision
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Validate live environment configuration
+        run: |
+          node --input-type=module -e '
+            const keys = ["DATAVERSE_URL", "DATAVERSE_TENANT_ID", "DATAVERSE_CLIENT_ID", "DATAVERSE_CLIENT_SECRET"];
+            const missing = keys.filter(key => !process.env[key]);
+            if (missing.length) {
+              console.error("Missing required GitHub Actions secrets: " + missing.join(", "));
+              process.exit(1);
+            }
+            const url = new URL(process.env.DATAVERSE_URL);
+            if (url.protocol !== "https:" || !/\\.crm(?:\\d+)?\\.dynamics\\.com$|\\.crm\\.microsoftdynamics\\.us$|\\.crm\\.dynamics\\.cn$/i.test(url.hostname)) {
+              console.error("DATAVERSE_URL must be an HTTPS Dataverse organization URL.");
+              process.exit(1);
+            }
+            console.log("Required secret names are configured; secret values are not printed.");
+          '
+
+      - name: Run read-only live semantic matrix
+        run: node tests/query-studio/live-semantic-matrix.mjs
+
+      - name: Publish redacted verification checkpoint
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Query Studio live verification"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Result: **$JOB_STATUS**"
+            echo "- Scope: read-only Dataverse semantic matrix"
+            echo "- No credential values or row values are included in this summary."
+            echo "- Persistent security/audit mutation tests were not run."
+          } >> "$GITHUB_STEP_SUMMARY"
