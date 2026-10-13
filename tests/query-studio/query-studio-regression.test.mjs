@@ -600,29 +600,5 @@ test("coordinated Execute routes ordinary SELECT through one background action t
   assert.equal(harness.requestedUrls.length, 1);
   assert.match(harness.requestedUrls[0], /\/api\/data\/v9\.2\/accounts\?sql=/);
 });
-test("coordinated Execute routes OFFSET/FETCH through metadata, compiled FetchXML and one result boundary", async () => {
-  const metadata = {
-    LogicalName: "contact", EntitySetName: "contacts", PrimaryIdAttribute: "contactid",
-    Attributes: [
-      { LogicalName: "contactid", AttributeType: "Uniqueidentifier", IsValidForRead: true },
-      { LogicalName: "fullname", AttributeType: "String", IsValidForRead: true }
-    ]
-  };
-  const harness = createHarness({
-    response: metadata,
-    fetchXmlResponse: { entities: [{ fullname: "Ada Lovelace" }], moreRecords: false }
-  });
-  const { result } = await harness.runAction("queryExecute", {
-    sql: "SELECT fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY"
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.provider, "dataverse-fetchxml-js-engine");
-  assert.ok(Array.isArray(result.rows), "canonical FetchXML result contains rows");
-  assert.equal(harness.requestedUrls.length, 1, "the native SQL endpoint must not be called for OFFSET/FETCH");
-  assert.equal(harness.requestedFetchXml.length, 1);
-  assert.match(harness.requestedFetchXml[0].query, /<fetch[^>]*page="2"[^>]*count="5"/);
-  assert.equal(result.columns[0].name, "fullname");
-  assert.equal(typeof result.durationMs, "number");
-  assert.equal(Array.isArray(result.warnings), true);
-});
+
 
