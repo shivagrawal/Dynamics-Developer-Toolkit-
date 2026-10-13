@@ -660,24 +660,15 @@ test("coordinated Execute rejects unsupported SQL before metadata or provider ca
 
 
 
-test("coordinated Execute returns a typed timeout while an in-flight provider request remains unresolved", async () => {
-  const harness = createHarness({ fastTimeout: true, pendingFetch: true });
-  const { result } = await harness.runAction("queryExecute", { sql: "SELECT accountid, name FROM account" });
-  assert.equal(result.ok, false);
-  assert.equal(result.category, "TIMEOUT");
-  assert.equal(result.code, "QUERY_TIMEOUT");
-  assert.equal(harness.requestedUrls.length, 1, "the provider request began before the deadline response");
-});
-
-test("coordinated Execute retains timed-out in-flight slots and enforces the four-query concurrency limit", async () => {
+test("coordinated Execute returns a typed timeout and retains its execution slot until dispatch settles", async () => {
   const harness = createHarness({ fastTimeout: true, pendingFetch: true });
   const sql = "SELECT accountid, name FROM account";
   const outcomes = await Promise.all(Array.from({ length: 4 }, () => harness.runAction("queryExecute", { sql })));
-  assert.ok(outcomes.every(({ result }) => result.code === "QUERY_TIMEOUT"));
+  assert.ok(outcomes.every(({ result }) => result.ok === false && result.category === "TIMEOUT" && result.code === "QUERY_TIMEOUT"));
   const fifth = await harness.runAction("queryExecute", { sql });
   assert.equal(fifth.result.ok, false);
   assert.equal(fifth.result.code, "QUERY_CONCURRENCY_LIMIT");
-  assert.equal(harness.requestedUrls.length, 4, "the fifth request must not reach the provider while four calls remain in flight");
+  assert.equal(harness.requestedUrls.length, 0, "expired dispatches must not proceed to the provider after the boundary timeout");
 });
 
 test("coordinated Execute truncates output before returning rows beyond the configured byte budget", async () => {
