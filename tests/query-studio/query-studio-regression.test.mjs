@@ -17,7 +17,7 @@ const coordinatorSource = fs.readFileSync(coordinatorPath, "utf8");
 const resultNormalizerSource = fs.readFileSync(resultNormalizerPath, "utf8");
 const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
-function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPages, metadataError, fetchXmlResponse } = {}) {
+function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPages, metadataError, fetchXmlResponse, schemaResponse } = {}) {
   let messageListener;
   let requestedUrl;
   const requestedUrls = [];
@@ -65,6 +65,10 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPage
     fetch: async (url) => {
       requestedUrl = String(url);
       requestedUrls.push(String(url));
+      if (String(url).includes("EntityDefinitions(LogicalName=")) {
+        const body = schemaResponse || { LogicalName: "contact", EntitySetName: "contacts", PrimaryIdAttribute: "contactid", PrimaryNameAttribute: "fullname", Attributes: [{ LogicalName: "contactid", AttributeType: "Uniqueidentifier", IsValidForRead: true }, { LogicalName: "fullname", AttributeType: "String", IsValidForRead: true }] };
+        return { ok: true, status: 200, statusText: "OK", json: async () => body };
+      }
       if (fetchResponse) return fetchResponse;
       if (fetchPages) {
         const page = fetchPages[fetchPageIndex++];
@@ -601,4 +605,50 @@ test("coordinated Execute routes ordinary SELECT through one background action t
   assert.match(harness.requestedUrls[0], /\/api\/data\/v9\.2\/accounts\?sql=/);
 });
 
+
+
+test("coordinated Execute sends OFFSET/FETCH to bounded FetchXML and projects its rows", async () => {
+  const harness = createHarness({
+    fetchXmlResponse: { entities: [
+      { contactid: "contact-5", fullname: "Contact Five" },
+      { contactid: "contact-6", fullname: "Contact Six" },
+      { contactid: "contact-7", fullname: "Contact Seven" },
+      { contactid: "contact-8", fullname: "Contact Eight" },
+      { contactid: "contact-9", fullname: "Contact Nine" }
+    ] }
+  });
+  const { result } = await harness.runAction("queryExecute", {
+    sql: "SELECT contactid, fullname FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY"
+  });
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(Array.from(result.columns, column => typeof column === "string" ? column : column.name), ["contactid", "fullname"]);
+  assert.equal(result.rows.length, 5);
+  assert.equal(result.rows[0].contactid, "contact-5");
+  assert.equal(result.rows[4].contactid, "contact-9");
+  assert.equal(harness.requestedFetchXml.length, 1, "bounded FetchXML provider called exactly once");
+  assert.match(harness.requestedFetchXml[0].query, /count="5"/);
+  assert.match(harness.requestedFetchXml[0].query, /page="2"/);
+  assert.equal(harness.requestedUrls.some(url => /\/api\/data\/v9\.2\/contacts\?sql=/.test(url)), false, "native SQL provider must not be called");
+});
+
+test("coordinated Execute fails closed on metadata errors before FetchXML or native provider invocation", async () => {
+  const harness = createHarness({ metadataError: "metadata permission denied" });
+  const { result } = await harness.runAction("queryExecute", {
+    sql: "SELECT contactid FROM contact ORDER BY contactid OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY"
+  });
+  assert.equal(result.ok, false);
+  assert.ok(["METADATA", "INTERNAL"].includes(result.code), "metadata failure should remain a typed error");
+  assert.equal(harness.requestedFetchXml.length, 0);
+  assert.equal(harness.requestedUrls.some(url => /\/api\/data\/v9\.2\/contacts\?sql=/.test(url)), false);
+});
+
+test("coordinated Execute rejects unsupported SQL before metadata or provider calls", async () => {
+  const harness = createHarness();
+  const { result } = await harness.runAction("queryExecute", {
+    sql: "SELECT contactid FROM contact UNION SELECT accountid FROM account"
+  });
+  assert.equal(result.ok, false);
+  assert.equal(harness.requestedUrls.length, 0);
+  assert.equal(harness.requestedFetchXml.length, 0);
+});
 
