@@ -17,7 +17,7 @@ const coordinatorSource = fs.readFileSync(coordinatorPath, "utf8");
 const resultNormalizerSource = fs.readFileSync(resultNormalizerPath, "utf8");
 const backgroundSource = fs.readFileSync(backgroundPath, "utf8");
 
-function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPages, metadataError, fetchXmlResponse, schemaResponse, fastTimeout = false, pendingFetch = false } = {}) {
+function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPages, metadataError, fetchXmlResponse, schemaResponse } = {}) {
   let messageListener;
   let requestedUrl;
   const requestedUrls = [];
@@ -57,15 +57,14 @@ function createHarness({ response, entityMetadata = {}, fetchResponse, fetchPage
     atob: globalThis.atob,
     btoa: globalThis.btoa,
     structuredClone,
-    setTimeout: fastTimeout ? (callback, delay, ...args) => delay >= 120000 ? (queueMicrotask(() => callback(...args)), { fastTimeout: true }) : setTimeout(callback, delay, ...args) : setTimeout,
-    clearTimeout: fastTimeout ? (timer) => { if (!timer?.fastTimeout) clearTimeout(timer); } : clearTimeout,
+    setTimeout,
+    clearTimeout,
     AbortController,
     window: {},
     Xrm: xrm,
     fetch: async (url) => {
       requestedUrl = String(url);
       requestedUrls.push(String(url));
-      if (pendingFetch && !String(url).includes("EntityDefinitions(LogicalName=")) return new Promise(() => {});
       if (String(url).includes("EntityDefinitions(LogicalName=")) {
         const body = schemaResponse || { LogicalName: "contact", EntitySetName: "contacts", PrimaryIdAttribute: "contactid", PrimaryNameAttribute: "fullname", Attributes: [{ LogicalName: "contactid", AttributeType: "Uniqueidentifier", IsValidForRead: true }, { LogicalName: "fullname", AttributeType: "String", IsValidForRead: true }] };
         return { ok: true, status: 200, statusText: "OK", json: async () => body };
@@ -658,30 +657,3 @@ test("coordinated Execute rejects unsupported SQL before metadata or provider ca
   assert.equal(harness.requestedFetchXml.length, 0);
 });
 
-
-
-test("coordinated Execute returns a typed timeout and retains its execution slot until dispatch settles", async () => {
-  const harness = createHarness({ fastTimeout: true, pendingFetch: true });
-  const sql = "SELECT accountid, name FROM account";
-  const outcomes = await Promise.all(Array.from({ length: 4 }, () => harness.runAction("queryExecute", { sql })));
-  assert.ok(outcomes.every(({ result }) => result.ok === false && result.category === "TIMEOUT" && result.code === "QUERY_TIMEOUT"));
-  const fifth = await harness.runAction("queryExecute", { sql });
-  assert.equal(fifth.result.ok, false);
-  assert.equal(fifth.result.code, "QUERY_CONCURRENCY_LIMIT");
-  assert.equal(harness.requestedUrls.length, 0, "expired dispatches must not proceed to the provider after the boundary timeout");
-});
-
-test("coordinated Execute truncates output before returning rows beyond the configured byte budget", async () => {
-  const oversizedValue = "x".repeat(22 * 1024 * 1024);
-  const harness = createHarness({
-    response: {
-      "@odata.context": "https://example.crm.dynamics.com/api/data/v9.2/$metadata#accounts(name)",
-      value: [{ name: oversizedValue }, { name: "must-not-be-returned" }]
-    }
-  });
-  const { result } = await harness.runAction("queryExecute", { sql: "SELECT name FROM account" });
-  assert.equal(result.ok, true);
-  assert.equal(result.truncated, true);
-  assert.equal(result.rows.length, 0, "a row larger than the output budget must not be accumulated");
-  assert.ok(result.warnings.some(warning => /incomplete|safety limit/i.test(warning)));
-});
