@@ -421,11 +421,8 @@
       if (!api?.send) throw new Error("DevLens Dataverse bridge is not available. Reload the Dynamics tab.");
       const response = await api.send("querySql", { sql: state.sql });
       if (!response?.ok) {
-        if (response?.code === "PROVIDER_CAPABILITY_REJECTION" && !isSecurityAuditQuery(state.sql)) {
-          state.running = false;
-          await executeEngine();
-          return;
-        }
+        // Route choice is owned by the background coordinator. Do not retry a
+        // failed native request through a second provider from the UI.
         const safeError = window.DevLensSqlResultNormalizer?.normalizeError?.(response || { code: "INTERNAL" });
         throw Object.assign(new Error(safeError?.message || response?.error || "Query failed."), { code: safeError?.code || response?.code, category: safeError?.category });
       }
