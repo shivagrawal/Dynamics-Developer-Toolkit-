@@ -53,14 +53,15 @@ function createHost() {
 
 function installRouteDecisionMock(window) {
   const api = window.D365AnalyzerApi;
-  if (!api || typeof api.send !== "function") return;
+  if (!api || typeof api.send !== "function" || api.__routeDecisionMockInstalled) return;
+  api.__routeDecisionMockInstalled = true;
   const send = api.send.bind(api);
   api.send = async (action, payload) => {
     if (action === "queryRouteDecision") {
       const sql = String(payload?.sql || "");
-      const securitySurface = /\\b(?:audit|systemuserroles|roleprivileges|privilegeobjecttypecodes|systemuser|businessunit)\\b/i.test(sql);
+      const securitySurface = /\b(?:audit|systemuserroles|roleprivileges|privilegeobjecttypecodes|systemuser|businessunit)\b/i.test(sql);
       if (securitySurface) return { ok: true, route: "security-audit", plan: null };
-      if (/\\bOFFSET\\b/i.test(sql)) {
+      if (/\bOFFSET\b/i.test(sql)) {
         const plan = window.DevLensSqlEngine?.plan?.(sql) || {
           table: "contact", joins: [], columns: [{ column: "fullname" }],
           offset: 5, fetch: 5, hasOffset: true, alias: "c", orderBy: []
