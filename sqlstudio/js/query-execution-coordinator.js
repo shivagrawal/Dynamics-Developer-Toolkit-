@@ -83,6 +83,7 @@
       return normalize ? normalize(failed, { durationMs: Date.now() - startedAt }) : failed;
     }
     let outcome;
+    let executedRoute = decision.route;
     try {
       outcome = await provider({ sql, plan: decision.plan || null, route: decision.route, requestId: request.requestId || null, deadlineAt: request.deadlineAt || null });
     } catch (error) {
@@ -95,6 +96,7 @@
       const alternate = decision.alternateRoute;
       if (fallbackEligible(outcome, decision, alternate) && typeof providers[alternate] === "function") {
         try {
+          executedRoute = alternate;
           outcome = await providers[alternate]({ sql, plan: decision.plan || null, route: alternate, requestId: request.requestId || null, deadlineAt: request.deadlineAt || null, fallbackFrom: decision.route });
         } catch (error) {
           outcome = errorOutcome(error?.code || "INTERNAL", error?.message, alternate);
@@ -104,9 +106,9 @@
       }
     }
     if (outcome.ok === true) {
-      outcome = { ...outcome, provider: decision.route, fallbackEligible: false };
+      outcome = { ...outcome, provider: executedRoute, fallbackEligible: false };
     } else {
-      outcome = { ...outcome, provider: outcome.provider || decision.route, fallbackEligible: false };
+      outcome = { ...outcome, provider: outcome.provider || executedRoute, fallbackEligible: false };
     }
     return normalize ? normalize(outcome, { durationMs: Date.now() - startedAt, provider: outcome.provider }) : outcome;
   }
