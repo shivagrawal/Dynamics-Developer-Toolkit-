@@ -42,6 +42,12 @@
     if (plan?.hasOffset === true || (Number.isInteger(plan?.offset) && plan.offset > 0) || plan?.fetch != null) {
       return { ok: true, route: "fetchxml", plan, reason: "bounded-offset-fetch-semantics" };
     }
+    // Joined SQL can be mis-resolved by the Dataverse native SQL endpoint when a
+    // joined projection or predicate is mapped to the base entity. Compile joins
+    // through the validated FetchXML planner so attributes stay scoped to aliases.
+    if (Array.isArray(plan?.joins) && plan.joins.length > 0) {
+      return { ok: true, route: "fetchxml", plan, reason: "joined-query-alias-semantics" };
+    }
     return { ok: true, route: "native-sql", plan, reason: "native-provider-default" };
   }
 
