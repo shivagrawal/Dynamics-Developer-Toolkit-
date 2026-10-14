@@ -131,6 +131,31 @@ try {
   assert.equal(outcome.rowCount, 1, "Seeded Account row was not returned by the read-only SQL query.");
   const returnedName = (await page.locator(".ss-results tbody tr").first().innerText()).toLowerCase();
   assert.ok(returnedName.includes(seed.accountName.toLowerCase()), "Query result did not match the seeded Account row.");
+  // Exercise the relationship compiler/provider using the Account and Contact created above.
+  // Reuse the editor and execute control so this traverses the same UI/background path.
+  await editor.fill(
+    "SELECT TOP 1 c.contactid, c.fullname, a.name FROM contact c " +
+    "INNER JOIN account a ON c.parentcustomerid = a.accountid " +
+    "WHERE a.name = '" + seed.accountName + "'"
+  );
+  await page.locator('[data-act="execute"]').click();
+  await page.waitForFunction(({ accountName }) => {
+    const error = document.querySelector(".ss-error");
+    const rows = document.querySelector(".ss-results tbody");
+    return Boolean(error?.textContent?.trim()) ||
+      Boolean(rows?.textContent?.toLowerCase().includes(accountName.toLowerCase()));
+  }, { accountName: seed.accountName }, { timeout: 120000 });
+  const joinError = await errorElement.count() > 0 ? (await errorElement.innerText()).slice(0, 500) : "";
+  assert.equal(joinError, "", "Authenticated browser-host relationship query failed: " + joinError);
+  const joinColumns = (await page.locator(".ss-results thead th").allTextContents()).map(value => value.toLowerCase());
+  const joinRows = await page.locator(".ss-results tbody tr").count();
+  const joinText = (await page.locator(".ss-results tbody").innerText()).toLowerCase();
+  assert.ok(joinColumns.some(column => column === "contactid"), "Relationship result did not contain contactid.");
+  assert.ok(joinColumns.some(column => column === "fullname"), "Relationship result did not contain fullname.");
+  assert.ok(joinColumns.some(column => column === "name"), "Relationship result did not contain Account name.");
+  assert.equal(joinRows, 1, "Relationship query did not return exactly the seeded Contact.");
+  assert.ok(joinText.includes(seed.accountName.toLowerCase()), "Relationship result did not include the seeded Account.");
+  assert.ok(joinText.includes("dtt query studio smoke"), "Relationship result did not include the seeded Contact.");
   // Dynamics can emit unrelated platform-level page errors (for example, prediction UI
   // initialization) while the query path succeeds. Preserve these as diagnostics without
   // making them a false-negative for the independently asserted SQL result.
@@ -147,8 +172,21 @@ try {
     pageErrors: pageErrors
   }));
   } finally {
-    if (seed.contactId) await page.evaluate(async id => Xrm.WebApi.deleteRecord("contact", id).catch(() => {}), seed.contactId);
-    if (seed.accountId) await page.evaluate(async id => Xrm.WebApi.deleteRecord("account", id).catch(() => {}), seed.accountId);
+    // Delete dependent records first and fail the run if cleanup does not complete.
+    if (seed.contactId) await page.evaluate(async id => Xrm.WebApi.deleteRecord("contact", id), seed.contactId);
+    if (seed.accountId) await page.evaluate(async id => Xrm.WebApi.deleteRecord("account", id), seed.accountId);
+    const remaining = await page.evaluate(async ({ contactId, accountId }) => {
+      const exists = async (entity, id) => {
+        try { await Xrm.WebApi.retrieveRecord(entity, id); return true; }
+        catch (error) {
+          if (error?.status === 404 || error?.statusCode === 404) return false;
+          throw error;
+        }
+      };
+      return { contact: contactId ? await exists("contact", contactId) : false, account: accountId ? await exists("account", accountId) : false };
+    }, { contactId: seed.contactId, accountId: seed.accountId });
+    assert.equal(remaining.contact, false, "Smoke-test Contact was not cleaned up.");
+    assert.equal(remaining.account, false, "Smoke-test Account was not cleaned up.");
   }
 } finally {
   if (context) await context.close();
