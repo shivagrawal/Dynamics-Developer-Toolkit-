@@ -43,6 +43,10 @@ jobs:
           if (-not (& $allowed $base) -or -not (& $allowed $app) -or $base.GetLeftPart([System.UriPartial]::Authority) -ne $app.GetLeftPart([System.UriPartial]::Authority)) { throw "DATAVERSE_URL and DYNAMICS_APP_URL must be HTTPS URLs on the same Dataverse organization." }
           Write-Host "Browser-host configuration validated. Authentication material is not printed."
 
+      - name: Fast syntax validation before browser startup
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: node --check tests/query-studio/browser-host-smoke.mjs
+
       - name: Install Playwright and Chromium
         shell: powershell -ExecutionPolicy Bypass -File {0}
         run: |
