@@ -60,6 +60,9 @@ try {
   const clientUrl = await page.evaluate(() => window.Xrm.Utility.getGlobalContext().getClientUrl());
   assert.equal(safeOrigin(clientUrl), appOrigin, "Xrm reports a different Dataverse organization.");
 
+  // DevLens is intentionally hidden until its toggle command is invoked.
+  // Use the extension keyboard command to open its injected panel before locating tabs.
+  await page.keyboard.press("Alt+p");
   const sqlStudioTab = page.locator('[data-view="sqlstudio"]');
   await sqlStudioTab.waitFor({ state: "visible", timeout: 45000 });
   await sqlStudioTab.click();
