@@ -1,7 +1,7 @@
 import readline from "node:readline/promises";
+import fs from "node:fs";
 import { stdin, stderr } from "node:process";
 import { chromium } from "playwright";
-import { gzipSync } from "node:zlib";
 
 const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\/+$/, "");
 const appUrl = process.env.DYNAMICS_APP_URL || (baseUrl ? baseUrl + "/main.aspx" : "");
@@ -47,16 +47,13 @@ try {
       catch { return false; }
     })
   };
-  const encoded = gzipSync(Buffer.from(JSON.stringify(state), "utf8")).toString("base64");
-  console.error(`Filtered session state: ${state.cookies.length} organization-related cookies, ${state.origins.length} origin(s), ${encoded.length} encoded characters.`);
-  if (encoded.length > 45000) {
-    console.error("Warning: the filtered state may still exceed GitHub's secret-size limit. No session data was printed.");
-  }
-  // This is a bearer session snapshot. Do not paste it into chat, source control, or logs.
-  // Output is gzip-compressed before Base64 encoding to reduce GitHub secret size.
-  // Pipe stdout directly to a clipboard/secret-management command instead.
-  process.stdout.write(encoded + "\n");
-  console.error("Session state captured. Treat the emitted value as a password; it may expire and must be rotated.");
+  const outputPath = process.env.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH;
+  if (!outputPath) throw new Error("Set DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH to a protected path outside the repository, for example D:\\query-studio-browser-state.json.");
+  // This file contains bearer session cookies. Keep it outside source control and restrict
+  // filesystem access to the Windows account that runs the self-hosted runner.
+  fs.writeFileSync(outputPath, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
+  console.error(`Filtered session state saved locally: ${state.cookies.length} organization-related cookies, ${state.origins.length} origin(s).`);
+  console.error("Session state was not printed. Treat the file as a password; it may expire and must be deleted when no longer needed.");
 } finally {
   await browser.close();
 }
