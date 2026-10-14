@@ -1741,8 +1741,185 @@ function isSupportedSecuritySqlShape(sql) {
   }
   return false;
 }
+
+async function executeQueryStudioCoordinated(sql, sender, executionPayload) {
+  const coordinator = globalThis.DevLensQueryExecutionCoordinator;
+  const engine = globalThis.DevLensSqlEngine;
+  const policy = globalThis.DevLensSqlPolicy;
+  if (!coordinator?.decide || !engine || !policy) {
+    return { ok: false, code: "POLICY_UNAVAILABLE", error: "The read-only query coordinator is unavailable; execution was stopped." };
+  }
+  const securityCandidate = isSecuritySqlCandidate(sql);
+  const supportedSecurityShape = isSupportedSecuritySqlShape(sql);
+  if (securityCandidate && !supportedSecurityShape) {
+    return { ok: false, code: "UNSUPPORTED_SECURITY_SQL_SHAPE", error: "This security/audit SQL query does not match a supported read-only query shape." };
+  }
+  const specializedSecurity = securityCandidate && supportedSecurityShape && typeof devLensSecurityAuditBridge === "function";
+  const decision = coordinator.decide(sql, engine, policy, { specializedSecurity });
+  if (!decision?.ok) return { ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only SQL policy rejected the query." };
+
+  const invokePage = async (action, payload, security = false) => {
+    const results = await chrome.scripting.executeScript({
+      // The authenticated smoke test and the supported Dynamics app surface expose
+      // Xrm in the top-level main.aspx frame. Avoid attempting injection into
+      // unrelated cross-origin child frames, which can fail the entire query route.
+      target: { tabId: sender.tab.id },
+      world: "MAIN",
+      func: security ? devLensSecurityAuditBridge : pageBridge,
+      args: security ? ["sqlQuery", { ...executionPayload, ...payload }] : [action, { ...executionPayload, ...payload }]
+    });
+    return results.find(item => item.result?.ok)?.result ||
+      results.find(item => item.result?.error || item.result?.code)?.result ||
+      { ok: false, code: "TRANSPORT", error: "No Dynamics form frame returned a query result." };
+  };
+
+  if (decision.route === "native-sql") {
+    return invokePage("querySql", { sql });
+  }
+  if (decision.route === "security-audit") {
+    return invokePage("sqlQuery", { sql }, true);
+  }
+  if (decision.route !== "fetchxml" || !decision.plan) {
+    return { ok: false, code: "ROUTE_UNAVAILABLE", error: "The coordinator selected an unsupported execution route." };
+  }
+
+  const names = [...new Set([decision.plan.table, ...(decision.plan.joins || []).map(join => join.table)])];
+  const metadata = { entities: {} };
+  for (const logicalName of names) {
+    const response = await invokePage("schemaTable", { logicalName });
+    if (!response?.ok || !response.data) {
+      return { ok: false, code: response?.code || "METADATA", error: response?.error || "Dataverse metadata could not be retrieved or validated." };
+    }
+    const data = response.data;
+    metadata.entities[logicalName] = {
+      logicalName: data.logicalName,
+      entitySetName: data.entitySetName,
+      primaryIdAttribute: data.primaryIdAttribute,
+      columns: (data.columns || []).map(column => ({
+        logicalName: column.logicalName,
+        attributeType: column.attributeType,
+        queryable: column.validForRead !== false && String(column.attributeType || "").toLowerCase() !== "virtual"
+      }))
+    };
+  }
+  let compiled;
+  try {
+    compiled = engine.compile(decision.plan, metadata);
+  } catch (error) {
+    return { ok: false, code: error?.code || "SQL_UNSUPPORTED", error: error?.message || "The SQL query could not be compiled safely." };
+  }
+  const xmlPolicy = policy.validateFetchXml(compiled.fetchXml, decision.plan.table);
+  if (!xmlPolicy?.ok) return { ok: false, code: xmlPolicy.code || "READ_ONLY_POLICY", error: xmlPolicy.error || "Compiled FetchXML was rejected by the read-only policy." };
+  const response = await invokePage("queryFetchXml", {
+    tableName: decision.plan.table,
+    fetchXml: compiled.fetchXml,
+    offset: decision.plan.offset,
+    limit: decision.plan.fetch
+  });
+  if (!response?.ok) return response;
+  const projections = compiled.resultColumns || (decision.plan.columns.some(column => column.star)
+    ? metadata.entities[decision.plan.table].columns.filter(column => column.queryable).map(column => ({ label: column.logicalName, key: column.logicalName }))
+    : decision.plan.columns.map(column => {
+        const label = column.alias || (column.tableAlias ? column.tableAlias + "." : "") + column.column;
+        const key = column.alias || (column.tableAlias && column.tableAlias.toLowerCase() !== decision.plan.alias.toLowerCase() ? column.tableAlias + "_" + column.column : column.column);
+        return { label, key };
+      }));
+  const rows = (response.rows || []).map(row => {
+    const output = {};
+    for (const projection of projections) {
+      const key = Object.keys(row).find(candidate => candidate.toLowerCase() === projection.key.toLowerCase());
+      const labelKey = Object.keys(row).find(candidate => candidate.toLowerCase() === projection.label.toLowerCase());
+      output[projection.label] = (key ? row[key] : undefined) ?? (labelKey ? row[labelKey] : undefined) ?? null;
+    }
+    return output;
+  });
+  return {
+    ...response,
+    columns: projections.map(projection => ({ name: projection.label, label: projection.label, sourceKey: projection.label })),
+    rows,
+    provider: response.provider || "dataverse-fetchxml-js-engine",
+    truncated: response.truncated === true || response.moreRecords === true
+  };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type !== "DEVLENS_ACTION") return;
+  if (message.action === "queryRouteDecision") {
+    const sql = message.payload?.sql;
+    const securityCandidate = isSecuritySqlCandidate(sql);
+    const supportedSecurityShape = isSupportedSecuritySqlShape(sql);
+    if (securityCandidate && !supportedSecurityShape) {
+      reply({ ok: false, code: "UNSUPPORTED_SECURITY_SQL_SHAPE", error: "This security/audit SQL query does not match a supported read-only query shape." });
+      return;
+    }
+    const specializedSecurity = securityCandidate && supportedSecurityShape && typeof devLensSecurityAuditBridge === "function";
+    const coordinator = globalThis.DevLensQueryExecutionCoordinator;
+    if (!coordinator?.decide) {
+      reply({ ok: false, code: "POLICY_UNAVAILABLE", error: "The query execution coordinator is unavailable; execution was stopped." });
+      return;
+    }
+    const decision = coordinator.decide(sql, globalThis.DevLensSqlEngine, globalThis.DevLensSqlPolicy, { specializedSecurity });
+    if (!decision?.ok) {
+      reply({ ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only SQL policy rejected the query." });
+      return;
+    }
+    reply({ ok: true, route: decision.route, reason: decision.reason, plan: decision.plan || null });
+    return;
+  }
+  if (message?.type !== "DEVLENS_ACTION") return;
+  if (message.action === "queryExecute") {
+    const sql = message.payload?.sql;
+    if (typeof sql !== "string" || !sql.trim()) {
+      reply({ ok: false, code: "SQL_SYNTAX", error: "Enter a SQL SELECT query." });
+      return;
+    }
+    if (!sender?.tab?.id) {
+      reply({ ok: false, code: "TRANSPORT", error: "Query Studio requires an active Dynamics tab." });
+      return;
+    }
+    if (devLensActiveQueryExecutions >= DEVLENS_QUERY_MAX_CONCURRENT) {
+      reply({ ok: false, code: "QUERY_CONCURRENCY_LIMIT", error: "Query Studio already has four queries executing. Wait for one to finish before starting another." });
+      return;
+    }
+    devLensActiveQueryExecutions++;
+    const startedAt = Date.now();
+    const executionPayload = { __devlensExecution: { deadlineAt: startedAt + DEVLENS_QUERY_DEADLINE_MS, maxOutputBytes: DEVLENS_QUERY_MAX_OUTPUT_BYTES } };
+    let replied = false;
+    const normalizeResponse = result => {
+      const normalizer = globalThis.DevLensSqlResultNormalizer;
+      if (!normalizer?.normalizeOutcome) {
+        return { ok: false, code: "POLICY_UNAVAILABLE", error: "The query result contract is unavailable; execution was stopped." };
+      }
+      try {
+        return normalizer.normalizeOutcome(result, { durationMs: Math.max(0, Date.now() - startedAt) });
+      } catch {
+        return normalizer.normalizeError({ code: "INTERNAL" });
+      }
+    };
+    const timer = setTimeout(() => {
+      if (replied) return;
+      replied = true;
+      reply(normalizeResponse({ ok: false, code: "QUERY_TIMEOUT", error: "Query Studio exceeded its 120-second deadline. An in-flight Dataverse call may continue until it settles." }));
+    }, DEVLENS_QUERY_DEADLINE_MS);
+    const replyOnce = result => {
+      if (replied) return;
+      replied = true;
+      clearTimeout(timer);
+      reply(normalizeResponse(result));
+    };
+    executeQueryStudioCoordinated(sql, sender, executionPayload)
+      .then(replyOnce)
+      .catch(error => replyOnce({
+        ok: false,
+        code: error?.code === "QUERY_TIMEOUT" ? "QUERY_TIMEOUT" : "TRANSPORT",
+        error: error?.code === "QUERY_TIMEOUT" ? "Query Studio exceeded its 120-second deadline." : "The coordinated Dataverse query could not be completed."
+      }))
+      .finally(() => {
+        clearTimeout(timer);
+        devLensActiveQueryExecutions = Math.max(0, devLensActiveQueryExecutions - 1);
+      });
+    return true;
+  }
   if (message.action === "querySql") {
     const securityCandidate = isSecuritySqlCandidate(message.payload?.sql);
     const supportedSecurityShape = isSupportedSecuritySqlShape(message.payload?.sql);
@@ -1753,9 +1930,22 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       return;
     }
     const specializedSecurity = securityCandidate && supportedSecurityShape && typeof devLensSecurityAuditBridge === "function";
-    const decision = globalThis.DevLensSqlPolicy?.evaluate(message.payload?.sql, globalThis.DevLensSqlEngine, { specializedSecurity });
+    const coordinator = globalThis.DevLensQueryExecutionCoordinator;
+    if (!coordinator?.decide) {
+      reply({ ok: false, code: "POLICY_UNAVAILABLE", error: "The query execution coordinator is unavailable; execution was stopped." });
+      return;
+    }
+    const decision = coordinator.decide(message.payload?.sql, globalThis.DevLensSqlEngine, globalThis.DevLensSqlPolicy, { specializedSecurity });
     if (!decision?.ok) {
       reply({ ok: false, code: decision?.code || "POLICY_UNAVAILABLE", error: decision?.error || "The read-only SQL policy is unavailable; execution was stopped." });
+      return;
+    }
+    if (decision.route === "fetchxml") {
+      reply({ ok: false, code: "ROUTE_REQUIRED", error: "This query requires the bounded FetchXML route. Query Studio must compile and execute the coordinator-approved plan instead of sending it to native SQL." });
+      return;
+    }
+    if (decision.route !== "native-sql" && decision.route !== "security-audit") {
+      reply({ ok: false, code: "ROUTE_UNAVAILABLE", error: "The coordinator selected a route that cannot be executed by this action." });
       return;
     }
   }

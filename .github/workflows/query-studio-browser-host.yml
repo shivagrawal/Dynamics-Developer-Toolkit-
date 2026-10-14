@@ -1,0 +1,74 @@
+name: Query Studio Authenticated Chromium Browser Host
+
+on:
+  push:
+    branches:
+      - work/query-studio-browser-host
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium-extension-host:
+    name: Authenticated Dynamics extension smoke test
+    runs-on: [self-hosted, Windows, X64, query-studio-browser]
+    timeout-minutes: 20
+    env:
+      DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
+      DYNAMICS_APP_URL: ${{ vars.DYNAMICS_APP_URL }}
+      DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH: ${{ vars.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH || 'D:\\query-studio-browser-state.json' }}
+      DYNAMICS_PLAYWRIGHT_PROFILE_PATH: ${{ vars.DYNAMICS_PLAYWRIGHT_PROFILE_PATH || 'D:\\query-studio-browser-profile' }}
+    steps:
+      - name: Check out tested revision
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Validate required browser-host configuration
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          if (-not $env:DATAVERSE_URL) { throw "Missing DATAVERSE_URL repository/environment secret." }
+          if (-not $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH) { $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH = "D:\query-studio-browser-state.json" }
+          if (-not $env:DYNAMICS_PLAYWRIGHT_PROFILE_PATH) { $env:DYNAMICS_PLAYWRIGHT_PROFILE_PATH = "D:\query-studio-browser-profile" }
+          if (-not (Test-Path -LiteralPath $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH -PathType Leaf)) { throw "The diagnostic storage-state file is missing. Run capture-browser-host-state.mjs as the runner account." }
+          if (-not (Test-Path -LiteralPath $env:DYNAMICS_PLAYWRIGHT_PROFILE_PATH -PathType Container)) { throw "The persistent Chromium profile is missing. Run capture-browser-host-state.mjs as the runner account." }
+          $base = [Uri]$env:DATAVERSE_URL
+          $appValue = if ($env:DYNAMICS_APP_URL) { $env:DYNAMICS_APP_URL } else { "$($base.GetLeftPart([System.UriPartial]::Authority))/main.aspx" }
+          $app = [Uri]$appValue
+          $allowed = { param($u) $u.Scheme -eq "https" -and ($u.Host -match '\.crm(\d+)?\.dynamics\.com$|\.crm\.microsoftdynamics\.us$|\.crm\.dynamics\.cn$') }
+          if (-not (& $allowed $base) -or -not (& $allowed $app) -or $base.GetLeftPart([System.UriPartial]::Authority) -ne $app.GetLeftPart([System.UriPartial]::Authority)) { throw "DATAVERSE_URL and DYNAMICS_APP_URL must be HTTPS URLs on the same Dataverse organization." }
+          Write-Host "Browser-host configuration validated. Authentication material is not printed."
+
+      - name: Fast syntax validation before browser startup
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: node --check tests/query-studio/browser-host-smoke.mjs
+
+      - name: Install Playwright and Chromium
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: |
+          npm install --no-save --no-package-lock playwright
+          npx playwright install chromium
+
+      - name: Run authenticated extension browser-host smoke test
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        run: node tests/query-studio/browser-host-smoke.mjs
+
+      - name: Publish redacted browser-host checkpoint
+        if: always()
+        shell: powershell -ExecutionPolicy Bypass -File {0}
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          @(
+            "## Query Studio browser-host verification"
+            "- Commit: $env:GITHUB_SHA"
+            "- Result: **$env:JOB_STATUS**"
+            "- Runner: self-hosted Windows Chromium using the runner-account persistent authenticated profile"
+            "- Scope: Query Studio UI, background queryExecute, bounded read-only SQL"
+            "- Authentication material and query result values are not included."
+            "- Persistent security/audit mutation tests were not run."
+          ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
