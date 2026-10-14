@@ -42,10 +42,19 @@
     if (plan?.hasOffset === true || (Number.isInteger(plan?.offset) && plan.offset > 0) || plan?.fetch != null) {
       return { ok: true, route: "fetchxml", plan, reason: "bounded-offset-fetch-semantics" };
     }
-    // Joined SQL can be mis-resolved by the Dataverse native SQL endpoint when a
-    // joined projection or predicate is mapped to the base entity. Compile joins
-    // through the validated FetchXML planner so attributes stay scoped to aliases.
-    if (Array.isArray(plan?.joins) && plan.joins.length > 0) {
+    // The Dataverse native SQL endpoint can resolve a joined-entity WHERE
+    // attribute against the base entity (e.g. a.name against Contact). Route only
+    // these queries through the validated FetchXML planner; projection-only joins
+    // retain their existing native SQL behavior for compatibility.
+    const joinedAliases = new Set((plan?.joins || []).map(join => String(join.alias).toLowerCase()));
+    const whereUsesJoinedAlias = node => {
+      if (!node || typeof node !== "object") return false;
+      if (node.type === "and" || node.type === "or") {
+        return whereUsesJoinedAlias(node.left) || whereUsesJoinedAlias(node.right);
+      }
+      return !!node.field?.tableAlias && joinedAliases.has(String(node.field.tableAlias).toLowerCase());
+    };
+    if (joinedAliases.size > 0 && whereUsesJoinedAlias(plan?.where)) {
       return { ok: true, route: "fetchxml", plan, reason: "joined-query-alias-semantics" };
     }
     return { ok: true, route: "native-sql", plan, reason: "native-provider-default" };
