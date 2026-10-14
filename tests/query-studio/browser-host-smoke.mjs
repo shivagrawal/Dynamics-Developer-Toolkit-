@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
 
 const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\/+$/, "");
 const appUrl = process.env.DYNAMICS_APP_URL || (baseUrl ? baseUrl + "/main.aspx" : "");
 const statePath = process.env.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH || "";
+const profilePath = process.env.DYNAMICS_PLAYWRIGHT_PROFILE_PATH ||
+  (statePath ? path.join(path.dirname(path.resolve(statePath)), "query-studio-browser-profile") : "");
 
 function safeOrigin(value) {
   const parsed = new URL(value);
@@ -17,24 +18,19 @@ function safeOrigin(value) {
 }
 
 assert.ok(baseUrl, "DATAVERSE_URL secret is required.");
-assert.ok(statePath, "DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH must point to a local Playwright storage-state JSON file.");
-assert.ok(fs.existsSync(statePath), "The configured local Playwright storage-state file does not exist.");
+assert.ok(statePath && fs.existsSync(statePath), "The diagnostic storage-state file is missing; run capture-browser-host-state.mjs first.");
+assert.ok(profilePath, "DYNAMICS_PLAYWRIGHT_PROFILE_PATH must point to the persistent Chromium profile directory.");
+assert.ok(fs.existsSync(profilePath), "The persistent Chromium profile is missing. Run capture-browser-host-state.mjs on this runner account first.");
 const appOrigin = safeOrigin(appUrl);
 assert.equal(appOrigin, safeOrigin(baseUrl), "DYNAMICS_APP_URL must use the same Dataverse origin as DATAVERSE_URL.");
+assert.equal(path.resolve(profilePath).startsWith(path.resolve(process.cwd()) + path.sep), false,
+  "The persistent browser profile must be outside the repository.");
 
-let storageState;
-try {
-  storageState = JSON.parse(fs.readFileSync(statePath, "utf8"));
-} catch {
-  throw new Error("The configured local Playwright storage-state file is not valid JSON. Re-capture it using the helper.");
-}
-assert.ok(Array.isArray(storageState.cookies), "Storage state must contain a cookies array.");
-assert.ok(Array.isArray(storageState.origins), "Storage state must contain an origins array.");
-
-const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "devlens-chromium-"));
 let context;
 try {
-  context = await chromium.launchPersistentContext(userDataDir, {
+  // Use the exact profile authenticated by the interactive capture helper. This
+  // preserves browser-managed auth/session state that storageState can omit.
+  context = await chromium.launchPersistentContext(path.resolve(profilePath), {
     headless: true,
     viewport: { width: 1440, height: 1000 },
     args: [
@@ -44,18 +40,6 @@ try {
       "--no-default-browser-check"
     ]
   });
-  if (storageState.cookies.length) await context.addCookies(storageState.cookies);
-  const localStorageByOrigin = Object.fromEntries(storageState.origins.map(item => [
-    item.origin,
-    (item.localStorage || []).map(entry => [entry.name, entry.value])
-  ]));
-  await context.addInitScript((entries) => {
-    const pairs = entries[location.origin];
-    if (!pairs || location.protocol !== "https:") return;
-    try {
-      for (const [key, value] of pairs) localStorage.setItem(key, value);
-    } catch { /* Storage may be unavailable on unrelated origins. */ }
-  }, localStorageByOrigin);
 
   const page = await context.newPage();
   const pageErrors = [];
@@ -63,9 +47,11 @@ try {
   await page.goto(appUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
   await page.waitForTimeout(2500);
 
-  assert.equal(new URL(page.url()).origin, appOrigin, "Navigation left the configured Dataverse organization.");
-  assert.doesNotMatch(page.url(), /login\.microsoftonline\.com|login\.windows\.net/i,
-    "Browser was redirected to sign-in; refresh the saved test-user storage state.");
+  const finalUrl = new URL(page.url());
+  assert.equal(finalUrl.origin, appOrigin,
+    finalUrl.hostname.includes("login.microsoftonline.com") || finalUrl.hostname.includes("login.windows.net")
+      ? "Persistent Chromium profile redirected to Microsoft sign-in. Re-run capture helper interactively under the same Windows account as the Actions runner."
+      : "Navigation left the configured Dataverse organization.");
   await page.waitForFunction(() => Boolean(window.Xrm?.Utility?.getGlobalContext && window.D365AnalyzerApi?.send && window.DevLensSqlStudioView), null, { timeout: 45000 });
 
   const host = await page.evaluate(() => {
@@ -94,7 +80,6 @@ try {
   const outcome = await page.evaluate(() => {
     const root = document.querySelector("#devlens-browser-host-smoke");
     return {
-      status: root?.querySelector(".ss-status")?.textContent?.slice(0, 200) || "",
       errorVisible: Boolean(root?.querySelector(".ss-error")),
       resultTableVisible: Boolean(root?.querySelector(".ss-results table")),
       columns: Array.from(root?.querySelectorAll(".ss-results thead th") || []).map(cell => cell.textContent),
@@ -109,7 +94,7 @@ try {
 
   console.log(JSON.stringify({
     result: "passed",
-    scope: "authenticated Chromium + unpacked extension + Query Studio UI + background queryExecute + Dataverse read-only SQL",
+    scope: "persistent authenticated Chromium profile + unpacked extension + Query Studio UI + background queryExecute + Dataverse read-only SQL",
     organization: appOrigin,
     query: "SELECT TOP 1 accountid FROM account",
     returnedRows: outcome.rowCount,
@@ -118,5 +103,4 @@ try {
   }));
 } finally {
   if (context) await context.close();
-  fs.rmSync(userDataDir, { recursive: true, force: true });
 }
