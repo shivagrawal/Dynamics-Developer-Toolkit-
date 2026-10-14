@@ -53,40 +53,29 @@ try {
     finalUrl.hostname.includes("login.microsoftonline.com") || finalUrl.hostname.includes("login.windows.net")
       ? "Persistent Chromium profile redirected to Microsoft sign-in. Re-run capture helper interactively under the same Windows account as the Actions runner."
       : "Navigation left the configured Dataverse organization.");
-  await page.waitForFunction(() => Boolean(window.Xrm?.Utility?.getGlobalContext && window.D365AnalyzerApi?.send && window.DevLensSqlStudioView), null, { timeout: 45000 });
+  // Xrm is a page-world API, but extension content scripts run in an isolated
+  // JavaScript world. Verify Xrm in page.evaluate and exercise DevLens through its
+  // actual injected UI instead of expecting extension globals on the page window.
+  await page.waitForFunction(() => Boolean(window.Xrm?.Utility?.getGlobalContext), null, { timeout: 45000 });
+  const clientUrl = await page.evaluate(() => window.Xrm.Utility.getGlobalContext().getClientUrl());
+  assert.equal(safeOrigin(clientUrl), appOrigin, "Xrm reports a different Dataverse organization.");
 
-  const host = await page.evaluate(() => {
-    const element = document.createElement("section");
-    element.id = "devlens-browser-host-smoke";
-    element.style.cssText = "position:fixed;inset:10px;z-index:2147483647;overflow:auto;background:#0f172a;padding:16px";
-    document.body.appendChild(element);
-    window.DevLensSqlStudioView.renderInto(element);
-    return {
-      clientUrl: window.Xrm.Utility.getGlobalContext().getClientUrl(),
-      bridgeReady: Boolean(window.D365AnalyzerApi?.send),
-      viewReady: Boolean(window.DevLensSqlStudioView?.isAvailable())
-    };
-  });
-  assert.equal(host.bridgeReady, true, "DevLens page-to-background bridge did not initialize.");
-  assert.equal(host.viewReady, true, "Query Studio view did not initialize.");
-  assert.equal(safeOrigin(host.clientUrl), appOrigin, "Xrm reports a different Dataverse organization.");
+  const sqlStudioTab = page.locator('[data-view="sqlstudio"]');
+  await sqlStudioTab.waitFor({ state: "visible", timeout: 45000 });
+  await sqlStudioTab.click();
+  const editor = page.locator(".ss-editor");
+  await editor.waitFor({ state: "visible", timeout: 30000 });
+  await editor.fill("SELECT TOP 1 accountid FROM account");
+  await page.locator('[data-act="execute"]').click();
+  const outcomeSignal = page.locator(".ss-error, .ss-results table").first();
+  await outcomeSignal.waitFor({ state: "visible", timeout: 120000 });
 
-  await page.locator("#devlens-browser-host-smoke .ss-editor").fill("SELECT TOP 1 accountid FROM account");
-  await page.locator('#devlens-browser-host-smoke [data-act="execute"]').click();
-  await page.waitForFunction(() => {
-    const root = document.querySelector("#devlens-browser-host-smoke");
-    return root && (root.querySelector(".ss-error") || root.querySelector(".ss-results table"));
-  }, null, { timeout: 120000 });
-
-  const outcome = await page.evaluate(() => {
-    const root = document.querySelector("#devlens-browser-host-smoke");
-    return {
-      errorVisible: Boolean(root?.querySelector(".ss-error")),
-      resultTableVisible: Boolean(root?.querySelector(".ss-results table")),
-      columns: Array.from(root?.querySelectorAll(".ss-results thead th") || []).map(cell => cell.textContent),
-      rowCount: root?.querySelectorAll(".ss-results tbody tr").length || 0
-    };
-  });
+  const errorVisible = await page.locator(".ss-error").count() > 0;
+  const resultTable = page.locator(".ss-results table");
+  const resultTableVisible = await resultTable.count() > 0;
+  const columns = resultTableVisible ? await page.locator(".ss-results thead th").allTextContents() : [];
+  const rowCount = resultTableVisible ? await page.locator(".ss-results tbody tr").count() : 0;
+  const outcome = { errorVisible, resultTableVisible, columns, rowCount };
   assert.equal(outcome.errorVisible, false, "Authenticated browser-host query failed; inspect the redacted Actions logs and test outcome.");
   assert.equal(outcome.resultTableVisible, true, "Query Studio did not render a result table.");
   assert.ok(outcome.columns.some(column => column.toLowerCase() === "accountid"), "Query result did not contain the requested accountid column.");
