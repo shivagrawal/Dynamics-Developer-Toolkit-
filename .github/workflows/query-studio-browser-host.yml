@@ -18,6 +18,7 @@ jobs:
       DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
       DYNAMICS_APP_URL: ${{ vars.DYNAMICS_APP_URL }}
       DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH: ${{ vars.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH || 'D:\\query-studio-browser-state.json' }}
+      DYNAMICS_PLAYWRIGHT_PROFILE_PATH: ${{ vars.DYNAMICS_PLAYWRIGHT_PROFILE_PATH || 'D:\\query-studio-browser-profile' }}
     steps:
       - name: Check out tested revision
         uses: actions/checkout@v5
@@ -32,13 +33,15 @@ jobs:
         run: |
           if (-not $env:DATAVERSE_URL) { throw "Missing DATAVERSE_URL repository/environment secret." }
           if (-not $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH) { $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH = "D:\query-studio-browser-state.json" }
-          if (-not (Test-Path -LiteralPath $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH -PathType Leaf)) { throw "The local storage-state file does not exist at the configured path. Check the runner account and configured path." }
+          if (-not $env:DYNAMICS_PLAYWRIGHT_PROFILE_PATH) { $env:DYNAMICS_PLAYWRIGHT_PROFILE_PATH = "D:\query-studio-browser-profile" }
+          if (-not (Test-Path -LiteralPath $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH -PathType Leaf)) { throw "The diagnostic storage-state file is missing. Run capture-browser-host-state.mjs as the runner account." }
+          if (-not (Test-Path -LiteralPath $env:DYNAMICS_PLAYWRIGHT_PROFILE_PATH -PathType Container)) { throw "The persistent Chromium profile is missing. Run capture-browser-host-state.mjs as the runner account." }
           $base = [Uri]$env:DATAVERSE_URL
           $appValue = if ($env:DYNAMICS_APP_URL) { $env:DYNAMICS_APP_URL } else { "$($base.GetLeftPart([System.UriPartial]::Authority))/main.aspx" }
           $app = [Uri]$appValue
           $allowed = { param($u) $u.Scheme -eq "https" -and ($u.Host -match '\.crm(\d+)?\.dynamics\.com$|\.crm\.microsoftdynamics\.us$|\.crm\.dynamics\.cn$') }
           if (-not (& $allowed $base) -or -not (& $allowed $app) -or $base.GetLeftPart([System.UriPartial]::Authority) -ne $app.GetLeftPart([System.UriPartial]::Authority)) { throw "DATAVERSE_URL and DYNAMICS_APP_URL must be HTTPS URLs on the same Dataverse organization." }
-          Write-Host "Browser-host configuration validated. Session contents are not printed."
+          Write-Host "Browser-host configuration validated. Authentication material is not printed."
 
       - name: Install Playwright and Chromium
         shell: powershell -ExecutionPolicy Bypass -File {0}
@@ -60,7 +63,7 @@ jobs:
             "## Query Studio browser-host verification"
             "- Commit: $env:GITHUB_SHA"
             "- Result: **$env:JOB_STATUS**"
-            "- Runner: self-hosted Windows Chromium with authenticated Dynamics host"
+            "- Runner: self-hosted Windows Chromium using the runner-account persistent authenticated profile"
             "- Scope: Query Studio UI, background queryExecute, bounded read-only SQL"
             "- Authentication material and query result values are not included."
             "- Persistent security/audit mutation tests were not run."
