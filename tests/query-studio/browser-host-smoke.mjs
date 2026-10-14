@@ -191,11 +191,6 @@ try {
   const joinColumns = (await page.locator(".ss-results thead th").allTextContents()).map(value => value.toLowerCase());
   const joinRows = await page.locator(".ss-results tbody tr").count();
   const joinText = (await page.locator(".ss-results tbody").innerText()).toLowerCase();
-  const joinError = await errorElement.count() > 0 ? (await errorElement.innerText()).slice(0, 500) : "";
-  assert.equal(joinError, "", "Authenticated browser-host relationship query failed: " + joinError);
-  const joinColumns = (await page.locator(".ss-results thead th").allTextContents()).map(value => value.toLowerCase());
-  const joinRows = await page.locator(".ss-results tbody tr").count();
-  const joinText = (await page.locator(".ss-results tbody").innerText()).toLowerCase();
   assert.ok(joinColumns.some(column => column === "contactid"), "Relationship result did not contain contactid.");
   assert.ok(joinColumns.some(column => column === "fullname"), "Relationship result did not contain fullname.");
   assert.ok(joinColumns.some(column => column === "name"), "Relationship result did not contain Account name.");
