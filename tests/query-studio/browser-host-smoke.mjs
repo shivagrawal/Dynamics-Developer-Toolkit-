@@ -154,6 +154,10 @@ try {
     // On a relationship-query timeout, emit bounded UI diagnostics so the failure
     // distinguishes a parser/provider error, a stale result, and a UI dispatch issue.
     const diagnostics = await page.evaluate(() => ({
+      href: location.href.slice(0, 500),
+      title: document.title.slice(0, 200),
+      bodyText: (document.body?.innerText || "").slice(0, 1200),
+      devlensElements: [...document.querySelectorAll('[id*="devlens" i], [class*="devlens" i], [class*="ss-" i]')].slice(0, 30).map(node => ({ tag: node.tagName, id: node.id, className: String(node.className || "").slice(0, 120) })),
       visibleErrors: [...document.querySelectorAll(".ss-error")].map(node => (node.textContent || "").trim().slice(0, 500)),
       resultText: (document.querySelector(".ss-results")?.innerText || "").slice(0, 1500),
       headers: [...document.querySelectorAll(".ss-results thead th")].map(node => (node.textContent || "").trim()).slice(0, 20),
