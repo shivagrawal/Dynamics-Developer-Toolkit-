@@ -87,12 +87,13 @@ try {
   // message channel. Synthetic page keyboard events do not reliably invoke
   // browser-managed extension commands, so they cannot be used to bootstrap a
   // hidden panel deterministically in an automated browser host.
+  await page.bringToFront();
   const worker = context.serviceWorkers().find(candidate =>
     candidate.url().endsWith("/background-entry.js")
   ) || await context.waitForEvent("serviceworker", { timeout: 30000 });
   await worker.evaluate(async () => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab?.id) throw new Error("No active Dynamics tab is available to the extension.");
+    if (!activeTab?.id || new URL(activeTab.url).origin !== new URL(location.href).origin) throw new Error("The active browser tab is not the Dynamics page under test.");
     await new Promise((resolve, reject) => {
       chrome.tabs.sendMessage(activeTab.id, { type: "DEVLENS_TOGGLE" }, () => {
         const error = chrome.runtime.lastError;
@@ -138,11 +139,12 @@ try {
   await page.goto(appUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
   await page.waitForFunction(() => Boolean(window.Xrm?.Utility?.getGlobalContext), null, { timeout: 45000 });
   await page.waitForTimeout(1000);
+  await page.bringToFront();
   const joinWorker = context.serviceWorkers().find(candidate => candidate.url().endsWith("/background-entry.js"))
     || await context.waitForEvent("serviceworker", { timeout: 15000 });
   await joinWorker.evaluate(async () => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab?.id) throw new Error("No active Dynamics tab is available to the extension for relationship query.");
+    if (!activeTab?.id || new URL(activeTab.url).origin !== new URL(location.href).origin) throw new Error("The active browser tab is not the Dynamics page under test for relationship query.");
     await new Promise((resolve, reject) => {
       chrome.tabs.sendMessage(activeTab.id, { type: "DEVLENS_TOGGLE" }, () => {
         const error = chrome.runtime.lastError;
