@@ -131,42 +131,66 @@ try {
   assert.equal(outcome.rowCount, 1, "Seeded Account row was not returned by the read-only SQL query.");
   const returnedName = (await page.locator(".ss-results tbody tr").first().innerText()).toLowerCase();
   assert.ok(returnedName.includes(seed.accountName.toLowerCase()), "Query result did not match the seeded Account row.");
-  // Exercise the relationship compiler/provider using the Account and Contact created above.
-  // Reuse the editor and execute control so this traverses the same UI/background path.
-  await editor.fill(
+  // Re-open the extension UI in a fresh Dynamics document before the relationship
+  // query. Model-driven apps can replace the current entity-list document after Web API
+  // activity; retaining old locators then creates a misleading 120-second SQL timeout.
+  // A fresh document also proves the extension can bootstrap independently per page.
+  await page.goto(appUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
+  await page.waitForFunction(() => Boolean(window.Xrm?.Utility?.getGlobalContext), null, { timeout: 45000 });
+  await page.waitForTimeout(1000);
+  const joinWorker = context.serviceWorkers().find(candidate => candidate.url().endsWith("/background-entry.js"))
+    || await context.waitForEvent("serviceworker", { timeout: 15000 });
+  await joinWorker.evaluate(async () => {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) throw new Error("No active Dynamics tab is available to the extension for relationship query.");
+    await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(activeTab.id, { type: "DEVLENS_TOGGLE" }, () => {
+        const error = chrome.runtime.lastError;
+        if (error && !error.message.includes("message port closed before a response")) reject(new Error(error.message));
+        else resolve();
+      });
+    });
+  });
+  await page.locator('[data-view="sqlstudio"]').waitFor({ state: "visible", timeout: 20000 });
+  await page.locator('[data-view="sqlstudio"]').click();
+  const joinEditor = page.locator(".ss-editor");
+  await joinEditor.waitFor({ state: "visible", timeout: 15000 });
+  await joinEditor.fill(
     "SELECT TOP 1 c.contactid, c.fullname, a.name FROM contact c " +
     "INNER JOIN account a ON c.parentcustomerid = a.accountid " +
     "WHERE a.name = '" + seed.accountName + "'"
   );
   await page.locator('[data-act="execute"]').click();
-  // A result from the preceding query can remain visible while the next query runs.
-  // Wait for either a new error or for the join result to contain the seeded contact,
-  // not merely the account name which was already displayed by query one.
+  // Fail promptly on document navigation or a surfaced query error. The prior 120-second
+  // wait obscured that the whole extension panel had disappeared from the document.
   try {
-    await page.waitForFunction(({ accountName }) => {
+    await page.waitForFunction(({ accountName, startingUrl }) => {
+      if (location.href !== startingUrl) return true;
       const error = document.querySelector(".ss-error");
       const rows = document.querySelector(".ss-results tbody");
       const text = rows?.textContent?.toLowerCase() || "";
       return Boolean(error?.textContent?.trim()) ||
         (text.includes(accountName.toLowerCase()) && text.includes("dtt query studio smoke"));
-    }, { accountName: seed.accountName }, { timeout: 120000 });
+    }, { accountName: seed.accountName, startingUrl: page.url() }, { timeout: 30000 });
   } catch (waitError) {
-    // On a relationship-query timeout, emit bounded UI diagnostics so the failure
-    // distinguishes a parser/provider error, a stale result, and a UI dispatch issue.
     const diagnostics = await page.evaluate(() => ({
       href: location.href.slice(0, 500),
       title: document.title.slice(0, 200),
       bodyText: (document.body?.innerText || "").slice(0, 1200),
-      devlensElements: [...document.querySelectorAll('[id*="devlens" i], [class*="devlens" i], [class*="ss-" i]')].slice(0, 30).map(node => ({ tag: node.tagName, id: node.id, className: String(node.className || "").slice(0, 120) })),
       visibleErrors: [...document.querySelectorAll(".ss-error")].map(node => (node.textContent || "").trim().slice(0, 500)),
-      resultText: (document.querySelector(".ss-results")?.innerText || "").slice(0, 1500),
-      headers: [...document.querySelectorAll(".ss-results thead th")].map(node => (node.textContent || "").trim()).slice(0, 20),
-      editorText: (document.querySelector(".ss-editor")?.value || "").slice(0, 500),
-      executeButtons: [...document.querySelectorAll('[data-act="execute"]')].map(node => ({ disabled: node.disabled, text: (node.textContent || "").trim().slice(0, 80) }))
+      resultText: (document.querySelector(".ss-results")?.innerText || "").slice(0, 1000),
+      headers: [...document.querySelectorAll(".ss-results thead th")].map(node => (node.textContent || "").trim()).slice(0, 20)
     }));
-    console.error("Relationship query wait diagnostics: " + JSON.stringify(diagnostics));
+    console.error("Relationship query failed within bounded wait: " + JSON.stringify(diagnostics));
     throw waitError;
   }
+  assert.equal(new URL(page.url()).origin, appOrigin, "Relationship query navigated away from the Dataverse organization.");
+  await page.locator(".ss-results table").waitFor({ state: "visible", timeout: 5000 });
+  const currentError = await page.locator(".ss-error").count() > 0 ? (await page.locator(".ss-error").innerText()).slice(0, 500) : "";
+  assert.equal(currentError, "", "Authenticated browser-host relationship query failed: " + currentError);
+  const joinColumns = (await page.locator(".ss-results thead th").allTextContents()).map(value => value.toLowerCase());
+  const joinRows = await page.locator(".ss-results tbody tr").count();
+  const joinText = (await page.locator(".ss-results tbody").innerText()).toLowerCase();
   const joinError = await errorElement.count() > 0 ? (await errorElement.innerText()).slice(0, 500) : "";
   assert.equal(joinError, "", "Authenticated browser-host relationship query failed: " + joinError);
   const joinColumns = (await page.locator(".ss-results thead th").allTextContents()).map(value => value.toLowerCase());
