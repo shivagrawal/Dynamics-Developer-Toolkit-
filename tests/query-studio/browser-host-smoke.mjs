@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { gunzipSync } from "node:zlib";
 import { chromium } from "playwright";
 
 const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\\/+$/, "");
 const appUrl = process.env.DYNAMICS_APP_URL || (baseUrl ? baseUrl + "/main.aspx" : "");
-const stateEncoded = process.env.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64 || "";
+const statePath = process.env.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH || "";
 
 function safeOrigin(value) {
   const parsed = new URL(value);
@@ -18,15 +17,16 @@ function safeOrigin(value) {
 }
 
 assert.ok(baseUrl, "DATAVERSE_URL secret is required.");
-assert.ok(stateEncoded, "DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64 secret is required; provide base64-encoded Playwright storage-state JSON for a test user.");
+assert.ok(statePath, "DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH must point to a local Playwright storage-state JSON file.");
+assert.ok(fs.existsSync(statePath), "The configured local Playwright storage-state file does not exist.");
 const appOrigin = safeOrigin(appUrl);
 assert.equal(appOrigin, safeOrigin(baseUrl), "DYNAMICS_APP_URL must use the same Dataverse origin as DATAVERSE_URL.");
 
 let storageState;
 try {
-  storageState = JSON.parse(gunzipSync(Buffer.from(stateEncoded, "base64")).toString("utf8"));
+  storageState = JSON.parse(fs.readFileSync(statePath, "utf8"));
 } catch {
-  throw new Error("DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64 is not valid gzip-compressed, base64-encoded Playwright storage-state JSON. Capture it again using the updated helper.");
+  throw new Error("The configured local Playwright storage-state file is not valid JSON. Re-capture it using the helper.");
 }
 assert.ok(Array.isArray(storageState.cookies), "Storage state must contain a cookies array.");
 assert.ok(Array.isArray(storageState.origins), "Storage state must contain an origins array.");
