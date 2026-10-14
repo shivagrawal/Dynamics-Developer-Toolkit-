@@ -39,6 +39,10 @@ try {
       organizationHost.endsWith("." + domain) ||
       domain === "dynamics.com" ||
       domain.endsWith(".dynamics.com") && organizationHost.endsWith("." + domain);
+      domain === "login.microsoftonline.com" ||
+      domain.endsWith(".login.microsoftonline.com") ||
+      domain === "login.windows.net" ||
+      domain.endsWith(".login.windows.net");
   });
   const state = {
     cookies: relevantCookies,
