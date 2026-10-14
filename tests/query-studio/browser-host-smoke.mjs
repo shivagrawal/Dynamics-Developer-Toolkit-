@@ -142,13 +142,27 @@ try {
   // A result from the preceding query can remain visible while the next query runs.
   // Wait for either a new error or for the join result to contain the seeded contact,
   // not merely the account name which was already displayed by query one.
-  await page.waitForFunction(({ accountName }) => {
-    const error = document.querySelector(".ss-error");
-    const rows = document.querySelector(".ss-results tbody");
-    const text = rows?.textContent?.toLowerCase() || "";
-    return Boolean(error?.textContent?.trim()) ||
-      (text.includes(accountName.toLowerCase()) && text.includes("dtt query studio smoke"));
-  }, { accountName: seed.accountName }, { timeout: 120000 });
+  try {
+    await page.waitForFunction(({ accountName }) => {
+      const error = document.querySelector(".ss-error");
+      const rows = document.querySelector(".ss-results tbody");
+      const text = rows?.textContent?.toLowerCase() || "";
+      return Boolean(error?.textContent?.trim()) ||
+        (text.includes(accountName.toLowerCase()) && text.includes("dtt query studio smoke"));
+    }, { accountName: seed.accountName }, { timeout: 120000 });
+  } catch (waitError) {
+    // On a relationship-query timeout, emit bounded UI diagnostics so the failure
+    // distinguishes a parser/provider error, a stale result, and a UI dispatch issue.
+    const diagnostics = await page.evaluate(() => ({
+      visibleErrors: [...document.querySelectorAll(".ss-error")].map(node => (node.textContent || "").trim().slice(0, 500)),
+      resultText: (document.querySelector(".ss-results")?.innerText || "").slice(0, 1500),
+      headers: [...document.querySelectorAll(".ss-results thead th")].map(node => (node.textContent || "").trim()).slice(0, 20),
+      editorText: (document.querySelector(".ss-editor")?.value || "").slice(0, 500),
+      executeButtons: [...document.querySelectorAll('[data-act="execute"]')].map(node => ({ disabled: node.disabled, text: (node.textContent || "").trim().slice(0, 80) }))
+    }));
+    console.error("Relationship query wait diagnostics: " + JSON.stringify(diagnostics));
+    throw waitError;
+  }
   const joinError = await errorElement.count() > 0 ? (await errorElement.innerText()).slice(0, 500) : "";
   assert.equal(joinError, "", "Authenticated browser-host relationship query failed: " + joinError);
   const joinColumns = (await page.locator(".ss-results thead th").allTextContents()).map(value => value.toLowerCase());
