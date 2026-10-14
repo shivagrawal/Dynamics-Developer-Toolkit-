@@ -1,6 +1,7 @@
 import readline from "node:readline/promises";
 import { stdin, stderr } from "node:process";
 import { chromium } from "playwright";
+import { gzipSync } from "node:zlib";
 
 const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\/+$/, "");
 const appUrl = process.env.DYNAMICS_APP_URL || (baseUrl ? baseUrl + "/main.aspx" : "");
@@ -28,8 +29,9 @@ try {
     throw new Error("Dynamics authentication was not confirmed. No storage state was emitted.");
   }
   const state = await context.storageState();
-  const encoded = Buffer.from(JSON.stringify(state), "utf8").toString("base64");
+  const encoded = gzipSync(Buffer.from(JSON.stringify(state), "utf8")).toString("base64");
   // This is a bearer session snapshot. Do not paste it into chat, source control, or logs.
+  // Output is gzip-compressed before Base64 encoding to reduce GitHub secret size.
   // Pipe stdout directly to a clipboard/secret-management command instead.
   process.stdout.write(encoded + "\n");
   console.error("Session state captured. Treat the emitted value as a password; it may expire and must be rotated.");
