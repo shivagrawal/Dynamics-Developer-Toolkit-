@@ -38,7 +38,7 @@ try {
     return organizationHost === domain ||
       organizationHost.endsWith("." + domain) ||
       domain === "dynamics.com" ||
-      domain.endsWith(".dynamics.com") && organizationHost.endsWith("." + domain);
+      (domain.endsWith(".dynamics.com") && organizationHost.endsWith("." + domain)) ||
       domain === "login.microsoftonline.com" ||
       domain.endsWith(".login.microsoftonline.com") ||
       domain === "login.windows.net" ||
