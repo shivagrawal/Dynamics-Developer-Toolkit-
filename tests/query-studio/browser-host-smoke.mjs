@@ -176,14 +176,20 @@ try {
     if (seed.contactId) await page.evaluate(async id => Xrm.WebApi.deleteRecord("contact", id), seed.contactId);
     if (seed.accountId) await page.evaluate(async id => Xrm.WebApi.deleteRecord("account", id), seed.accountId);
     const remaining = await page.evaluate(async ({ contactId, accountId }) => {
-      const exists = async (entity, id) => {
-        try { await Xrm.WebApi.retrieveRecord(entity, id); return true; }
-        catch (error) {
-          if (error?.status === 404 || error?.statusCode === 404) return false;
-          throw error;
-        }
+      // A filtered collection query verifies absence without relying on the browser
+      // client's version-specific shape for a 404 retrieveRecord rejection.
+      const exists = async (entity, primaryId, id) => {
+        if (!id) return false;
+        const result = await Xrm.WebApi.retrieveMultipleRecords(
+          entity,
+          "?$select=" + primaryId + "&$filter=" + primaryId + " eq " + id + "&$top=1"
+        );
+        return result.entities.length > 0;
       };
-      return { contact: contactId ? await exists("contact", contactId) : false, account: accountId ? await exists("account", accountId) : false };
+      return {
+        contact: await exists("contact", "contactid", contactId),
+        account: await exists("account", "accountid", accountId)
+      };
     }, { contactId: seed.contactId, accountId: seed.accountId });
     assert.equal(remaining.contact, false, "Smoke-test Contact was not cleaned up.");
     assert.equal(remaining.account, false, "Smoke-test Account was not cleaned up.");
