@@ -1760,7 +1760,10 @@ async function executeQueryStudioCoordinated(sql, sender, executionPayload) {
 
   const invokePage = async (action, payload, security = false) => {
     const results = await chrome.scripting.executeScript({
-      target: { tabId: sender.tab.id, allFrames: true },
+      // The authenticated smoke test and the supported Dynamics app surface expose
+      // Xrm in the top-level main.aspx frame. Avoid attempting injection into
+      // unrelated cross-origin child frames, which can fail the entire query route.
+      target: { tabId: sender.tab.id },
       world: "MAIN",
       func: security ? devLensSecurityAuditBridge : pageBridge,
       args: security ? ["sqlQuery", { ...executionPayload, ...payload }] : [action, { ...executionPayload, ...payload }]
