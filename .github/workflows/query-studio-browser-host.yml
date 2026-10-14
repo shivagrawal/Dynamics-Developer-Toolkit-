@@ -17,7 +17,7 @@ jobs:
     env:
       DATAVERSE_URL: ${{ secrets.DATAVERSE_URL }}
       DYNAMICS_APP_URL: ${{ vars.DYNAMICS_APP_URL }}
-      DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH: ${{ vars.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH }}
+      DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH: ${{ vars.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH || 'D:\\query-studio-browser-state.json' }}
     steps:
       - name: Check out tested revision
         uses: actions/checkout@v5
@@ -28,7 +28,7 @@ jobs:
           node-version: 24
 
       - name: Validate required browser-host configuration
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -File {0}
         run: |
           if (-not $env:DATAVERSE_URL) { throw "Missing DATAVERSE_URL repository/environment secret." }
           if (-not $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH) { $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH = "D:\query-studio-browser-state.json" }
