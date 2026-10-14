@@ -91,11 +91,22 @@ try {
   const worker = context.serviceWorkers().find(candidate =>
     candidate.url().endsWith("/background-entry.js")
   ) || await context.waitForEvent("serviceworker", { timeout: 30000 });
-  await worker.evaluate(async () => {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab?.id || new URL(activeTab.url).origin !== new URL(location.href).origin) throw new Error("The active browser tab is not the Dynamics page under test.");
+  await worker.evaluate(async (expectedUrl) => {
+    const expected = new URL(expectedUrl);
+    const tabs = await chrome.tabs.query({ url: expected.origin + "/*" });
+    const targetTab = tabs.find(tab => {
+      try {
+        const actual = new URL(tab.url);
+        return actual.origin === expected.origin &&
+          actual.pathname === expected.pathname &&
+          actual.search === expected.search;
+      } catch {
+        return false;
+      }
+    });
+    if (!targetTab?.id) throw new Error("No Dynamics tab matching the page under test is available to the extension.");
     await new Promise((resolve, reject) => {
-      chrome.tabs.sendMessage(activeTab.id, { type: "DEVLENS_TOGGLE" }, () => {
+      chrome.tabs.sendMessage(targetTab.id, { type: "DEVLENS_TOGGLE" }, () => {
         const error = chrome.runtime.lastError;
         // The content-script listener intentionally does not send a response;
         // Chrome reports a closed response port even when the toggle was handled.
@@ -106,7 +117,7 @@ try {
         }
       });
     });
-  });
+  }, page.url());
   const sqlStudioTab = page.locator('[data-view="sqlstudio"]');
   await sqlStudioTab.waitFor({ state: "visible", timeout: 45000 });
   await sqlStudioTab.click();
@@ -142,17 +153,28 @@ try {
   await page.bringToFront();
   const joinWorker = context.serviceWorkers().find(candidate => candidate.url().endsWith("/background-entry.js"))
     || await context.waitForEvent("serviceworker", { timeout: 15000 });
-  await joinWorker.evaluate(async () => {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab?.id || new URL(activeTab.url).origin !== new URL(location.href).origin) throw new Error("The active browser tab is not the Dynamics page under test for relationship query.");
+  await joinWorker.evaluate(async (expectedUrl) => {
+    const expected = new URL(expectedUrl);
+    const tabs = await chrome.tabs.query({ url: expected.origin + "/*" });
+    const targetTab = tabs.find(tab => {
+      try {
+        const actual = new URL(tab.url);
+        return actual.origin === expected.origin &&
+          actual.pathname === expected.pathname &&
+          actual.search === expected.search;
+      } catch {
+        return false;
+      }
+    });
+    if (!targetTab?.id) throw new Error("No Dynamics tab matching the page under test is available to the extension for relationship query.");
     await new Promise((resolve, reject) => {
-      chrome.tabs.sendMessage(activeTab.id, { type: "DEVLENS_TOGGLE" }, () => {
+      chrome.tabs.sendMessage(targetTab.id, { type: "DEVLENS_TOGGLE" }, () => {
         const error = chrome.runtime.lastError;
         if (error && !error.message.includes("message port closed before a response")) reject(new Error(error.message));
         else resolve();
       });
     });
-  });
+  }, page.url());
   await page.locator('[data-view="sqlstudio"]').waitFor({ state: "visible", timeout: 20000 });
   await page.locator('[data-view="sqlstudio"]').click();
   const joinEditor = page.locator(".ss-editor");
