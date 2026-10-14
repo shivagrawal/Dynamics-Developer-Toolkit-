@@ -68,17 +68,20 @@ try {
     contactId: null
   };
   try {
-    const created = await page.evaluate(async (accountName) => {
+    const createdAccount = await page.evaluate(async (accountName) => {
       const account = await Xrm.WebApi.createRecord("account", { name: accountName });
+      return account.id.replace(/[{}]/g, "");
+    }, seed.accountName);
+    seed.accountId = createdAccount;
+    const createdContact = await page.evaluate(async (accountId) => {
       const contact = await Xrm.WebApi.createRecord("contact", {
         firstname: "DTT Query",
         lastname: "Studio Smoke",
-        parentcustomerid_account@odata.bind: "/accounts(" + account.id.replace(/[{}]/g, "") + ")"
+        "parentcustomerid_account@odata.bind": "/accounts(" + accountId + ")"
       });
-      return { accountId: account.id.replace(/[{}]/g, ""), contactId: contact.id.replace(/[{}]/g, "") };
-    }, seed.accountName);
-    seed.accountId = created.accountId;
-    seed.contactId = created.contactId;
+      return contact.id.replace(/[{}]/g, "");
+    }, seed.accountId);
+    seed.contactId = createdContact;
 
   // Drive the extension through its real MV3 service worker and content-script
   // message channel. Synthetic page keyboard events do not reliably invoke
