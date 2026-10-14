@@ -14,6 +14,29 @@ test("ordinary supported SELECT deterministically selects native SQL", () => {
   assert.ok(decision.plan);
 });
 
+test("joined projections and joined predicates select alias-aware FetchXML", () => {
+  const sql = "SELECT TOP 1 c.contactid, c.fullname, a.name FROM contact c INNER JOIN account a ON c.parentcustomerid = a.accountid WHERE a.name = 'DTT Query Studio Smoke'";
+  const decision = coordinator.decide(sql, engine, policy);
+  assert.equal(decision.ok, true);
+  assert.equal(decision.route, "fetchxml");
+  assert.equal(decision.reason, "joined-query-alias-semantics");
+  const metadata = {
+    entities: {
+      contact: { logicalName: "contact", entitySetName: "contacts", primaryIdAttribute: "contactid", columns: [
+        { logicalName: "contactid", queryable: true }, { logicalName: "fullname", queryable: true },
+        { logicalName: "parentcustomerid", queryable: true }
+      ] },
+      account: { logicalName: "account", entitySetName: "accounts", primaryIdAttribute: "accountid", columns: [
+        { logicalName: "accountid", queryable: true }, { logicalName: "name", queryable: true }
+      ] }
+    }
+  };
+  const compiled = engine.compile(decision.plan, metadata);
+  assert.match(compiled.fetchXml, /<link-entity name="account" alias="a"[^>]*><attribute name="name" alias="a_name"\/><\/link-entity>/);
+  assert.match(compiled.fetchXml, /<condition attribute="name" operator="eq" entityname="a" value="DTT Query Studio Smoke"\/>/);
+  assert.match(compiled.fetchXml, /<entity name="contact"><attribute name="contactid"\/><attribute name="fullname"\/>/);
+});
+
 test("OFFSET/FETCH deterministically selects bounded FetchXML", () => {
   const decision = coordinator.decide("SELECT accountid, name FROM account ORDER BY name OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY", engine, policy);
   assert.equal(decision.ok, true);
