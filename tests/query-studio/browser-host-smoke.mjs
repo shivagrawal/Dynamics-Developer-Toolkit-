@@ -131,7 +131,7 @@ try {
   assert.equal(outcome.rowCount, 1, "Seeded Account row was not returned by the read-only SQL query.");
   const returnedName = (await page.locator(".ss-results tbody tr").first().innerText()).toLowerCase();
   assert.ok(returnedName.includes(seed.accountName.toLowerCase()), "Query result did not match the seeded Account row.");
-  assert.equal(pageErrors.length, 0, "The Dynamics page emitted an uncaught JavaScript error during the smoke test.");
+  assert.equal(pageErrors.length, 0, `The Dynamics page emitted ${pageErrors.length} uncaught JavaScript error(s) during the smoke test: ${pageErrors.join(" | ")}`);
 
   console.log(JSON.stringify({
     result: "passed",
