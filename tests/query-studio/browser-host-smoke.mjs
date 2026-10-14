@@ -60,6 +60,26 @@ try {
   const clientUrl = await page.evaluate(() => window.Xrm.Utility.getGlobalContext().getClientUrl());
   assert.equal(safeOrigin(clientUrl), appOrigin, "Xrm reports a different Dataverse organization.");
 
+  // Seed deterministic test data because a basic user may have no existing
+  // Account rows. Always remove the records created by this smoke test.
+  const seed = {
+    accountName: "DTT Query Studio Smoke " + new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14),
+    accountId: null,
+    contactId: null
+  };
+  try {
+    const created = await page.evaluate(async (accountName) => {
+      const account = await Xrm.WebApi.createRecord("account", { name: accountName });
+      const contact = await Xrm.WebApi.createRecord("contact", {
+        firstname: "DTT Query",
+        lastname: "Studio Smoke",
+        parentcustomerid_account@odata.bind: "/accounts(" + account.id.replace(/[{}]/g, "") + ")"
+      });
+      return { accountId: account.id.replace(/[{}]/g, ""), contactId: contact.id.replace(/[{}]/g, "") };
+    }, seed.accountName);
+    seed.accountId = created.accountId;
+    seed.contactId = created.contactId;
+
   // Drive the extension through its real MV3 service worker and content-script
   // message channel. Synthetic page keyboard events do not reliably invoke
   // browser-managed extension commands, so they cannot be used to bootstrap a
@@ -88,7 +108,7 @@ try {
   await sqlStudioTab.click();
   const editor = page.locator(".ss-editor");
   await editor.waitFor({ state: "visible", timeout: 30000 });
-  await editor.fill("SELECT TOP 1 accountid FROM account");
+  await editor.fill("SELECT TOP 1 accountid, name FROM account WHERE name = '" + seed.accountName + "'");
   await page.locator('[data-act="execute"]').click();
   const outcomeSignal = page.locator(".ss-error, .ss-results table").first();
   await outcomeSignal.waitFor({ state: "visible", timeout: 120000 });
@@ -104,18 +124,26 @@ try {
   assert.equal(outcome.errorVisible, false, `Authenticated browser-host query failed: ${errorText}`);
   assert.equal(outcome.resultTableVisible, true, "Query Studio did not render a result table.");
   assert.ok(outcome.columns.some(column => column.toLowerCase() === "accountid"), "Query result did not contain the requested accountid column.");
-  assert.ok(outcome.rowCount <= 1, "TOP 1 query returned more than one row.");
+  assert.ok(outcome.columns.some(column => column.toLowerCase() === "name"), "Query result did not contain the requested name column.");
+  assert.equal(outcome.rowCount, 1, "Seeded Account row was not returned by the read-only SQL query.");
+  const returnedName = (await page.locator(".ss-results tbody tr").first().innerText()).toLowerCase();
+  assert.ok(returnedName.includes(seed.accountName.toLowerCase()), "Query result did not match the seeded Account row.");
   assert.equal(pageErrors.length, 0, "The Dynamics page emitted an uncaught JavaScript error during the smoke test.");
 
   console.log(JSON.stringify({
     result: "passed",
-    scope: "persistent authenticated Chromium profile + unpacked extension + Query Studio UI + background queryExecute + Dataverse read-only SQL",
+    scope: "persistent authenticated Chromium profile + unpacked extension + Query Studio UI + seeded Dataverse account/contact + background queryExecute + read-only SQL",
     organization: appOrigin,
-    query: "SELECT TOP 1 accountid FROM account",
+    query: "SELECT TOP 1 accountid, name FROM account WHERE name = '<unique smoke-test account>'",
     returnedRows: outcome.rowCount,
-    requestedColumnPresent: true,
+    seededAccountMatched: true,
+    seededContactCreated: Boolean(seed.contactId),
     pageErrors: 0
   }));
+  } finally {
+    if (seed.contactId) await page.evaluate(async id => Xrm.WebApi.deleteRecord("contact", id).catch(() => {}), seed.contactId);
+    if (seed.accountId) await page.evaluate(async id => Xrm.WebApi.deleteRecord("account", id).catch(() => {}), seed.accountId);
+  }
 } finally {
   if (context) await context.close();
 }
