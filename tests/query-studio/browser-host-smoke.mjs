@@ -30,8 +30,9 @@ let context;
 try {
   // Use the exact profile authenticated by the interactive capture helper. This
   // preserves browser-managed auth/session state that storageState can omit.
+  // Chromium extension loading is not reliable in headless mode; the runner is a dedicated Windows browser host.
   context = await chromium.launchPersistentContext(path.resolve(profilePath), {
-    headless: true,
+    headless: false,
     viewport: { width: 1440, height: 1000 },
     args: [
       `--disable-extensions-except=${process.cwd()}`,
