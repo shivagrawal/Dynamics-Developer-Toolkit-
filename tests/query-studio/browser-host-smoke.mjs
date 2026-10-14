@@ -73,8 +73,13 @@ try {
     await new Promise((resolve, reject) => {
       chrome.tabs.sendMessage(activeTab.id, { type: "DEVLENS_TOGGLE" }, () => {
         const error = chrome.runtime.lastError;
-        if (error) reject(new Error(error.message));
-        else resolve();
+        // The content-script listener intentionally does not send a response;
+        // Chrome reports a closed response port even when the toggle was handled.
+        if (error && !error.message.includes("message port closed before a response")) {
+          reject(new Error(error.message));
+        } else {
+          resolve();
+        }
       });
     });
   });
