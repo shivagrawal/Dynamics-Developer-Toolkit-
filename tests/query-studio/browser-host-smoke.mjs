@@ -4,14 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
 
-const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\\/+$/, "");
+const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\/+$/, "");
 const appUrl = process.env.DYNAMICS_APP_URL || (baseUrl ? baseUrl + "/main.aspx" : "");
 const statePath = process.env.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH || "";
 
 function safeOrigin(value) {
   const parsed = new URL(value);
   assert.equal(parsed.protocol, "https:", "Dynamics app URL must use HTTPS.");
-  assert.match(parsed.hostname, /\\.crm(?:\\d+)?\\.dynamics\\.com$|\\.crm\\.microsoftdynamics\\.us$|\\.crm\\.dynamics\\.cn$/i,
+  assert.match(parsed.hostname, /\.crm(?:\d+)?\.dynamics\.com$|\.crm\.microsoftdynamics\.us$|\.crm\.dynamics\.cn$/i,
     "Dynamics app URL must point to a Dataverse organization.");
   return parsed.origin;
 }
@@ -64,7 +64,7 @@ try {
   await page.waitForTimeout(2500);
 
   assert.equal(new URL(page.url()).origin, appOrigin, "Navigation left the configured Dataverse organization.");
-  assert.doesNotMatch(page.url(), /login\\.microsoftonline\\.com|login\\.windows\\.net/i,
+  assert.doesNotMatch(page.url(), /login\.microsoftonline\.com|login\.windows\.net/i,
     "Browser was redirected to sign-in; refresh the saved test-user storage state.");
   await page.waitForFunction(() => Boolean(window.Xrm?.Utility?.getGlobalContext && window.D365AnalyzerApi?.send && window.DevLensSqlStudioView), null, { timeout: 45000 });
 
