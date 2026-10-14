@@ -41,18 +41,18 @@ jobs:
           Write-Host "Browser-host configuration validated. Session contents are not printed."
 
       - name: Install Playwright and Chromium
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -File {0}
         run: |
           npm install --no-save --no-package-lock playwright
           npx playwright install chromium
 
       - name: Run authenticated extension browser-host smoke test
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -File {0}
         run: node tests/query-studio/browser-host-smoke.mjs
 
       - name: Publish redacted browser-host checkpoint
         if: always()
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -File {0}
         env:
           JOB_STATUS: ${{ job.status }}
         run: |
