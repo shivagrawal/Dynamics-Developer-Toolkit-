@@ -93,13 +93,15 @@ try {
   const outcomeSignal = page.locator(".ss-error, .ss-results table").first();
   await outcomeSignal.waitFor({ state: "visible", timeout: 120000 });
 
-  const errorVisible = await page.locator(".ss-error").count() > 0;
+  const errorElement = page.locator(".ss-error");
+  const errorVisible = await errorElement.count() > 0;
+  const errorText = errorVisible ? (await errorElement.innerText()).slice(0, 500) : "";
   const resultTable = page.locator(".ss-results table");
   const resultTableVisible = await resultTable.count() > 0;
   const columns = resultTableVisible ? await page.locator(".ss-results thead th").allTextContents() : [];
   const rowCount = resultTableVisible ? await page.locator(".ss-results tbody tr").count() : 0;
   const outcome = { errorVisible, resultTableVisible, columns, rowCount };
-  assert.equal(outcome.errorVisible, false, "Authenticated browser-host query failed; inspect the redacted Actions logs and test outcome.");
+  assert.equal(outcome.errorVisible, false, `Authenticated browser-host query failed: ${errorText}`);
   assert.equal(outcome.resultTableVisible, true, "Query Studio did not render a result table.");
   assert.ok(outcome.columns.some(column => column.toLowerCase() === "accountid"), "Query result did not contain the requested accountid column.");
   assert.ok(outcome.rowCount <= 1, "TOP 1 query returned more than one row.");
