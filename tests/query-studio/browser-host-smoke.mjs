@@ -139,11 +139,15 @@ try {
     "WHERE a.name = '" + seed.accountName + "'"
   );
   await page.locator('[data-act="execute"]').click();
+  // A result from the preceding query can remain visible while the next query runs.
+  // Wait for either a new error or for the join result to contain the seeded contact,
+  // not merely the account name which was already displayed by query one.
   await page.waitForFunction(({ accountName }) => {
     const error = document.querySelector(".ss-error");
     const rows = document.querySelector(".ss-results tbody");
+    const text = rows?.textContent?.toLowerCase() || "";
     return Boolean(error?.textContent?.trim()) ||
-      Boolean(rows?.textContent?.toLowerCase().includes(accountName.toLowerCase()));
+      (text.includes(accountName.toLowerCase()) && text.includes("dtt query studio smoke"));
   }, { accountName: seed.accountName }, { timeout: 120000 });
   const joinError = await errorElement.count() > 0 ? (await errorElement.innerText()).slice(0, 500) : "";
   assert.equal(joinError, "", "Authenticated browser-host relationship query failed: " + joinError);
