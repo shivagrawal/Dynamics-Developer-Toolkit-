@@ -34,7 +34,7 @@ try {
   // sign-in, telemetry, and other application sessions into the CI secret.
   const organizationHost = base.hostname.toLowerCase();
   const relevantCookies = fullState.cookies.filter(cookie => {
-    const domain = cookie.domain.replace(/^\\./, "").toLowerCase();
+    const domain = cookie.domain.replace(/^\./, "").toLowerCase();
     return organizationHost === domain ||
       organizationHost.endsWith("." + domain) ||
       domain === "dynamics.com" ||
