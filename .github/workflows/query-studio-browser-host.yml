@@ -28,31 +28,31 @@ jobs:
           node-version: 24
 
       - name: Validate required browser-host configuration
-        shell: pwsh
+        shell: powershell
         run: |
           if (-not $env:DATAVERSE_URL) { throw "Missing DATAVERSE_URL repository/environment secret." }
-          if (-not $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH) { throw "Set repository variable DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH to the absolute path of the local, protected Playwright storage-state JSON file." }
-          if (-not (Test-Path -LiteralPath $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH -PathType Leaf)) { throw "The local storage-state file does not exist at the configured path." }
+          if (-not $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH) { $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH = "D:\query-studio-browser-state.json" }
+          if (-not (Test-Path -LiteralPath $env:DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH -PathType Leaf)) { throw "The local storage-state file does not exist at the configured path. Check the runner account and configured path." }
           $base = [Uri]$env:DATAVERSE_URL
           $appValue = if ($env:DYNAMICS_APP_URL) { $env:DYNAMICS_APP_URL } else { "$($base.GetLeftPart([System.UriPartial]::Authority))/main.aspx" }
           $app = [Uri]$appValue
-          $allowed = { param($u) $u.Scheme -eq "https" -and ($u.Host -match '\\.crm(\d+)?\.dynamics\.com$|\.crm\.microsoftdynamics\.us$|\.crm\.dynamics\.cn$') }
+          $allowed = { param($u) $u.Scheme -eq "https" -and ($u.Host -match '\.crm(\d+)?\.dynamics\.com$|\.crm\.microsoftdynamics\.us$|\.crm\.dynamics\.cn$') }
           if (-not (& $allowed $base) -or -not (& $allowed $app) -or $base.GetLeftPart([System.UriPartial]::Authority) -ne $app.GetLeftPart([System.UriPartial]::Authority)) { throw "DATAVERSE_URL and DYNAMICS_APP_URL must be HTTPS URLs on the same Dataverse organization." }
           Write-Host "Browser-host configuration validated. Session contents are not printed."
 
       - name: Install Playwright and Chromium
-        shell: pwsh
+        shell: powershell
         run: |
           npm install --no-save --no-package-lock playwright
           npx playwright install chromium
 
       - name: Run authenticated extension browser-host smoke test
-        shell: pwsh
+        shell: powershell
         run: node tests/query-studio/browser-host-smoke.mjs
 
       - name: Publish redacted browser-host checkpoint
         if: always()
-        shell: pwsh
+        shell: powershell
         env:
           JOB_STATUS: ${{ job.status }}
         run: |
