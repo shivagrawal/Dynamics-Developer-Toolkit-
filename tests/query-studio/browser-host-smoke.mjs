@@ -60,12 +60,24 @@ try {
   const clientUrl = await page.evaluate(() => window.Xrm.Utility.getGlobalContext().getClientUrl());
   assert.equal(safeOrigin(clientUrl), appOrigin, "Xrm reports a different Dataverse organization.");
 
-  // The registered Alt+P command sends DEVLENS_MINIMIZE. When the panel is
-  // initially hidden, the first invocation creates it in minimized state; the
-  // second invocation restores the full panel so its navigation tabs are visible.
-  await page.keyboard.press("Alt+p");
-  await page.waitForTimeout(500);
-  await page.keyboard.press("Alt+p");
+  // Drive the extension through its real MV3 service worker and content-script
+  // message channel. Synthetic page keyboard events do not reliably invoke
+  // browser-managed extension commands, so they cannot be used to bootstrap a
+  // hidden panel deterministically in an automated browser host.
+  const worker = context.serviceWorkers().find(candidate =>
+    candidate.url().endsWith("/background-entry.js")
+  ) || await context.waitForEvent("serviceworker", { timeout: 30000 });
+  await worker.evaluate(async () => {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) throw new Error("No active Dynamics tab is available to the extension.");
+    await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(activeTab.id, { type: "DEVLENS_TOGGLE" }, () => {
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve();
+      });
+    });
+  });
   const sqlStudioTab = page.locator('[data-view="sqlstudio"]');
   await sqlStudioTab.waitFor({ state: "visible", timeout: 45000 });
   await sqlStudioTab.click();
