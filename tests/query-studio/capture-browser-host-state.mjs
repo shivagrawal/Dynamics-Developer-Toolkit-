@@ -1,21 +1,34 @@
 import readline from "node:readline/promises";
 import fs from "node:fs";
+import path from "node:path";
 import { stdin, stderr } from "node:process";
 import { chromium } from "playwright";
 
 const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\/+$/, "");
 const appUrl = process.env.DYNAMICS_APP_URL || (baseUrl ? baseUrl + "/main.aspx" : "");
+const statePath = process.env.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH || "";
+const profilePath = process.env.DYNAMICS_PLAYWRIGHT_PROFILE_PATH ||
+  (statePath ? path.join(path.dirname(path.resolve(statePath)), "query-studio-browser-profile") : "");
 if (!baseUrl || !appUrl) throw new Error("Set DATAVERSE_URL and optionally DYNAMICS_APP_URL before capturing a browser session.");
+if (!statePath) throw new Error("Set DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH to a protected path outside the repository.");
+if (!profilePath) throw new Error("Set DYNAMICS_PLAYWRIGHT_PROFILE_PATH to a protected profile directory outside the repository.");
 
 const base = new URL(baseUrl);
 const app = new URL(appUrl);
 if (base.protocol !== "https:" || app.protocol !== "https:" || base.origin !== app.origin) {
   throw new Error("Both URLs must use HTTPS and point to the same Dataverse organization.");
 }
+if (path.resolve(profilePath).startsWith(path.resolve(process.cwd()) + path.sep)) {
+  throw new Error("The browser profile must be outside the repository to prevent committing authentication material.");
+}
 
-const browser = await chromium.launch({ headless: false });
+fs.mkdirSync(path.dirname(path.resolve(profilePath)), { recursive: true });
+const context = await chromium.launchPersistentContext(path.resolve(profilePath), {
+  headless: false,
+  viewport: { width: 1440, height: 1000 },
+  args: ["--no-first-run", "--no-default-browser-check"]
+});
 try {
-  const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto(appUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
   console.error("Sign in to the dedicated Dynamics test user in the opened Chromium window.");
@@ -26,12 +39,13 @@ try {
 
   const authenticated = await page.evaluate(() => Boolean(window.Xrm?.Utility?.getGlobalContext));
   if (!authenticated || new URL(page.url()).origin !== base.origin) {
-    throw new Error("Dynamics authentication was not confirmed. No storage state was emitted.");
+    throw new Error("Dynamics authentication was not confirmed. The browser profile was retained for diagnosis.");
   }
+
+  // Keep a filtered diagnostic snapshot for compatibility, but the smoke test now
+  // reuses the persistent Chromium profile so browser-managed authentication state
+  // (including storage not represented by Playwright storageState) is preserved.
   const fullState = await context.storageState();
-  // Keep only cookies scoped to this Dataverse organization / Dynamics domain and
-  // localStorage for the organization origin. Avoid carrying unrelated Microsoft
-  // sign-in, telemetry, and other application sessions into the CI secret.
   const organizationHost = base.hostname.toLowerCase();
   const relevantCookies = fullState.cookies.filter(cookie => {
     const domain = cookie.domain.replace(/^\./, "").toLowerCase();
@@ -51,13 +65,9 @@ try {
       catch { return false; }
     })
   };
-  const outputPath = process.env.DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH;
-  if (!outputPath) throw new Error("Set DYNAMICS_PLAYWRIGHT_STORAGE_STATE_PATH to a protected path outside the repository, for example D:\\query-studio-browser-state.json.");
-  // This file contains bearer session cookies. Keep it outside source control and restrict
-  // filesystem access to the Windows account that runs the self-hosted runner.
-  fs.writeFileSync(outputPath, JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
-  console.error(`Filtered session state saved locally: ${state.cookies.length} organization-related cookies, ${state.origins.length} origin(s).`);
-  console.error("Session state was not printed. Treat the file as a password; it may expire and must be deleted when no longer needed.");
+  fs.writeFileSync(path.resolve(statePath), JSON.stringify(state), { encoding: "utf8", mode: 0o600 });
+  console.error("Authenticated persistent Chromium profile saved locally; diagnostic storage-state snapshot also refreshed.");
+  console.error("The profile contains authentication material. Keep it outside source control, restrict filesystem access, and delete it when no longer needed.");
 } finally {
-  await browser.close();
+  await context.close();
 }
