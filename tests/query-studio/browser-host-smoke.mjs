@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 import { chromium } from "playwright";
 
 const baseUrl = (process.env.DATAVERSE_URL || "").replace(/\\/+$/, "");
@@ -23,9 +24,9 @@ assert.equal(appOrigin, safeOrigin(baseUrl), "DYNAMICS_APP_URL must use the same
 
 let storageState;
 try {
-  storageState = JSON.parse(Buffer.from(stateEncoded, "base64").toString("utf8"));
+  storageState = JSON.parse(gunzipSync(Buffer.from(stateEncoded, "base64")).toString("utf8"));
 } catch {
-  throw new Error("DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64 is not valid base64-encoded Playwright storage-state JSON.");
+  throw new Error("DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64 is not valid gzip-compressed, base64-encoded Playwright storage-state JSON. Capture it again using the updated helper.");
 }
 assert.ok(Array.isArray(storageState.cookies), "Storage state must contain a cookies array.");
 assert.ok(Array.isArray(storageState.origins), "Storage state must contain an origins array.");
