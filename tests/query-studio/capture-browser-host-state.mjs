@@ -28,8 +28,30 @@ try {
   if (!authenticated || new URL(page.url()).origin !== base.origin) {
     throw new Error("Dynamics authentication was not confirmed. No storage state was emitted.");
   }
-  const state = await context.storageState();
+  const fullState = await context.storageState();
+  // Keep only cookies scoped to this Dataverse organization / Dynamics domain and
+  // localStorage for the organization origin. Avoid carrying unrelated Microsoft
+  // sign-in, telemetry, and other application sessions into the CI secret.
+  const organizationHost = base.hostname.toLowerCase();
+  const relevantCookies = fullState.cookies.filter(cookie => {
+    const domain = cookie.domain.replace(/^\\./, "").toLowerCase();
+    return organizationHost === domain ||
+      organizationHost.endsWith("." + domain) ||
+      domain === "dynamics.com" ||
+      domain.endsWith(".dynamics.com") && organizationHost.endsWith("." + domain);
+  });
+  const state = {
+    cookies: relevantCookies,
+    origins: fullState.origins.filter(entry => {
+      try { return new URL(entry.origin).origin === base.origin; }
+      catch { return false; }
+    })
+  };
   const encoded = gzipSync(Buffer.from(JSON.stringify(state), "utf8")).toString("base64");
+  console.error(`Filtered session state: ${state.cookies.length} organization-related cookies, ${state.origins.length} origin(s), ${encoded.length} encoded characters.`);
+  if (encoded.length > 45000) {
+    console.error("Warning: the filtered state may still exceed GitHub's secret-size limit. No session data was printed.");
+  }
   // This is a bearer session snapshot. Do not paste it into chat, source control, or logs.
   // Output is gzip-compressed before Base64 encoding to reduce GitHub secret size.
   // Pipe stdout directly to a clipboard/secret-management command instead.
