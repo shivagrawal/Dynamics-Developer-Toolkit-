@@ -35,7 +35,7 @@ jobs:
             const missing = required.filter(key => !process.env[key]);
             if (missing.length) {
               console.error("Missing required GitHub Actions secrets: " + missing.join(", "));
-              console.error("Set DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64 to base64-encoded Playwright storage-state JSON from a dedicated test user.");
+              console.error("Set DYNAMICS_PLAYWRIGHT_STORAGE_STATE_B64 to gzip-compressed, base64-encoded Playwright storage-state JSON from the updated capture helper for a dedicated test user.");
               process.exit(1);
             }
             const base = new URL(process.env.DATAVERSE_URL);
